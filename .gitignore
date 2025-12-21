@@ -65,6 +65,7 @@ node_modules
 # Large artifacts
 chatbot-pre-react4shell.tar.gz
 langfuse_traces_backup/
+langfuse_traces_backup
 
 # Root package-lock.json (only for promptfoo testing - regenerate when needed)
 # Frontend has its own package-lock.json which is tracked
@@ -74,4 +75,4 @@ langfuse_traces_backup/
 .next/
 out/
 *.tsbuildinfo
-next-env.d.ts
+next-env.d.tschatbot-pre-react4shell.tar.gz
