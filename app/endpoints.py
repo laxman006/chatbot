@@ -8,6 +8,10 @@ import httpx
 import os
 import json
 import base64
+from http import HTTPStatus
+import logging
+
+logger = logging.getLogger(__name__)
 import asyncio
 import re
 from datetime import datetime
@@ -21,14 +25,20 @@ from app.mongodb_memory import (
     clear_user_chat_history, save_session, get_all_sessions, get_user_sessions, 
     get_session_by_id, create_shared_chat, get_shared_chat
 )
-from app.helpers import strip_markdown, preserve_markdown
+from app.helpers import strip_markdown, preserve_markdown, is_weak_answer
 from app.langfuse_integration import langfuse_tracker
 from app.auth import verify_user_access, require_admin, require_restricted_admin
+from app.external_knowledge_gate import (
+    evaluate_external_knowledge_gate,
+    ExternalKnowledgeDecision,
+    build_rule_3b_metadata,
+)
 from config import (
-    SYSTEM_PROMPT, MICROSOFT_CLIENT_ID, MICROSOFT_CLIENT_SECRET, MICROSOFT_TENANT,
+    MICROSOFT_CLIENT_ID, MICROSOFT_CLIENT_SECRET, MICROSOFT_TENANT,
     ENABLE_INTENT_CLASSIFICATION, ENABLE_QUERY_EXPANSION, ENABLE_CONTEXT_COMPRESSION,
     DENSE_RETRIEVAL_K, BM25_RETRIEVAL_K, FINAL_RETRIEVAL_K,
-    DENSE_WEIGHT, BM25_WEIGHT, RERANKER_WEIGHT
+    DENSE_WEIGHT, BM25_WEIGHT, RERANKER_WEIGHT,
+    SYSTEM_PROMPT_CF_ONLY, SYSTEM_PROMPT_CF_PLUS_EXTERNAL
 )
 from langchain_core.prompts import ChatPromptTemplate
 import time
@@ -420,6 +430,48 @@ def calculate_document_diversity(doc_results):
         "unique_tags": len(tags),
         "unique_titles": len(titles)
     }
+
+
+def invoke_system_prompt(
+    system_prompt: str,
+    context: str,
+    question: str,
+    temperature: float = 0.1,
+    max_tokens: int = 1500,
+    forced_no_context: bool = False
+) -> tuple[str, list]:
+    """Run the configured LLM prompt template with provided context."""
+    system_prompt_text = system_prompt
+    if forced_no_context:
+        system_prompt_text += "\n\nIMPORTANT: No relevant documents were found in the knowledge base for this query."
+
+    if forced_no_context:
+        human_message = "Question: {question}"
+        inputs = {"question": question}
+    else:
+        human_message = "Context: {context}\n\nQuestion: {question}"
+        inputs = {"context": context, "question": question}
+
+    prompt_template = ChatPromptTemplate.from_messages([
+        ("system", system_prompt_text),
+        ("human", human_message)
+    ])
+
+    messages = prompt_template.format_messages(**inputs)
+    llm = get_llm(temperature=temperature, max_tokens=max_tokens)
+    chain = prompt_template | llm
+    result = chain.invoke(inputs)
+
+    return result.content, messages
+
+
+def cloudfuze_safe_fallback() -> str:
+    """Return a safe CloudFuze-centric response when external docs are unavailable."""
+    return (
+        "I can help with CloudFuze migration prerequisites, supported platforms, "
+        "or general CloudFuze strategy. Please share more about your business use case "
+        "so we can stay within those areas."
+    )
 
 
 def confidence_based_fallback(doc_results, intent: str, intent_confidence: float, query: str):
@@ -1044,6 +1096,11 @@ async def chat(request: Request, auth_user: dict = Depends(require_auth)):
     # Use user_id if provided, otherwise fall back to session_id for backward compatibility
     conversation_id = user_id if user_id else session_id
 
+    rule_3b_decision = None
+    rule_3b_metadata = {}
+    prompt_mode = "cf_only"
+    topic_classified = None
+
     # FIRST: Check if we have a corrected response for this question
     corrected_answer = find_similar_corrected_response(question)
     
@@ -1055,11 +1112,12 @@ async def chat(request: Request, auth_user: dict = Depends(require_auth)):
         # Handle conversational queries directly without document retrieval
         from langchain_core.prompts import ChatPromptTemplate
         
+        from config import SYSTEM_PROMPT_CF_ONLY
         llm = get_llm(temperature=0.7)
         
         # CloudFuze-focused conversational prompt
         conversational_prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are a CloudFuze AI assistant specializing in cloud migration services. For greetings like 'hi', 'hello', 'thanks', 'bye', respond warmly and professionally. For ANY other topics unrelated to CloudFuze, cloud migration, or enterprise services, politely redirect by saying: 'I don't have information about that topic, but I can help you with CloudFuze's migration services or products. What would you like to know?'"),
+            ("system", SYSTEM_PROMPT_CF_ONLY),
             ("human", "{question}")
         ])
         
@@ -1189,28 +1247,51 @@ async def chat(request: Request, auth_user: dict = Depends(require_auth)):
                 from app.llm import format_docs
                 formatted_docs = format_docs(final_docs)
                 context = "\n\n".join(formatted_docs)
-                
-                # Create prompt and get answer
-                from langchain_core.prompts import ChatPromptTemplate
-                from config import SYSTEM_PROMPT
-                
-                prompt_template = ChatPromptTemplate.from_messages([
-                    ("system", SYSTEM_PROMPT),
-                    ("human", "Context: {context}\n\nQuestion: {question}")
-                ])
-                
-                llm = get_llm(
-                    temperature=0.1,  # Low temperature for consistent responses
-                    max_tokens=1500
+                forced_no_context = len(formatted_docs) == 0
+
+                # FIRST ATTEMPT: Use the CloudFuze-only system prompt
+                answer, _ = invoke_system_prompt(
+                    SYSTEM_PROMPT_CF_ONLY,
+                    context,
+                    enhanced_query,
+                    forced_no_context=forced_no_context
                 )
-                
-                chain = prompt_template | llm
-                result = chain.invoke({
-                    "context": context,
-                    "question": enhanced_query
-                })
-                
-                answer = result.content
+                prompt_mode = "cf_only"
+
+                if is_weak_answer(answer):
+                    try:
+                        rule_3b_decision, rule_3b_metadata = evaluate_external_knowledge_gate(question)
+                        topic_classified = rule_3b_metadata.get("topic_classified")
+
+                        if rule_3b_decision == ExternalKnowledgeDecision.ALLOWED:
+                            print("[3B FALLBACK] CF-only answer weak; retrying with CF+external prompt.")
+                            try:
+                                answer, _ = invoke_system_prompt(
+                                    SYSTEM_PROMPT_CF_PLUS_EXTERNAL,
+                                    context,
+                                    enhanced_query,
+                                    forced_no_context=forced_no_context
+                                )
+                                prompt_mode = "cf_external"
+                            except Exception as exc:
+                                print(f"[WARNING] CF+external fallback failed: {exc}")
+                                import traceback
+                                traceback.print_exc()
+                        else:
+                            print(f"[3B GATE] DENIED: {rule_3b_decision.value} - Returning safe CloudFuze fallback.")
+                            answer = cloudfuze_safe_fallback()
+                            prompt_mode = "cf_fallback"
+                    except Exception as exc:
+                        print(f"[WARNING] Rule 3B gate evaluation failed (post-CF-only): {exc}")
+                        import traceback
+                        traceback.print_exc()
+
+                # If Rule 3B is ALLOWED, route through answer templates (for non-generic topics)
+                if prompt_mode == "cf_external" and topic_classified and topic_classified != "generic":
+                    # For specific topics, we would use templates here
+                    # For now, the LLM response is already constrained by the prompt
+                    # Templates can be enforced in future iterations if needed
+                    pass
                 
             except Exception as e:
                 print(f"[ERROR] Intent-based retrieval failed: {e}")
@@ -1241,7 +1322,8 @@ async def chat(request: Request, auth_user: dict = Depends(require_auth)):
             },
             "query": {
                 "is_conversational": is_conversational_query(question)
-            }
+            },
+            **build_rule_3b_metadata(rule_3b_decision, rule_3b_metadata, prompt_mode, "/chat")
         }
     )
 
@@ -1267,6 +1349,11 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
 
     async def generate_stream():
         try:
+            rule_3b_decision = None
+            rule_3b_metadata = {}
+            prompt_mode = "cf_only"
+            topic_classified = None
+            
             # FIRST: Check if we have a corrected response for this question
             corrected_answer = find_similar_corrected_response(question)
             
@@ -1349,7 +1436,7 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
                 yield f"data: {json.dumps({'type': 'thinking_complete'})}\n\n"
                 
                 from langchain_core.prompts import ChatPromptTemplate
-                
+                from config import SYSTEM_PROMPT_CF_ONLY
                 llm = get_llm(
                     streaming=True, 
                     temperature=0.7,
@@ -1358,7 +1445,7 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
                 
                 # CloudFuze-focused conversational prompt
                 conversational_prompt = ChatPromptTemplate.from_messages([
-                    ("system", "You are a CloudFuze AI assistant specializing in cloud migration services. For greetings like 'hi', 'hello', 'thanks', 'bye', respond warmly and professionally. For ANY other topics unrelated to CloudFuze, cloud migration, or enterprise services, politely redirect by saying: 'I don't have information about that topic, but I can help you with CloudFuze's migration services or products. What would you like to know?'"),
+                    ("system", SYSTEM_PROMPT_CF_ONLY),
                     ("human", "{question}")
                 ])
                 
@@ -1817,34 +1904,48 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
             # PHASE 2: STREAMING - Generate and stream response
             # This happens after the frontend clears the "Thinking..." animation
             llm_start_time = time.time()
-            
-            # Create streaming LLM with low temperature for consistent responses
-            llm = get_llm(
-                streaming=True, 
-                temperature=0.1,  # Low temperature for more consistent, deterministic responses
-                max_tokens=1500
+            full_response, final_messages = invoke_system_prompt(
+                SYSTEM_PROMPT_CF_ONLY,
+                context_text,
+                enhanced_query,
+                forced_no_context=forced_no_context
             )
-            
-            # Create the prompt template
-            from langchain_core.prompts import ChatPromptTemplate
-            from config import SYSTEM_PROMPT
-            
-            # Adapt prompt based on whether we have relevant context
-            if forced_no_context:
-                # No relevant documents - explicitly tell LLM
-                prompt_template = ChatPromptTemplate.from_messages([
-                    ("system", SYSTEM_PROMPT + "\n\nIMPORTANT: No relevant documents were found in the knowledge base for this query."),
-                    ("human", "Question: {question}")
-                ])
-                messages = prompt_template.format_messages(question=enhanced_query)
-            else:
-                # Normal flow with context
-                prompt_template = ChatPromptTemplate.from_messages([
-                    ("system", SYSTEM_PROMPT),
-                    ("human", "Context: {context}\n\nQuestion: {question}")
-                ])
-                messages = prompt_template.format_messages(context=context_text, question=enhanced_query)
-            
+            prompt_mode = "cf_only"
+
+            if is_weak_answer(full_response):
+                try:
+                    rule_3b_decision, rule_3b_metadata = evaluate_external_knowledge_gate(question)
+                    topic_classified = rule_3b_metadata.get("topic_classified")
+
+                    if rule_3b_decision == ExternalKnowledgeDecision.ALLOWED:
+                        full_response, final_messages = invoke_system_prompt(
+                            SYSTEM_PROMPT_CF_PLUS_EXTERNAL,
+                            context_text,
+                            enhanced_query,
+                            forced_no_context=forced_no_context
+                        )
+                        prompt_mode = "cf_external"
+                    else:
+                        print(f"[3B GATE] DENIED: {rule_3b_decision.value} - Streaming safe CloudFuze fallback.")
+                        full_response = cloudfuze_safe_fallback()
+                        prompt_mode = "cf_fallback"
+                except Exception as exc:
+                    print(f"[WARNING] Rule 3B gate evaluation failed (streaming): {exc}")
+                    import traceback
+                    traceback.print_exc()
+
+            # Log Rule 3B evaluation to Langfuse (if it exists)
+            if rag_trace and rag_trace.query_span:
+                try:
+                    rag_trace.query_span.span(
+                        name="rule_3b_gate",
+                        input=question,
+                        output=f"Decision: {rule_3b_decision.value if rule_3b_decision else 'not_evaluated'}",
+                        metadata=rule_3b_metadata
+                    )
+                except Exception as e:
+                    print(f"[WARNING] Failed to log Rule 3B gate to Langfuse: {e}")
+
             # ===== START SYNTHESIS SPAN =====
             if rag_trace:
                 try:
@@ -1860,16 +1961,13 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
                     )
                 except Exception as e:
                     print(f"[WARNING] Failed to start synthesis: {e}")
-            
-            # Stream the response with real-time streaming
-            full_response = ""
-            # messages already created above based on forced_no_context
-            async for chunk in llm.astream(messages):
-                if hasattr(chunk, 'content'):
-                    token = chunk.content
-                    full_response += token
-                    yield f"data: {json.dumps({'token': token, 'type': 'token'})}\n\n"
-                    # Removed sleep for faster streaming
+
+            messages = final_messages if final_messages else []
+            # Stream the response
+            for idx, token in enumerate(full_response):
+                yield f"data: {json.dumps({'token': token, 'type': 'token'})}\n\n"
+                if idx % 5 == 0:
+                    await asyncio.sleep(0.01)
             
             # Record LLM generation time
             llm_time_ms = int((time.time() - llm_start_time) * 1000)
@@ -1910,6 +2008,14 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
                     "method": intent_method,
                     "branch_description": INTENT_BRANCHES.get(intent, {}).get("description", "Option E: Perplexity-style RAG")
                 },
+                
+                # ===== RULE 3B EXTERNAL KNOWLEDGE GATE =====
+                **build_rule_3b_metadata(
+                    rule_3b_decision if 'rule_3b_decision' in locals() else None,
+                    rule_3b_metadata if 'rule_3b_metadata' in locals() else {},
+                    prompt_mode if 'prompt_mode' in locals() else "cf_only",
+                    "/chat/stream"
+                ),
                 
                 # ===== CONFIDENCE SCORING (NEW) =====
                 "confidence": {
@@ -3143,7 +3249,7 @@ async def get_teams_analytics_summary_clean(
             get_all_email_to_team_mapping, validate_team_emails,
             get_exclusion_list
         )
-        from app.trace_utils import TraceFilteringStats, process_trace_batch, calculate_question_metrics, save_traces_to_json
+        from app.trace_utils import TraceFilteringStats, process_trace_batch, calculate_question_metrics
         import asyncio
         from datetime import datetime, timedelta, timezone
         import httpx
@@ -3213,7 +3319,6 @@ async def get_teams_analytics_summary_clean(
         batch_limit = 100
         max_pages =20 if time_filter in ["today", "yesterday"] else (10 if time_filter != "all" else 20)
         rate_limit_backoff = 1.0
-        all_traces = []  # Collect all traces for saving
         
         async with httpx.AsyncClient() as client:
             while page <= max_pages:
@@ -3262,7 +3367,7 @@ async def get_teams_analytics_summary_clean(
                         break
                     
                     # Collect all traces for saving (before filtering)
-                    all_traces.extend(traces)
+                    # We don't need to extend to all_traces anymore, as it's removed.
                     
                     # Filter out excluded emails BEFORE processing
                     filtered_traces = []
@@ -3309,14 +3414,6 @@ async def get_teams_analytics_summary_clean(
                     break
         
         # Save all fetched traces to JSON file
-        if all_traces:
-            save_traces_to_json(
-                traces=all_traces,
-                time_filter=time_filter,
-                start_time=start_time,
-                end_time=end_time,
-                endpoint_name="teams_summary_clean"
-            )
         
         # Calculate metrics
         team_stats = []
@@ -3400,7 +3497,7 @@ async def get_teams_analytics_summary(
         from app.langfuse_integration import langfuse_client
         from config import LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST
         from app.models.teams import get_all_teams, get_team_by_member_email, get_team_color, get_all_email_to_team_mapping, validate_team_emails
-        from app.trace_utils import TraceFilteringStats, process_trace_batch, calculate_question_metrics, save_traces_to_json
+        from app.trace_utils import TraceFilteringStats, process_trace_batch, calculate_question_metrics
         import asyncio
         from datetime import datetime, timedelta, timezone
         import httpx
@@ -3492,7 +3589,6 @@ async def get_teams_analytics_summary(
         # - All time: 20 pages = ~2000 traces (was 10 pages = 1000)
         max_pages = 5 if time_filter in ["today", "yesterday"] else (10 if time_filter != "all" else 20)
         rate_limit_backoff = 1.0  # Initial backoff for rate limiting
-        all_traces = []  # Collect all traces for saving
         
         print(f"[PAGINATION] max_pages={max_pages}, batch_limit={batch_limit}")
         
@@ -3545,7 +3641,7 @@ async def get_teams_analytics_summary(
                         break
                     
                     # Collect all traces for saving
-                    all_traces.extend(traces)
+                    # We don't need to extend to all_traces anymore, as it's removed.
                     
                     # Process traces using unified utility function
                     traces_added = process_trace_batch(
@@ -3577,14 +3673,6 @@ async def get_teams_analytics_summary(
                     break
         
         # Save all fetched traces to JSON file
-        if all_traces:
-            save_traces_to_json(
-                traces=all_traces,
-                time_filter=time_filter,
-                start_time=start_time,
-                end_time=end_time,
-                endpoint_name="teams_summary"
-            )
         
         print(f"\n[STEP 7] Processing team statistics...")
         # Calculate unique questions and top questions per team
@@ -3732,7 +3820,7 @@ async def get_teams_analytics_with_exclusion(
             get_all_teams, get_team_by_member_email, get_team_color,
             get_all_email_to_team_mapping, validate_team_emails
         )
-        from app.trace_utils import TraceFilteringStats, process_trace_batch, calculate_question_metrics, save_traces_to_json
+        from app.trace_utils import TraceFilteringStats, process_trace_batch, calculate_question_metrics
         import asyncio
         from datetime import datetime, timedelta, timezone
         import httpx
@@ -3802,7 +3890,6 @@ async def get_teams_analytics_with_exclusion(
         batch_limit = 100
         max_pages = 5 if time_filter in ["today", "yesterday"] else (10 if time_filter != "all" else 20)
         excluded_count = 0
-        all_traces = []  # Collect all traces for saving
         
         async with httpx.AsyncClient() as client:
             while page <= max_pages:
@@ -3834,7 +3921,7 @@ async def get_teams_analytics_with_exclusion(
                         break
                     
                     # Collect all traces for saving
-                    all_traces.extend(traces)
+                    # We don't need to extend to all_traces anymore, as it's removed.
                     
                     # Filter out excluded emails
                     filtered_traces = []
@@ -3871,14 +3958,6 @@ async def get_teams_analytics_with_exclusion(
                     break
         
         # Save all fetched traces to JSON file
-        if all_traces:
-            save_traces_to_json(
-                traces=all_traces,
-                time_filter=time_filter,
-                start_time=start_time,
-                end_time=end_time,
-                endpoint_name="teams_summary_with_exclusion"
-            )
         
         # Calculate metrics
         team_stats = []
@@ -4164,7 +4243,7 @@ async def get_team_details(
                         break
                     
                     # Collect all traces for saving
-                    all_traces.extend(traces)
+                    # We don't need to extend to all_traces anymore, as it's removed.
                     
                     # Process traces
                     for trace in traces:
@@ -4255,7 +4334,7 @@ async def get_langfuse_dashboard_summary(
     """
     try:
         from app.langfuse_integration import langfuse_client
-        from app.trace_utils import save_traces_to_json
+        from app.trace_utils import TraceFilteringStats
         import asyncio
         from datetime import datetime, timedelta, timezone
         
@@ -4294,7 +4373,6 @@ async def get_langfuse_dashboard_summary(
         
         users_activity = defaultdict(lambda: {"count": 0, "email": "", "name": ""})
         all_questions = []
-        all_traces = []  # Collect all traces for saving
         
         page = 1
         batch_limit = 100
@@ -4371,14 +4449,6 @@ async def get_langfuse_dashboard_summary(
                     break
         
         # Save all fetched traces to JSON file
-        if all_traces:
-            save_traces_to_json(
-                traces=all_traces,
-                time_filter=time_filter,
-                start_time=start_time,
-                end_time=end_time,
-                endpoint_name="dashboard_summary"
-            )
         
         # Get most active users (top 10)
         most_active = sorted(
@@ -4450,7 +4520,7 @@ async def get_langfuse_users_analytics(
     try:
         from app.langfuse_integration import langfuse_client
         from config import LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST
-        from app.trace_utils import save_traces_to_json
+        from app.trace_utils import TraceFilteringStats
         import asyncio
         from datetime import datetime, timedelta, timezone
         
@@ -4491,7 +4561,6 @@ async def get_langfuse_users_analytics(
         limit = 100
         # Match teams endpoint page limits for consistency (INCREASED for more comprehensive data)
         max_pages = 5 if time_filter in ["today", "yesterday"] else (10 if time_filter != "all" else 20)
-        all_traces = []  # Collect all traces for saving
         
         async with httpx.AsyncClient() as client:
             while page <= max_pages:
@@ -4586,14 +4655,6 @@ async def get_langfuse_users_analytics(
                     break
         
         # Save all fetched traces to JSON file
-        if all_traces:
-            save_traces_to_json(
-                traces=all_traces,
-                time_filter=time_filter,
-                start_time=start_time,
-                end_time=end_time,
-                endpoint_name="users_analytics"
-            )
         
         # Process data - find top questions
         for user_id, user_info in users_data.items():
@@ -4871,7 +4932,6 @@ async def get_top_questions_global(
             end_time = None
         
         all_questions = []
-        all_traces = []  # Collect all traces for saving
         page = 1
         batch_limit = 100
         # Match teams endpoint page limits for consistency (INCREASED for more comprehensive data)
@@ -4912,7 +4972,7 @@ async def get_top_questions_global(
                         break
                     
                     # Collect all traces for saving
-                    all_traces.extend(traces)
+                    # We don't need to extend to all_traces anymore, as it's removed.
                     
                     for trace in traces:
                         question = trace.get("input", "")
@@ -4929,14 +4989,6 @@ async def get_top_questions_global(
                     break
         
         # Save all fetched traces to JSON file
-        if all_traces:
-            save_traces_to_json(
-                traces=all_traces,
-                time_filter=time_filter,
-                start_time=start_time,
-                end_time=end_time,
-                endpoint_name="top_questions"
-            )
         
         # Get top questions
         try:
@@ -5215,8 +5267,9 @@ async def generate_improved_response(user_query: str, bad_response: str, user_co
         )
         
         # Create auto-correction prompt WITH knowledge base context
+        from config import SYSTEM_PROMPT_CF_ONLY
         correction_prompt = f"""
-{SYSTEM_PROMPT}
+{SYSTEM_PROMPT_CF_ONLY}
 
 ADDITIONAL CONTEXT FOR CORRECTION:
 
@@ -5367,7 +5420,7 @@ async def refresh_microsoft_token(request: TokenRefreshRequest):
                 logger.error(f"Token refresh failed: {token_response.status_code}")
                 # Log but don't expose full error details to frontend
                 raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    status_code=HTTPStatus.UNAUTHORIZED,
                     detail="Token refresh failed"
                 )
             
@@ -5388,7 +5441,7 @@ async def refresh_microsoft_token(request: TokenRefreshRequest):
                     if not user_email.endswith("@cloudfuze.com"):
                         logger.warning(f"Refresh attempt from non-CloudFuze email: {user_email}")
                         raise HTTPException(
-                            status_code=status.HTTP_403_FORBIDDEN,
+                            status_code=HTTPStatus.FORBIDDEN,
                             detail="Access denied"
                         )
             
@@ -5406,7 +5459,7 @@ async def refresh_microsoft_token(request: TokenRefreshRequest):
     except Exception as e:
         logger.error(f"Token refresh error: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Token refresh failed"
         )
 

@@ -173,6 +173,27 @@ def preserve_markdown(md_text: str) -> str:
     # Return the clean Markdown text (don't convert to HTML)
     return clean_text
 
+
+def is_weak_answer(answer: str) -> bool:
+    """
+    Detect whether the LLM response is weak so we can trigger a fallback.
+    Weakness criteria follow the guidance in the Rule 3B execution plan.
+    """
+    if not answer:
+        return True
+
+    normalized = answer.strip()
+    if len(normalized) < 40:
+        return True
+
+    lower = normalized.lower()
+    weak_phrases = [
+        "i don't have information",
+        "no relevant documents"
+    ]
+
+    return any(phrase in lower for phrase in weak_phrases)
+
 def build_vectorstore(url: str):
     """Build and persist embeddings for web documents with HNSW graph indexing."""
     raw_text = load_webpage(url)

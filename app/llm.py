@@ -3,7 +3,6 @@ import asyncio
 from langchain_core.callbacks.base import BaseCallbackHandler
 from langchain_openai import ChatOpenAI
 # RetrievalQA is now handled differently in langchain 1.x
-from config import SYSTEM_PROMPT
 from app.llm_factory import get_llm
 
 
@@ -109,10 +108,8 @@ def setup_qa_chain(retriever):
     from langchain_core.runnables import RunnablePassthrough
     from langchain_core.output_parsers import StrOutputParser
     
-    # Create a custom prompt template with system message
     prompt_template = ChatPromptTemplate.from_messages([
-        ("system", SYSTEM_PROMPT),
-        ("human", "Context: {context}\n\nQuestion: {question}")
+        ("human", "{question}")
     ])
     
     # Use factory function to get the appropriate LLM based on configuration
