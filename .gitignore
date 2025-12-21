@@ -62,6 +62,10 @@ data.zip
 *.zip
 node_modules
 
+# Large artifacts
+chatbot-pre-react4shell.tar.gz
+langfuse_traces_backup/
+
 # Root package-lock.json (only for promptfoo testing - regenerate when needed)
 # Frontend has its own package-lock.json which is tracked
 /package-lock.json
