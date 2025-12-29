@@ -371,3 +371,39 @@ RERANKER_WEIGHT = float(os.getenv("RERANKER_WEIGHT", "0.8"))  # Weight for cross
 # Score-based relevance filtering (prevent low-quality responses when all scores are poor)
 MIN_SCORE_THRESHOLD = float(os.getenv("MIN_SCORE_THRESHOLD", "-0.5"))  # Minimum reranker score to accept documents
 SCORE_MARGIN_THRESHOLD = float(os.getenv("SCORE_MARGIN_THRESHOLD", "0.3"))  # Minimum gap between max and avg score
+
+# ============================================================================
+# AGENTIC RAG ENHANCEMENT CONFIGURATION
+# ============================================================================
+
+# Query Classification
+ENABLE_QUERY_CLASSIFICATION = os.getenv("ENABLE_QUERY_CLASSIFICATION", "true").lower() == "true"
+QUERY_CLASSIFIER_CACHE_TTL = int(os.getenv("QUERY_CLASSIFIER_CACHE_TTL", "86400"))  # 24 hours
+
+# Adaptive Retrieval
+ENABLE_ADAPTIVE_RETRIEVAL = os.getenv("ENABLE_ADAPTIVE_RETRIEVAL", "true").lower() == "true"
+SIMPLE_QUERY_K_DENSE = int(os.getenv("SIMPLE_QUERY_K_DENSE", "20"))
+SIMPLE_QUERY_K_BM25 = int(os.getenv("SIMPLE_QUERY_K_BM25", "20"))
+SIMPLE_QUERY_K_FINAL = int(os.getenv("SIMPLE_QUERY_K_FINAL", "5"))
+COMPLEX_QUERY_K_DENSE = int(os.getenv("COMPLEX_QUERY_K_DENSE", "60"))
+COMPLEX_QUERY_K_BM25 = int(os.getenv("COMPLEX_QUERY_K_BM25", "60"))
+COMPLEX_QUERY_K_FINAL = int(os.getenv("COMPLEX_QUERY_K_FINAL", "15"))
+DOCUMENT_QUERY_K_DENSE = int(os.getenv("DOCUMENT_QUERY_K_DENSE", "30"))
+DOCUMENT_QUERY_K_BM25 = int(os.getenv("DOCUMENT_QUERY_K_BM25", "30"))
+DOCUMENT_QUERY_K_FINAL = int(os.getenv("DOCUMENT_QUERY_K_FINAL", "8"))
+CONVERSATIONAL_QUERY_K_DENSE = int(os.getenv("CONVERSATIONAL_QUERY_K_DENSE", "40"))
+CONVERSATIONAL_QUERY_K_BM25 = int(os.getenv("CONVERSATIONAL_QUERY_K_BM25", "40"))
+CONVERSATIONAL_QUERY_K_FINAL = int(os.getenv("CONVERSATIONAL_QUERY_K_FINAL", "8"))
+
+# Confidence Scoring
+ENABLE_CONFIDENCE_SCORING = os.getenv("ENABLE_CONFIDENCE_SCORING", "true").lower() == "true"
+MIN_RETRIEVAL_CONFIDENCE = float(os.getenv("MIN_RETRIEVAL_CONFIDENCE", "0.3"))
+MIN_RESPONSE_CONFIDENCE = float(os.getenv("MIN_RESPONSE_CONFIDENCE", "0.5"))
+
+# Fallback Strategies
+ENABLE_FALLBACK_STRATEGIES = os.getenv("ENABLE_FALLBACK_STRATEGIES", "true").lower() == "true"
+MAX_FALLBACK_ATTEMPTS = int(os.getenv("MAX_FALLBACK_ATTEMPTS", "3"))
+
+# Query Expansion Enhancements
+QUERY_EXPANSION_CACHE_ENABLED = os.getenv("QUERY_EXPANSION_CACHE_ENABLED", "true").lower() == "true"
+QUERY_EXPANSION_MIN_SIMILARITY = float(os.getenv("QUERY_EXPANSION_MIN_SIMILARITY", "0.7"))

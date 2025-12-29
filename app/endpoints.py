@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Request, HTTPException, Header, Depends, Query, Path, status
 from fastapi.responses import PlainTextResponse, StreamingResponse, JSONResponse
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Tuple, Dict
 import uuid
 import httpx
 import os
@@ -35,15 +35,25 @@ from config import (
     SYSTEM_PROMPT, MICROSOFT_CLIENT_ID, MICROSOFT_CLIENT_SECRET, MICROSOFT_TENANT,
     ENABLE_INTENT_CLASSIFICATION, ENABLE_QUERY_EXPANSION, ENABLE_CONTEXT_COMPRESSION,
     DENSE_RETRIEVAL_K, BM25_RETRIEVAL_K, FINAL_RETRIEVAL_K,
-    DENSE_WEIGHT, BM25_WEIGHT, RERANKER_WEIGHT
+    DENSE_WEIGHT, BM25_WEIGHT, RERANKER_WEIGHT,
+    ENABLE_QUERY_CLASSIFICATION, ENABLE_ADAPTIVE_RETRIEVAL,
+    ENABLE_CONFIDENCE_SCORING, ENABLE_FALLBACK_STRATEGIES
 )
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.documents import Document
 import time
 from query_expander import QueryExpander
 from reranker import CrossEncoderReranker
 from context_compressor import ContextCompressor
 from contextlib import suppress
 from collections import Counter, defaultdict
+
+# Agentic RAG imports
+from app.query_classifier import get_query_classifier
+from app.adaptive_retrieval import get_adaptive_k_values, apply_metadata_boost, metadata_first_search
+from app.confidence_scorer import get_retrieval_scorer, get_response_scorer
+from app.fallback_strategies import get_fallback_strategy
+from app.multi_hop_reasoner import get_multi_hop_reasoner
 
 
 # ============================================================================
@@ -1092,6 +1102,258 @@ def perplexity_style_retrieve(
     return reranked  # list of (doc, final_score)
 
 
+# ============================================================================
+# AGENTIC RAG RETRIEVAL FUNCTION
+# ============================================================================
+
+def agentic_retrieve(
+    query: str,
+    conversation_history: Optional[List[str]] = None
+) -> Tuple[List[Tuple[Document, float]], Dict]:
+    """
+    Agentic RAG retrieval with query classification, adaptive retrieval, 
+    confidence scoring, and fallback strategies.
+    
+    Args:
+        query: User query string
+        conversation_history: Optional list of previous messages for context
+        
+    Returns:
+        Tuple of (doc_results, metadata_dict)
+        doc_results: List of (doc, score) tuples
+        metadata_dict: Dictionary with classification, confidence, fallback info
+    """
+    metadata = {
+        'query_type': 'simple_factual',
+        'confidence': 1.0,
+        'complexity': 'medium',
+        'fallback_used': False,
+        'fallback_strategy': 'no_fallback',
+        'multi_hop_applied': False,
+        'conversational_enhanced': False
+    }
+    
+    # Step 0: Classify FIRST using original query (before enhancement)
+    original_query = query
+    query_type_for_enhancement = None
+    
+    if ENABLE_QUERY_CLASSIFICATION:
+        try:
+            classifier = get_query_classifier()
+            # Classify using ORIGINAL query (not enhanced) to get accurate type
+            classification = classifier.classify(original_query, conversation_history)
+            query_type_for_enhancement = classification['query_type']
+            metadata['query_type'] = classification['query_type']
+            metadata['complexity'] = classification['complexity']
+            metadata['sub_questions'] = classification.get('sub_questions', [])
+            metadata['required_doc_types'] = classification.get('required_doc_types', [])
+            print(f"[AGENTIC_RAG] Query classified as: {metadata['query_type']} ({metadata['complexity']})")
+        except Exception as e:
+            print(f"[WARN] Query classification failed: {e}")
+            # Fallback to simple_factual
+            metadata['query_type'] = 'simple_factual'
+    
+    query_type = metadata['query_type']
+    complexity = metadata['complexity']
+    
+    # Step 1.5: Enhance conversational queries with conversation history
+    # Also enhance if query looks conversational even if not classified as such (fallback)
+    is_likely_conversational = query_type == 'conversational' or (
+        len(original_query.strip()) < 50 and
+        any(word in original_query.lower() for word in ['it', 'that', 'this', 'how does', 'what are', 'tell me', 'more about'])
+    )
+    
+    if conversation_history and len(conversation_history) > 0 and is_likely_conversational:
+        query_lower = original_query.lower().strip()
+        # Filter out current query and very short messages
+        filtered_history = [
+            msg for msg in conversation_history 
+            if msg and len(msg.strip()) > 15 and msg.strip().lower() != query_lower
+        ]
+        
+        if filtered_history:
+            # Strategy: Find the ROOT question (oldest substantial question) for better context
+            # This ensures "how does it work" refers back to "Slack to teams migration"
+            # Iterate in REVERSE order (oldest first) to find the actual root question
+            root_question = None
+            
+            # Reverse the list to check oldest messages first
+            reversed_history = list(reversed(filtered_history))
+            
+            # Look for the first substantial question (likely the original topic)
+            for msg in reversed_history:
+                msg_lower = msg.lower().strip()
+                # Check if it's a root question (not a follow-up)
+                # Root questions are typically longer, don't contain follow-up words, and aren't questions about "it"
+                is_root = (
+                    not any(word in msg_lower for word in [
+                        'more', 'tell me', 'explain', 'what about', 'how it', 
+                        'features of', 'helpful', 'how does it', 'what is it',
+                        'can you', 'could you', 'please', 'thanks', 'thank you'
+                    ]) and
+                    len(msg.strip()) > 20 and  # Substantial question
+                    not msg_lower.startswith('how does it') and  # Explicitly exclude "how does it work" type questions
+                    not msg_lower.startswith('what are the') and  # Exclude "what are the features"
+                    not msg_lower.startswith('what is it')  # Exclude "what is it"
+                )
+                if is_root:
+                    root_question = msg.strip()
+                    print(f"[CONVERSATIONAL] Found root question: {root_question[:100]}...")
+                    break
+            
+            # If no root question found, use the OLDEST meaningful question (first in reversed list)
+            if not root_question:
+                root_question = reversed_history[0].strip()
+                print(f"[CONVERSATIONAL] Using oldest question as root: {root_question[:100]}...")
+            
+            # Enhance query with root question for retrieval
+            enhanced_query = f"{root_question}. {original_query}"
+            print(f"[CONVERSATIONAL] Enhanced query with root context: {enhanced_query[:150]}...")
+            query = enhanced_query  # Use enhanced query for retrieval
+            metadata['conversational_enhanced'] = True
+            metadata['root_question'] = root_question
+    
+    # Step 2: Get adaptive k values
+    if ENABLE_ADAPTIVE_RETRIEVAL:
+        k_values = get_adaptive_k_values(query_type, complexity)
+        k_dense = k_values['k_dense']
+        k_bm25 = k_values['k_bm25']
+        k_final = k_values['k_final']
+        print(f"[AGENTIC_RAG] Using adaptive k values: dense={k_dense}, bm25={k_bm25}, final={k_final}")
+    else:
+        k_dense = DENSE_RETRIEVAL_K
+        k_bm25 = BM25_RETRIEVAL_K
+        k_final = FINAL_RETRIEVAL_K
+    
+    # Step 3: Route to appropriate retrieval strategy
+    if query_type == 'specific_document':
+        # Metadata-first search for specific documents
+        try:
+            doc_results = metadata_first_search(
+                query=query,
+                vectorstore=vectorstore,
+                bm25_retriever=bm25_retriever,
+                k_dense=k_dense,
+                k_bm25=k_bm25,
+                k_final=k_final
+            )
+        except Exception as e:
+            print(f"[WARN] Metadata-first search failed: {e}")
+            doc_results = perplexity_style_retrieve(
+                query=query,
+                k_dense=k_dense,
+                k_bm25=k_bm25,
+                k_final=k_final,
+                use_expansion=False  # Skip expansion for specific documents
+            )
+    elif query_type == 'conversational':
+        # For conversational queries: skip expansion, use lower k values
+        print(f"[CONVERSATIONAL] Skipping query expansion for conversational query")
+        doc_results = perplexity_style_retrieve(
+            query=query,
+            k_dense=k_dense,
+            k_bm25=k_bm25,
+            k_final=k_final,
+            use_expansion=False  # Skip expansion for conversational queries
+        )
+    else:
+        # Standard retrieval with adaptive expansion
+        # Skip expansion for simple queries and conversational queries
+        use_expansion = ENABLE_QUERY_EXPANSION and query_type not in ['simple_factual', 'conversational']
+        
+        # Use enhanced query expansion with adaptive n
+        if use_expansion:
+            try:
+                expansions = query_expander.expand(
+                    query=query,
+                    n=None,  # Let it determine adaptively
+                    query_type=query_type,
+                    complexity=complexity
+                )
+                if expansions:
+                    print(f"[AGENTIC_RAG] Using {len(expansions)} query expansions")
+            except Exception as e:
+                print(f"[WARN] Enhanced query expansion failed: {e}")
+        
+        doc_results = perplexity_style_retrieve(
+            query=query,
+            k_dense=k_dense,
+            k_bm25=k_bm25,
+            k_final=k_final,
+            use_expansion=use_expansion
+        )
+    
+    # Step 4: Apply metadata boost for specific document queries
+    if query_type == 'specific_document':
+        doc_results = apply_metadata_boost(doc_results, query, query_type)
+    
+    # Step 5: Multi-hop reasoning for complex queries
+    if query_type == 'complex_multi_part' and ENABLE_ADAPTIVE_RETRIEVAL:
+        try:
+            reasoner = get_multi_hop_reasoner()
+            doc_results, reasoning_info = reasoner.reason(
+                query=query,
+                query_type=query_type,
+                complexity=complexity,
+                initial_results=doc_results
+            )
+            metadata['multi_hop_applied'] = reasoning_info.get('applied', False)
+            if metadata['multi_hop_applied']:
+                metadata['sub_questions'] = reasoning_info.get('sub_questions', [])
+                print(f"[AGENTIC_RAG] Multi-hop reasoning applied: {reasoning_info.get('final_count', 0)} documents")
+        except Exception as e:
+            print(f"[WARN] Multi-hop reasoning failed: {e}")
+    
+    # Step 6: Confidence scoring
+    if ENABLE_CONFIDENCE_SCORING:
+        try:
+            scorer = get_retrieval_scorer()
+            confidence_result = scorer.score(query, doc_results, query_type)
+            metadata['confidence'] = confidence_result['confidence']
+            metadata['confidence_reasons'] = confidence_result.get('reasons', [])
+            metadata['score_stats'] = confidence_result.get('score_stats', {})
+            
+            is_low_confidence = confidence_result.get('is_low_confidence', False)
+            
+            # Step 7: Fallback strategies if low confidence
+            if is_low_confidence and ENABLE_FALLBACK_STRATEGIES:
+                print(f"[AGENTIC_RAG] Low confidence ({metadata['confidence']:.2f}), attempting fallback...")
+                fallback = get_fallback_strategy()
+                
+                # Try fallback tiers
+                for tier in range(1, 6):
+                    new_results, strategy = fallback.execute_fallback(
+                        query=query,
+                        original_results=doc_results,
+                        confidence_score=metadata['confidence'],
+                        query_type=query_type,
+                        tier=tier
+                    )
+                    
+                    if strategy not in ['no_fallback', 'max_attempts_reached', 'unknown_tier']:
+                        # Re-score after fallback
+                        confidence_result = scorer.score(query, new_results, query_type)
+                        if confidence_result['confidence'] > metadata['confidence']:
+                            doc_results = new_results
+                            metadata['confidence'] = confidence_result['confidence']
+                            metadata['fallback_used'] = True
+                            metadata['fallback_strategy'] = strategy
+                            metadata['fallback_tier'] = tier
+                            print(f"[AGENTIC_RAG] Fallback tier {tier} ({strategy}) improved confidence to {metadata['confidence']:.2f}")
+                            break
+                    
+                    if strategy == 'clarifying_questions':
+                        # Can't retrieve more, should ask user
+                        metadata['needs_clarification'] = True
+                        break
+        except Exception as e:
+            print(f"[WARN] Confidence scoring failed: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    return doc_results, metadata
+
+
 class ChatRequest(BaseModel):
     question: str
     user_id: str = None
@@ -1581,19 +1843,67 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
                 yield f"data: {json.dumps({'type': 'status', 'status': 'retrieving_docs', 'message': 'Searching knowledge base'})}\n\n"
                 await asyncio.sleep(0.05)
                 
-                # ====== PERPLEXITY-STYLE RAG (OPTION E) ======
-                # Retrieve docs with dense + BM25 + reranker
-                doc_results = perplexity_style_retrieve(
-                    query=enhanced_query,
-                    k_dense=40,
-                    k_bm25=40,
-                    k_final=8,
-                    use_expansion=True,
-                )
+                # ====== AGENTIC RAG OR PERPLEXITY-STYLE RAG ======
+                # Use agentic RAG if enabled, otherwise fallback to perplexity-style
+                agentic_metadata = {}
+                
+                if ENABLE_QUERY_CLASSIFICATION or ENABLE_ADAPTIVE_RETRIEVAL:
+                    # Use agentic RAG
+                    try:
+                        # Get conversation history for context
+                        conversation_history = None
+                        if conversation_id:
+                            try:
+                                from app.mongodb_memory import get_user_chat_history
+                                history = await get_user_chat_history(conversation_id)
+                                # Get user messages, EXCLUDING the current question
+                                all_user_messages = [msg.get('content', '') for msg in history if msg.get('role') == 'user' and len(msg.get('content', '').strip()) > 10]
+                                # Exclude current question if it's in the history
+                                current_query_lower = enhanced_query.lower().strip()
+                                conversation_history = [
+                                    msg for msg in all_user_messages[-10:] 
+                                    if msg.lower().strip() != current_query_lower and 
+                                    not enhanced_query.lower().endswith(msg.lower().strip())  # Also exclude if current query ends with it (enhanced query)
+                                ]
+                                if conversation_history:
+                                    print(f"[CONVERSATIONAL] Loaded {len(conversation_history)} previous user messages for context (excluding current)")
+                            except Exception as e:
+                                print(f"[WARN] Failed to load conversation history: {e}")
+                                pass
+                        
+                        doc_results, agentic_metadata = agentic_retrieve(
+                            query=enhanced_query,
+                            conversation_history=conversation_history
+                        )
+                        print(f"[AGENTIC_RAG] Retrieved {len(doc_results)} docs using agentic pipeline")
+                        print(f"[AGENTIC_RAG] Query type: {agentic_metadata.get('query_type')}, Confidence: {agentic_metadata.get('confidence', 0):.2f}")
+                    except Exception as e:
+                        print(f"[WARN] Agentic RAG failed, falling back to perplexity-style: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        # Fallback to perplexity-style
+                        doc_results = perplexity_style_retrieve(
+                            query=enhanced_query,
+                            k_dense=40,
+                            k_bm25=40,
+                            k_final=8,
+                            use_expansion=True,
+                        )
+                        agentic_metadata = {'query_type': 'fallback', 'confidence': 0.5}
+                else:
+                    # Use original perplexity-style RAG
+                    doc_results = perplexity_style_retrieve(
+                        query=enhanced_query,
+                        k_dense=40,
+                        k_bm25=40,
+                        k_final=8,
+                        use_expansion=True,
+                    )
+                    agentic_metadata = {'query_type': 'perplexity_style', 'confidence': 0.5}
 
                 final_docs = [doc for doc, score in doc_results]
                 
-                print(f"[RAG] Retrieved {len(final_docs)} docs using Option E pipeline")
+                print(f"[RAG] Retrieved {len(final_docs)} docs")
                 
                 # Send status: Documents found and reranking
                 yield f"data: {json.dumps({'type': 'status', 'status': 'reranking_docs', 'message': f'Found {len(doc_results)} documents, reranking for relevance'})}\n\n"
@@ -1605,11 +1915,11 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
                 )
                 
                 # For compatibility with existing code, create fallback variables
-                intent = "option_e"
-                intent_confidence = 1.0
-                intent_method = "perplexity_style"
-                fallback_strategy = "no_fallback"
-                expanded_query = enhanced_query  # No expansion needed, handled by perplexity_style_retrieve
+                intent = agentic_metadata.get('query_type', 'option_e')
+                intent_confidence = agentic_metadata.get('confidence', 1.0)
+                intent_method = "agentic_rag" if (ENABLE_QUERY_CLASSIFICATION or ENABLE_ADAPTIVE_RETRIEVAL) else "perplexity_style"
+                fallback_strategy = agentic_metadata.get('fallback_strategy', 'no_fallback')
+                expanded_query = enhanced_query  # Expansion handled by agentic_retrieve or perplexity_style_retrieve
                     
                 # Record retrieval time
                 retrieval_time_ms = int((time.time() - retrieval_start_time) * 1000)
@@ -1820,13 +2130,50 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
             
             # Format the documents properly with metadata using format_docs from llm.py
             forced_no_context = False  # Track if we're forcing no-context response
+            use_conversation_context = False  # Track if using conversation context for conversational queries
             try:
                 from app.llm import format_docs
                 
                 if not final_docs:
                     print("[WARNING] No relevant documents after score filtering!")
-                    context_text = ""  # Empty context, not "No relevant documents found"
-                    forced_no_context = True
+                    
+                    # Special handling for conversational queries: use conversation context
+                    query_type = agentic_metadata.get('query_type', '')
+                    if query_type == 'conversational' and conversation_id:
+                        try:
+                            print("[CONVERSATIONAL] No docs found, attempting to use conversation context...")
+                            # Use get_user_chat_history to get raw messages
+                            from app.mongodb_memory import get_user_chat_history
+                            conv_messages = await get_user_chat_history(conversation_id)
+                            if conv_messages and len(conv_messages) > 0:
+                                # Format conversation context from last 10 messages
+                                conv_text_parts = []
+                                for msg in conv_messages[-10:]:  # Last 10 messages
+                                    role = msg.get('role', 'unknown')
+                                    content = msg.get('content', '')
+                                    if content and len(content.strip()) > 10:
+                                        conv_text_parts.append(f"{role.capitalize()}: {content}")
+                                
+                                if conv_text_parts:
+                                    context_text = "Previous conversation context:\n\n" + "\n\n".join(conv_text_parts)
+                                    print(f"[CONVERSATIONAL] Using conversation context ({len(context_text)} chars)")
+                                    use_conversation_context = True
+                                    forced_no_context = False
+                                else:
+                                    context_text = ""
+                                    forced_no_context = True
+                            else:
+                                context_text = ""
+                                forced_no_context = True
+                        except Exception as e:
+                            print(f"[WARN] Failed to get conversation context: {e}")
+                            import traceback
+                            traceback.print_exc()
+                            context_text = ""
+                            forced_no_context = True
+                    else:
+                        context_text = ""  # Empty context, not "No relevant documents found"
+                        forced_no_context = True
                 else:
                     formatted_docs = format_docs(final_docs)
                     context_text = "\n\n".join([f"Document {i+1}:\n{formatted_doc}" for i, formatted_doc in enumerate(formatted_docs)])
@@ -1922,15 +2269,22 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
             from config import SYSTEM_PROMPT
             
             # Adapt prompt based on whether we have relevant context
-            if forced_no_context:
-                # No relevant documents - explicitly tell LLM
+            if forced_no_context and not use_conversation_context:
+                # No relevant documents and no conversation context - explicitly tell LLM
                 prompt_template = ChatPromptTemplate.from_messages([
                     ("system", SYSTEM_PROMPT + "\n\nIMPORTANT: No relevant documents were found in the knowledge base for this query."),
                     ("human", "Question: {question}")
                 ])
                 messages = prompt_template.format_messages(question=enhanced_query)
+            elif use_conversation_context:
+                # Using conversation context for conversational queries
+                prompt_template = ChatPromptTemplate.from_messages([
+                    ("system", SYSTEM_PROMPT + "\n\nIMPORTANT: This is a conversational follow-up question. Use the conversation context provided to answer based on what was discussed earlier."),
+                    ("human", "Conversation Context: {context}\n\nQuestion: {question}")
+                ])
+                messages = prompt_template.format_messages(context=context_text, question=enhanced_query)
             else:
-                # Normal flow with context
+                # Normal flow with document context
                 prompt_template = ChatPromptTemplate.from_messages([
                     ("system", SYSTEM_PROMPT),
                     ("human", "Context: {context}\n\nQuestion: {question}")
