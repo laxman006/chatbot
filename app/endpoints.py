@@ -1251,6 +1251,12 @@ async def chat(request: Request, auth_user: dict = Depends(require_auth)):
                 result = qa_chain.invoke({"query": enhanced_query})
                 answer = result["result"]
 
+    # Track message event for analytics (non-blocking)
+    try:
+        await mongodb_memory.insert_message_event(user_id, session_id, user_email)
+    except Exception as e:
+        logger.debug(f"Failed to track message event: {e}")
+
     # Add both user question and bot response to conversation AFTER processing
     await add_to_conversation(conversation_id, "user", question)
     await add_to_conversation(conversation_id, "assistant", answer)
@@ -1907,6 +1913,12 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
             # Record LLM generation time
             llm_time_ms = int((time.time() - llm_start_time) * 1000)
             streaming_time_ms = llm_time_ms  # In streaming mode, these are the same
+            
+            # Track message event for analytics (non-blocking)
+            try:
+                await mongodb_memory.insert_message_event(user_id, session_id, user_email)
+            except Exception as e:
+                logger.debug(f"Failed to track message event: {e}")
             
             # Add both user question and bot response to conversation AFTER processing
             await add_to_conversation(conversation_id, "user", question)
@@ -3005,6 +3017,405 @@ async def get_most_asked_questions(
     }
 
 
+# ---------------- Admin Dashboard: User Statistics ----------------
+
+
+@router.get("/admin/users/summary")
+async def get_admin_users_summary(
+    exclude_users: Optional[str] = Query(None, description="Comma-separated list of user emails/names to exclude"),
+    current_user: dict = Depends(require_admin)
+):
+    """
+    Get ALL-TIME user statistics from user_activity collection.
+    Returns pre-calculated lifetime metrics (no date filtering).
+    
+    This endpoint is used by the admin dashboard for the "All Time" view.
+    """
+    try:
+        # Parse exclude_users if provided
+        exclude_list = None
+        if exclude_users:
+            exclude_list = [u.strip() for u in exclude_users.split(",") if u.strip()]
+        
+        # Get statistics from MongoDB
+        users = await get_user_statistics(exclude_users=exclude_list)
+        
+        return {
+            "total_users": len(users),
+            "users": users,
+            "generated_at": datetime.utcnow().isoformat(),
+            "data_source": "user_activity",
+            "time_range": "all_time",
+            "filters_applied": {
+                "excluded_users_count": len(exclude_list) if exclude_list else 0
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error getting admin users summary: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve user statistics: {str(e)}"
+        )
+
+
+@router.get("/admin/rankers")
+async def get_admin_rankers(
+    from_date: Optional[str] = Query(None, description="Start date in YYYY-MM-DD format"),
+    to_date: Optional[str] = Query(None, description="End date in YYYY-MM-DD format"),
+    exclude_users: Optional[str] = Query(None, description="Comma-separated list of user emails/names to exclude"),
+    limit: int = Query(100, ge=1, le=500, description="Maximum number of rankers to return"),
+    current_user: dict = Depends(require_admin)
+):
+    """
+    Get date-based user rankers from message_events collection.
+    Returns time-filtered analytics for specific date ranges.
+    
+    This endpoint is used by the admin dashboard for date-filtered views.
+    """
+    try:
+        # Parse dates if provided
+        start_date = None
+        end_date = None
+        if from_date:
+            try:
+                start_date = datetime.strptime(from_date, "%Y-%m-%d")
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Invalid from_date format. Use YYYY-MM-DD")
+        
+        if to_date:
+            try:
+                # Set to end of day for inclusive end date
+                end_date = datetime.strptime(to_date, "%Y-%m-%d")
+                end_date = end_date.replace(hour=23, minute=59, second=59)
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Invalid to_date format. Use YYYY-MM-DD")
+        
+        # Parse exclude_users if provided
+        exclude_list = None
+        if exclude_users:
+            exclude_list = [u.strip() for u in exclude_users.split(",") if u.strip()]
+        
+        # Get rankers from MongoDB
+        rankers = await get_rankers_by_date(
+            start_date=start_date,
+            end_date=end_date,
+            exclude_users=exclude_list,
+            limit=limit
+        )
+        
+        return {
+            "total_rankers": len(rankers),
+            "rankers": rankers,
+            "generated_at": datetime.utcnow().isoformat(),
+            "data_source": "message_events",
+            "filters_applied": {
+                "from_date": from_date,
+                "to_date": to_date,
+                "excluded_users_count": len(exclude_list) if exclude_list else 0
+            },
+            "time_range": f"{from_date or 'all'} to {to_date or 'all'}" if from_date or to_date else "all"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting admin rankers: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve rankers: {str(e)}"
+        )
+
+
+# ---------------- Admin Teams Dashboard: MongoDB-based Team Analytics ----------------
+
+
+@router.get("/admin/teams/summary")
+async def get_teams_summary_mongodb(
+    from_date: Optional[str] = Query(None, description="Start date in YYYY-MM-DD format"),
+    to_date: Optional[str] = Query(None, description="End date in YYYY-MM-DD format"),
+    exclude_users: Optional[str] = Query(None, description="Comma-separated list of user emails/names to exclude"),
+    current_user: dict = Depends(require_admin)
+):
+    """
+    Get team-wise statistics from MongoDB.
+    - If dates provided: Uses message_events collection (date-filtered)
+    - If no dates: Uses user_activity collection (all-time aggregated)
+    
+    This endpoint is used by the admin teams dashboard.
+    """
+    try:
+        await mongodb_memory.connect()
+        
+        # Parse dates if provided
+        start_date = None
+        end_date = None
+        if from_date:
+            try:
+                start_date = datetime.strptime(from_date, "%Y-%m-%d")
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Invalid from_date format. Use YYYY-MM-DD")
+        
+        if to_date:
+            try:
+                end_date = datetime.strptime(to_date, "%Y-%m-%d")
+                end_date = end_date.replace(hour=23, minute=59, second=59)
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Invalid to_date format. Use YYYY-MM-DD")
+        
+        # Parse exclude_users if provided
+        exclude_list = None
+        if exclude_users:
+            exclude_list = [u.strip().lower() for u in exclude_users.split(",") if u.strip()]
+        
+        # Determine data source based on date filter
+        if start_date or end_date:
+            # Date-based: Query message_events collection
+            logger.info(f"[TEAMS] Date-based query: {start_date} to {end_date}")
+            message_events_collection = mongodb_memory.database["message_events"]
+            user_activity_collection = mongodb_memory.database["user_activity"]
+            
+            # Build date filter
+            # Note: created_at is stored as naive UTC datetime (from datetime.utcnow())
+            # MongoDB handles naive datetime comparisons correctly, but we'll keep dates as naive UTC for consistency
+            date_filter = {}
+            if start_date or end_date:
+                date_range = {}
+                if start_date:
+                    # Keep as naive UTC (datetime.utcnow() creates naive UTC)
+                    # MongoDB will compare correctly
+                    date_range["$gte"] = start_date
+                if end_date:
+                    # Keep as naive UTC, but ensure it's end of day
+                    date_range["$lte"] = end_date
+                if date_range:
+                    date_filter["created_at"] = date_range
+                    logger.info(f"[TEAMS] Date filter: {date_range}")
+            
+            # Build exclusion filter
+            exclude_filter = {}
+            if exclude_list:
+                exclude_emails_lower = [email.lower() for email in exclude_list]
+                exclude_filter["user_email"] = {"$nin": exclude_emails_lower}
+            
+            # Aggregate messages by user_id from message_events
+            # Note: message_events collection doesn't have event_type field - it only contains message events
+            match_filter = {**date_filter, **exclude_filter}
+            
+            pipeline = [
+                {"$match": match_filter},
+                {"$group": {
+                    "_id": "$user_id",
+                    "user_email": {"$first": "$user_email"},
+                    "total_messages": {"$sum": 1}
+                }},
+                {"$project": {
+                    "_id": 0,
+                    "user_id": "$_id",
+                    "user_email": 1,
+                    "total_messages": 1
+                }}
+            ]
+            
+            # Debug: Check total documents in collection
+            total_docs = await message_events_collection.count_documents({})
+            logger.info(f"[TEAMS] Total documents in message_events: {total_docs}")
+            
+            # Debug: Check documents in date range (without grouping)
+            sample_docs = await message_events_collection.find(match_filter).limit(5).to_list(length=5)
+            logger.info(f"[TEAMS] Sample documents matching filter: {len(sample_docs)}")
+            if sample_docs:
+                logger.info(f"[TEAMS] Sample doc created_at: {sample_docs[0].get('created_at')}, type: {type(sample_docs[0].get('created_at'))}")
+            
+            user_messages = await message_events_collection.aggregate(pipeline).to_list(length=None)
+            logger.info(f"[TEAMS] Found {len(user_messages)} users with messages in date range")
+            
+            # Get team assignments from user_activity, with fallback to teams.py
+            from app.models.teams import get_team_by_member_email
+            teams_data = {}
+            for user_msg in user_messages:
+                user_id = user_msg.get("user_id")  # This is the GUID (e.g., "aad-12345")
+                user_email = (user_msg.get("user_email") or "").lower()
+                total_messages = user_msg.get("total_messages", 0)
+                
+                # Try to get team_name from user_activity first
+                # user_activity uses user_id (GUID) as the key, but also has user_email field
+                team_name = None
+                user_doc = None
+                
+                # Try lookup by user_id (GUID) first
+                if user_id:
+                    user_doc = await user_activity_collection.find_one(
+                        {"user_id": user_id},
+                        {"team_name": 1, "user_email": 1, "user_name": 1}
+                    )
+                
+                # If not found by user_id, try by user_email
+                if not user_doc and user_email:
+                    user_doc = await user_activity_collection.find_one(
+                        {"user_email": user_email},
+                        {"team_name": 1, "user_email": 1, "user_name": 1}
+                    )
+                
+                if user_doc:
+                    team_name = user_doc.get("team_name")
+                    user_name = user_doc.get("user_name", "")
+                
+                # Fallback to teams.py if not found in user_activity
+                if not team_name or team_name.strip() == "":
+                    if user_email:
+                        team_name = get_team_by_member_email(user_email)
+                        if team_name == "Unassigned":
+                            team_name = None
+                            logger.debug(f"[TEAMS] User {user_email} (ID: {user_id}) not found in teams.py, skipping")
+                    else:
+                        logger.debug(f"[TEAMS] User ID {user_id} has no email, cannot assign team, skipping")
+                
+                # Skip users without team assignment
+                if not team_name or team_name.strip() == "":
+                    continue
+                
+                # Initialize team if not exists
+                if team_name not in teams_data:
+                    teams_data[team_name] = {
+                        "team_name": team_name,
+                        "total_messages": 0,
+                        "active_members": set(),
+                        "member_details": []
+                    }
+                
+                # Aggregate team data
+                teams_data[team_name]["total_messages"] += total_messages
+                teams_data[team_name]["active_members"].add(user_email)
+                teams_data[team_name]["member_details"].append({
+                    "email": user_email,
+                    "name": user_name,
+                    "messages": total_messages
+                })
+            
+            data_source = "message_events"
+            time_range = f"{from_date or 'all'} to {to_date or 'all'}" if from_date or to_date else "all"
+        else:
+            # All-time: Use user_activity collection
+            logger.info(f"[TEAMS] All-time query from user_activity")
+            user_activity_collection = mongodb_memory.database["user_activity"]
+            
+            # Get all user_activity documents
+            cursor = user_activity_collection.find({})
+            all_users = await cursor.to_list(length=None)
+            
+            logger.info(f"[TEAMS] Found {len(all_users)} users in user_activity collection")
+            
+            # Group users by team_name
+            from app.models.teams import get_team_by_member_email
+            teams_data = {}
+            
+            for user_doc in all_users:
+                user_email = user_doc.get("user_email", "").lower()
+                user_name = user_doc.get("user_name", "")
+                team_name = user_doc.get("team_name")
+                total_messages = user_doc.get("total_messages", 0)
+                
+                # Skip excluded users
+                if exclude_list:
+                    if user_email in exclude_list or user_name.lower() in exclude_list:
+                        continue
+                    # Also check if any excluded email/name is contained
+                    if any(excluded in user_email or excluded in user_name.lower() for excluded in exclude_list):
+                        continue
+                
+                # Fallback to teams.py if team_name not found in user_activity
+                if not team_name or team_name.strip() == "":
+                    team_name = get_team_by_member_email(user_email)
+                    if team_name == "Unassigned":
+                        team_name = None
+                        logger.debug(f"[TEAMS] User {user_email} not found in teams.py, skipping")
+                
+                # Skip users without team assignment
+                if not team_name or team_name.strip() == "":
+                    continue
+                
+                # Initialize team if not exists
+                if team_name not in teams_data:
+                    teams_data[team_name] = {
+                        "team_name": team_name,
+                        "total_messages": 0,
+                        "active_members": set(),
+                        "member_details": []
+                    }
+                
+                # Aggregate team data
+                teams_data[team_name]["total_messages"] += total_messages
+                teams_data[team_name]["active_members"].add(user_email)
+                teams_data[team_name]["member_details"].append({
+                    "email": user_email,
+                    "name": user_name,
+                    "messages": total_messages
+                })
+            
+            data_source = "user_activity"
+            time_range = "all_time"
+        
+        # Convert to list format and get team info from teams.py
+        from app.models.teams import get_team_by_name, get_all_teams, get_team_color
+        
+        teams_list = []
+        for team_name, team_data in teams_data.items():
+            # Get team info from teams.py
+            team_info = get_team_by_name(team_name)
+            if not team_info:
+                # Team not found in teams.py, use defaults
+                team_info = {
+                    "lead": None,
+                    "lead_email": None,
+                    "members": [],
+                    "color": "#6B7280",  # Gray fallback
+                    "description": team_name
+                }
+            
+            teams_list.append({
+                "team_name": team_name,
+                "lead": team_info.get("lead"),
+                "lead_email": team_info.get("lead_email"),
+                "color": get_team_color(team_name) or team_info.get("color", "#6B7280"),
+                "description": team_info.get("description", team_name),
+                "total_messages": team_data["total_messages"],
+                "total_questions": team_data["total_messages"],  # Map messages to questions for frontend compatibility
+                "unique_questions": 0,  # Not available from user_activity, set to 0
+                "top_questions": [],  # Not available from user_activity, empty array
+                "active_members_count": len(team_data["active_members"]),
+                "member_count": len(team_info.get("members", [])),
+                "members": team_data["member_details"]
+            })
+        
+        # Sort by total_messages descending
+        teams_list.sort(key=lambda x: x["total_messages"], reverse=True)
+        
+        logger.info(f"[TEAMS] Returning {len(teams_list)} teams with data out of {len(TEAMS_STRUCTURE)} total teams in database")
+        
+        return {
+            "status": "success",
+            "total_teams": len(TEAMS_STRUCTURE),  # Total teams in database, not just teams with activity
+            "teams": teams_list,
+            "generated_at": datetime.utcnow().isoformat(),
+            "data_source": data_source,
+            "time_range": time_range,
+            "filters_applied": {
+                "from_date": from_date,
+                "to_date": to_date,
+                "excluded_users_count": len(exclude_list) if exclude_list else 0
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting teams summary from MongoDB: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve team statistics: {str(e)}"
+        )
+
+
+>>>>>>> aa938d4 (feat: Admin menu restructure, Team Leaderboard integration, and analytics improvements)
 @router.get("/dataset/corrected-responses")
 async def get_corrected_responses(current_user: dict = Depends(require_admin)):
     """Get all corrected responses from the dataset. Requires admin access."""

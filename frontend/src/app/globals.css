@@ -491,6 +491,32 @@ header img {
   background-color: #f3f4f6;
 }
 
+.dropdown-item.admin-parent {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.admin-submenu {
+  background-color: #f9fafb;
+  border-top: 1px solid #e5e7eb;
+  border-bottom: 1px solid #e5e7eb;
+  display: block;
+  width: 100%;
+}
+
+.admin-submenu .dropdown-item.admin-item {
+  padding-left: 44px;
+  font-size: 13px;
+  color: #6b7280;
+  background-color: #f9fafb;
+}
+
+.admin-submenu .dropdown-item.admin-item:hover {
+  background-color: #f3f4f6;
+  color: #374151;
+}
+
 .main-content {
   display: flex;
   flex-direction: column;

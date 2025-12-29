@@ -113,9 +113,6 @@ export default function AdminTopQuestionsPage() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
         <div>
           <h1 style={{ fontSize: '28px', fontWeight: 700, marginBottom: '6px' }}>Most Asked Questions</h1>
-          <p style={{ color: '#6b7280', fontSize: '14px' }}>
-            Visible only to admins: {ADMIN_EMAILS.join(', ')}
-          </p>
         </div>
         <div style={{ display: 'flex', gap: '8px' }}>
           <button

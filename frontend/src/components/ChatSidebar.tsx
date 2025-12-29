@@ -34,6 +34,7 @@ export default function ChatSidebar({
   const [user, setUser] = useState<User | null>(null);
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [showLogoutModal, setShowLogoutModal] = useState<boolean>(false);
+  const [adminSubmenuOpen, setAdminSubmenuOpen] = useState<boolean>(false);
   const hasRenderedHistoryRef = useRef(false);
 
   useEffect(() => {
@@ -428,6 +429,25 @@ export default function ChatSidebar({
     renderSessionHistory(!hasRenderedHistoryRef.current);
   }, [renderSessionHistory]);
 
+  // Close submenu when dropdown closes
+  useEffect(() => {
+    const dropdown = document.getElementById('userDropdown');
+    if (!dropdown) return;
+
+    const observer = new MutationObserver(() => {
+      if (!dropdown.classList.contains('show')) {
+        setAdminSubmenuOpen(false);
+      }
+    });
+
+    observer.observe(dropdown, {
+      attributes: true,
+      attributeFilter: ['class']
+    });
+
+    return () => observer.disconnect();
+  }, []);
+
   // Show logout confirmation modal
   const handleLogoutClick = () => {
     setShowLogoutModal(true);
@@ -489,6 +509,7 @@ export default function ChatSidebar({
         // Don't close if clicking inside userMenu or dropdown
         if (!userMenu.contains(target) && !dropdown.contains(target)) {
           dropdown.classList.remove('show');
+          setAdminSubmenuOpen(false);
         }
       }
     };
@@ -671,60 +692,92 @@ export default function ChatSidebar({
             <span className="user-email-small" id="userEmailSidebar">{user?.email || ''}</span>
           </div>
           <div className="user-dropdown-sidebar" id="userDropdown">
-            {isAdmin && (
-              <div className="dropdown-section">
-                <div className="dropdown-section-title">ADMIN</div>
-                <div className="dropdown-item admin-item" onClick={() => {
-                  router.push('/admin/teams');
-                  const dropdown = document.getElementById('userDropdown');
-                  if (dropdown) dropdown.classList.remove('show');
-                }}>
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm9 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
-                  </svg>
-                  <span>Team Analytics</span>
-                </div>
-                <div className="dropdown-item admin-item" onClick={() => {
-                  router.push('/admin/analytics');
-                  const dropdown = document.getElementById('userDropdown');
-                  if (dropdown) dropdown.classList.remove('show');
-                }}>
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                    <path d="M3 3v18h18M3 15l4-4 3 3 5-5 6 6M9 7h6M9 7v2" />
-                  </svg>
-                  <span>Langfuse Analytics</span>
-                </div>
-                <div className="dropdown-item admin-item" onClick={() => {
-                  router.push('/admin/top-questions');
-                  const dropdown = document.getElementById('userDropdown');
-                  if (dropdown) dropdown.classList.remove('show');
-                }}>
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                    <path d="M3 13h2v-2H3v2Zm4 0h2v-2H7v2Zm4 0h2v-2h-2v2Zm4 0h2v-2h-2v2Zm4 0h2v-2h-2v2ZM5 21h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2-3h-4l-2 3H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2Z" />
-                  </svg>
-                  <span>Most Asked Questions</span>
-                </div>
-              </div>
-            )}
             <div className="dropdown-item" id="userEmail">{user?.email || ''}</div>
             {isAdmin && (
-              <div 
-                className="dropdown-item" 
-                onClick={() => {
-                  router.push('/admin/dashboard');
-                  const dropdown = document.getElementById('userDropdown');
-                  if (dropdown) {
-                    dropdown.classList.remove('show');
-                  }
-                }}
-                style={{ cursor: 'pointer' }}
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                  <rect x="3" y="3" width="18" height="18" rx="2" />
-                  <path d="M3 9h18M9 21V9" />
-                </svg>
-                <span>Admin</span>
-              </div>
+              <>
+                <div 
+                  className="dropdown-item admin-parent" 
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setAdminSubmenuOpen(!adminSubmenuOpen);
+                  }}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                    <rect x="3" y="3" width="18" height="18" rx="2" />
+                    <path d="M3 9h18M9 21V9" />
+                  </svg>
+                  <span>Admin</span>
+                  <svg 
+                    width="16" 
+                    height="16" 
+                    viewBox="0 0 24 24" 
+                    fill="none" 
+                    stroke="currentColor" 
+                    strokeWidth="2"
+                    style={{ 
+                      marginLeft: 'auto',
+                      transform: adminSubmenuOpen ? 'rotate(90deg)' : 'rotate(0deg)',
+                      transition: 'transform 0.2s ease'
+                    }}
+                  >
+                    <path d="M9 18l6-6-6-6" />
+                  </svg>
+                </div>
+                {adminSubmenuOpen && (
+                  <div className="admin-submenu" onClick={(e) => e.stopPropagation()}>
+                    <div className="dropdown-item admin-item" onClick={(e) => {
+                      e.stopPropagation();
+                      router.push('/admin/teams');
+                      const dropdown = document.getElementById('userDropdown');
+                      if (dropdown) dropdown.classList.remove('show');
+                      setAdminSubmenuOpen(false);
+                    }}>
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm9 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
+                      </svg>
+                      <span>Team Analytics</span>
+                    </div>
+                    <div className="dropdown-item admin-item" onClick={(e) => {
+                      e.stopPropagation();
+                      router.push('/admin/teams-dashboard');
+                      const dropdown = document.getElementById('userDropdown');
+                      if (dropdown) dropdown.classList.remove('show');
+                      setAdminSubmenuOpen(false);
+                    }}>
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                        <path d="M3 3h18v18H3V3zm2 2v14h14V5H5zm2 2h10v2H7V7zm0 4h10v2H7v-2zm0 4h7v2H7v-2z" />
+                      </svg>
+                      <span>Team Leaderboard</span>
+                    </div>
+                    <div className="dropdown-item admin-item" onClick={(e) => {
+                      e.stopPropagation();
+                      router.push('/admin/analytics');
+                      const dropdown = document.getElementById('userDropdown');
+                      if (dropdown) dropdown.classList.remove('show');
+                      setAdminSubmenuOpen(false);
+                    }}>
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                        <path d="M3 3v18h18M3 15l4-4 3 3 5-5 6 6M9 7h6M9 7v2" />
+                      </svg>
+                      <span>Langfuse Analytics</span>
+                    </div>
+                    <div className="dropdown-item admin-item" onClick={(e) => {
+                      e.stopPropagation();
+                      router.push('/admin/top-questions');
+                      const dropdown = document.getElementById('userDropdown');
+                      if (dropdown) dropdown.classList.remove('show');
+                      setAdminSubmenuOpen(false);
+                    }}>
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                        <path d="M3 13h2v-2H3v2Zm4 0h2v-2H7v2Zm4 0h2v-2h-2v2Zm4 0h2v-2h-2v2Zm4 0h2v-2h-2v2ZM5 21h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2-3h-4l-2 3H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2Z" />
+                      </svg>
+                      <span>Most Asked Questions</span>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
             <div className="dropdown-item logout" onClick={handleLogoutClick}>
               <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
