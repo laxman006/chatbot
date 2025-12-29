@@ -1302,6 +1302,12 @@ async def chat(request: Request, auth_user: dict = Depends(require_auth)):
                 result = qa_chain.invoke({"query": enhanced_query})
                 answer = result["result"]
 
+    # Track message event for analytics (non-blocking)
+    try:
+        await mongodb_memory.insert_message_event(user_id, session_id, user_email)
+    except Exception as e:
+        logger.debug(f"Failed to track message event: {e}")
+
     # Add both user question and bot response to conversation AFTER processing
     await add_to_conversation(conversation_id, "user", question)
     await add_to_conversation(conversation_id, "assistant", answer)
@@ -1966,6 +1972,12 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
             # Record LLM generation time
             llm_time_ms = int((time.time() - llm_start_time) * 1000)
             streaming_time_ms = llm_time_ms  # In streaming mode, these are the same
+            
+            # Track message event for analytics (non-blocking)
+            try:
+                await mongodb_memory.insert_message_event(user_id, session_id, user_email)
+            except Exception as e:
+                logger.debug(f"Failed to track message event: {e}")
             
             # Add both user question and bot response to conversation AFTER processing
             await add_to_conversation(conversation_id, "user", question)
@@ -3362,19 +3374,21 @@ async def get_teams_summary_mongodb(
             user_activity_collection = mongodb_memory.database["user_activity"]
             
             # Build date filter
+            # Note: created_at is stored as naive UTC datetime (from datetime.utcnow())
+            # MongoDB handles naive datetime comparisons correctly, but we'll keep dates as naive UTC for consistency
             date_filter = {}
             if start_date or end_date:
                 date_range = {}
                 if start_date:
-                    if start_date.tzinfo is None:
-                        start_date = start_date.replace(tzinfo=timezone.utc)
+                    # Keep as naive UTC (datetime.utcnow() creates naive UTC)
+                    # MongoDB will compare correctly
                     date_range["$gte"] = start_date
                 if end_date:
-                    if end_date.tzinfo is None:
-                        end_date = end_date.replace(tzinfo=timezone.utc)
+                    # Keep as naive UTC, but ensure it's end of day
                     date_range["$lte"] = end_date
                 if date_range:
                     date_filter["created_at"] = date_range
+                    logger.info(f"[TEAMS] Date filter: {date_range}")
             
             # Build exclusion filter
             exclude_filter = {}
@@ -3382,45 +3396,78 @@ async def get_teams_summary_mongodb(
                 exclude_emails_lower = [email.lower() for email in exclude_list]
                 exclude_filter["user_email"] = {"$nin": exclude_emails_lower}
             
-            # Aggregate messages by user_email from message_events
-            match_filter = {"event_type": "message", **date_filter, **exclude_filter}
+            # Aggregate messages by user_id from message_events
+            # Note: message_events collection doesn't have event_type field - it only contains message events
+            match_filter = {**date_filter, **exclude_filter}
             
             pipeline = [
                 {"$match": match_filter},
                 {"$group": {
                     "_id": "$user_id",
                     "user_email": {"$first": "$user_email"},
-                    "user_name": {"$first": "$user_name"},
                     "total_messages": {"$sum": 1}
                 }},
                 {"$project": {
                     "_id": 0,
                     "user_id": "$_id",
                     "user_email": 1,
-                    "user_name": 1,
                     "total_messages": 1
                 }}
             ]
             
+            # Debug: Check total documents in collection
+            total_docs = await message_events_collection.count_documents({})
+            logger.info(f"[TEAMS] Total documents in message_events: {total_docs}")
+            
+            # Debug: Check documents in date range (without grouping)
+            sample_docs = await message_events_collection.find(match_filter).limit(5).to_list(length=5)
+            logger.info(f"[TEAMS] Sample documents matching filter: {len(sample_docs)}")
+            if sample_docs:
+                logger.info(f"[TEAMS] Sample doc created_at: {sample_docs[0].get('created_at')}, type: {type(sample_docs[0].get('created_at'))}")
+            
             user_messages = await message_events_collection.aggregate(pipeline).to_list(length=None)
             logger.info(f"[TEAMS] Found {len(user_messages)} users with messages in date range")
             
-            # Get team assignments from user_activity
+            # Get team assignments from user_activity, with fallback to teams.py
+            from app.models.teams import get_team_by_member_email
             teams_data = {}
             for user_msg in user_messages:
-                user_email = user_msg.get("user_email", "").lower()
-                user_name = user_msg.get("user_name", "")
+                user_id = user_msg.get("user_id")  # This is the GUID (e.g., "aad-12345")
+                user_email = (user_msg.get("user_email") or "").lower()
                 total_messages = user_msg.get("total_messages", 0)
                 
-                # Get team_name from user_activity
-                user_doc = await user_activity_collection.find_one(
-                    {"user_id": user_email},
-                    {"team_name": 1}
-                )
-                
+                # Try to get team_name from user_activity first
+                # user_activity uses user_id (GUID) as the key, but also has user_email field
                 team_name = None
+                user_doc = None
+                
+                # Try lookup by user_id (GUID) first
+                if user_id:
+                    user_doc = await user_activity_collection.find_one(
+                        {"user_id": user_id},
+                        {"team_name": 1, "user_email": 1, "user_name": 1}
+                    )
+                
+                # If not found by user_id, try by user_email
+                if not user_doc and user_email:
+                    user_doc = await user_activity_collection.find_one(
+                        {"user_email": user_email},
+                        {"team_name": 1, "user_email": 1, "user_name": 1}
+                    )
+                
                 if user_doc:
                     team_name = user_doc.get("team_name")
+                    user_name = user_doc.get("user_name", "")
+                
+                # Fallback to teams.py if not found in user_activity
+                if not team_name or team_name.strip() == "":
+                    if user_email:
+                        team_name = get_team_by_member_email(user_email)
+                        if team_name == "Unassigned":
+                            team_name = None
+                            logger.debug(f"[TEAMS] User {user_email} (ID: {user_id}) not found in teams.py, skipping")
+                    else:
+                        logger.debug(f"[TEAMS] User ID {user_id} has no email, cannot assign team, skipping")
                 
                 # Skip users without team assignment
                 if not team_name or team_name.strip() == "":
@@ -3458,6 +3505,7 @@ async def get_teams_summary_mongodb(
             logger.info(f"[TEAMS] Found {len(all_users)} users in user_activity collection")
             
             # Group users by team_name
+            from app.models.teams import get_team_by_member_email
             teams_data = {}
             
             for user_doc in all_users:
@@ -3473,6 +3521,13 @@ async def get_teams_summary_mongodb(
                     # Also check if any excluded email/name is contained
                     if any(excluded in user_email or excluded in user_name.lower() for excluded in exclude_list):
                         continue
+                
+                # Fallback to teams.py if team_name not found in user_activity
+                if not team_name or team_name.strip() == "":
+                    team_name = get_team_by_member_email(user_email)
+                    if team_name == "Unassigned":
+                        team_name = None
+                        logger.debug(f"[TEAMS] User {user_email} not found in teams.py, skipping")
                 
                 # Skip users without team assignment
                 if not team_name or team_name.strip() == "":
@@ -3534,11 +3589,11 @@ async def get_teams_summary_mongodb(
         # Sort by total_messages descending
         teams_list.sort(key=lambda x: x["total_messages"], reverse=True)
         
-        logger.info(f"[TEAMS] Returning {len(teams_list)} teams with data")
+        logger.info(f"[TEAMS] Returning {len(teams_list)} teams with data out of {len(TEAMS_STRUCTURE)} total teams in database")
         
         return {
             "status": "success",
-            "total_teams": len(teams_list),
+            "total_teams": len(TEAMS_STRUCTURE),  # Total teams in database, not just teams with activity
             "teams": teams_list,
             "generated_at": datetime.utcnow().isoformat(),
             "data_source": data_source,

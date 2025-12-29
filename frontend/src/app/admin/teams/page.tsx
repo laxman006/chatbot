@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { getCurrentUser } from '@/lib/session-utils';
-import { apiFetch } from '@/lib/api';
+import { getApiBase } from '@/lib/api';
 import { isAdminEmail } from '@/constants/admins';
 import { colorPalette } from '@/constants/colors';
 
@@ -145,13 +145,15 @@ export default function TeamsAnalyticsPage() {
         return;
       }
 
+      const apiBase = getApiBase();
+      console.log('[Teams Fetch] API Base:', apiBase);
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
       };
 
-      // apiFetch expects just the path, not the full URL - it adds the base automatically
-      const urlPath = `/analytics/langfuse/teams/summary?time_filter=${filter}`;
-      console.log('[Teams Fetch] Attempting to fetch path:', urlPath);
+      const url = `${apiBase}/analytics/langfuse/teams/summary?time_filter=${filter}`;
+      console.log('[Teams Fetch] Attempting to fetch from:', url);
+      console.log('[Teams Fetch] Headers:', headers);
 
       try {
         const controller = new AbortController();
@@ -164,9 +166,10 @@ export default function TeamsAnalyticsPage() {
             controller.abort();
           }, 90000); // 90 second timeout
 
-          const response = await apiFetch(urlPath, {
+          const response = await fetch(url, {
             method: 'GET',
             headers,
+            credentials: 'include',
             signal: controller.signal,
           });
 
@@ -240,16 +243,19 @@ export default function TeamsAnalyticsPage() {
       const user = getCurrentUser(); // NOT async!
       if (!user) return;
 
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
+      const apiBase = getApiBase();
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
 
-      // apiFetch expects just the path, not the full URL - it adds the base automatically
-      const urlPath = `/analytics/langfuse/teams/details/${encodeURIComponent(teamName)}?time_filter=${appliedFilter}`;
-      const response = await apiFetch(urlPath, {
-        method: 'GET',
-        headers,
-      });
+      const response = await fetch(
+        `${apiBase}/analytics/langfuse/teams/details/${encodeURIComponent(teamName)}?time_filter=${appliedFilter}`,
+        {
+          method: 'GET',
+          headers,
+          credentials: 'include',
+        }
+      );
 
       if (response.ok) {
         const data = await response.json();
@@ -452,7 +458,7 @@ export default function TeamsAnalyticsPage() {
       {/* Fetch Time */}
       {lastFetchTime && (
         <div style={{ marginBottom: '16px', fontSize: '12px', color: colorPalette.typography.muted }}>
-          Last updated: {new Date(lastFetchTime).toLocaleTimeString()}
+          Last updated: {new Date(lastFetchTime).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
         </div>
       )}
 

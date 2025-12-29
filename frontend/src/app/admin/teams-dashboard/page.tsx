@@ -83,10 +83,14 @@ export default function TeamsDashboardPage() {
     try {
       const params = new URLSearchParams();
       if (startDate) {
-        params.append('from_date', startDate);
+        // Extract YYYY-MM-DD format from ISO string if needed
+        const dateOnly = startDate.includes('T') ? startDate.split('T')[0] : startDate;
+        params.append('from_date', dateOnly);
       }
       if (endDate) {
-        params.append('to_date', endDate);
+        // Extract YYYY-MM-DD format from ISO string if needed
+        const dateOnly = endDate.includes('T') ? endDate.split('T')[0] : endDate;
+        params.append('to_date', dateOnly);
       }
       if (excludeUsers && excludeUsers.length > 0) {
         params.append('exclude_users', excludeUsers.join(','));
@@ -167,6 +171,21 @@ export default function TeamsDashboardPage() {
     }
   }, []);
 
+  const formatLocalDate = useCallback((utcTime: string | null) => {
+    if (!utcTime) return '—';
+    try {
+      const date = new Date(utcTime);
+      return date.toLocaleString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric'
+      });
+    } catch (error) {
+      console.error('[TEAMS DASHBOARD] Error formatting date:', utcTime, error);
+      return utcTime;
+    }
+  }, []);
+
   // Top 5 teams
   const top5Teams = useMemo(() => {
     return teamStats.slice(0, 5);
@@ -214,9 +233,6 @@ export default function TeamsDashboardPage() {
         }}>
           <div>
             <h1 style={{ fontSize: '28px', fontWeight: 700, marginBottom: '6px', color: '#323130' }}>Team Leaderboard</h1>
-            <p style={{ color: '#605e5c', fontSize: '14px' }}>
-              Visible only to admins: {ADMIN_EMAILS.join(', ')}
-            </p>
           </div>
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             <DateRangeFilterDropdown onFilterChange={setDateRange} />
@@ -277,7 +293,7 @@ export default function TeamsDashboardPage() {
 
       {generatedAt && (
         <div style={{ marginBottom: '12px', color: '#6b7280', fontSize: '13px' }}>
-          Last updated: <strong style={{ color: '#111827' }}>{formatLocalTime(generatedAt)}</strong>
+          Last updated: <strong style={{ color: '#111827' }}>{formatLocalDate(generatedAt)}</strong>
           {' • '}
           Total teams: <strong style={{ color: '#111827' }}>{totalTeams}</strong>
           {dateRange.startDate || dateRange.endDate ? (

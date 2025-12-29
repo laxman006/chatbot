@@ -248,12 +248,11 @@ export default function UserOnboardingModal({
                   viewBox="0 0 12 12"
                   fill="none"
                   style={{
-                    transform: isTeamDropdownOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+                    transform: isTeamDropdownOpen ? 'translateY(-50%) rotate(180deg)' : 'translateY(-50%) rotate(0deg)',
                     transition: 'transform 0.2s',
                     position: 'absolute',
                     right: '12px',
-                    top: '50%',
-                    transform: isTeamDropdownOpen ? 'translateY(-50%) rotate(180deg)' : 'translateY(-50%) rotate(0deg)'
+                    top: '50%'
                   }}
                 >
                   <path d="M6 9L1 4h10z" fill="#374151" />

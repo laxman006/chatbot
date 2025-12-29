@@ -118,9 +118,6 @@ export default function AdminDashboardPage() {
         
         const response = await apiFetch(url, {
           method: 'GET',
-          headers: {
-            Authorization: `Bearer ${user.access_token}`
-          }
         });
 
         payload = await response.json();
@@ -164,9 +161,6 @@ export default function AdminDashboardPage() {
         
         const response = await apiFetch(url, {
           method: 'GET',
-          headers: {
-            Authorization: `Bearer ${user.access_token}`
-          }
         });
 
         payload = await response.json();
@@ -250,6 +244,27 @@ export default function AdminDashboardPage() {
         minute: '2-digit',
         hour12: true, // Use 12-hour format (am/pm)
         timeZoneName: 'short' // Shows timezone abbreviation (IST)
+      });
+    } catch (error) {
+      console.error('[DASHBOARD] Error formatting date:', utcTime, error);
+      return '—';
+    }
+  };
+
+  // Format date only (without time) for "Last updated" display
+  const formatLocalDate = (utcTime?: string) => {
+    if (!utcTime) return '—';
+    try {
+      const date = new Date(utcTime);
+      // Validate date
+      if (isNaN(date.getTime())) {
+        console.warn('[DASHBOARD] Invalid date:', utcTime);
+        return '—';
+      }
+      return date.toLocaleString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric'
       });
     } catch (error) {
       console.error('[DASHBOARD] Error formatting date:', utcTime, error);
@@ -349,9 +364,6 @@ export default function AdminDashboardPage() {
         }}>
           <div>
             <h1 style={{ fontSize: '28px', fontWeight: 700, marginBottom: '6px', color: '#323130' }}>User Leaderboard</h1>
-            <p style={{ color: '#605e5c', fontSize: '14px' }}>
-              Visible only to admins: {ADMIN_EMAILS.join(', ')}
-            </p>
           </div>
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             <DateRangeFilterDropdown onFilterChange={setDateRange} />
@@ -413,7 +425,7 @@ export default function AdminDashboardPage() {
 
       {generatedAt && (
         <div style={{ marginBottom: '12px', color: '#6b7280', fontSize: '13px' }}>
-          Last updated: <strong style={{ color: '#111827' }}>{formatLocalTime(generatedAt)}</strong>
+          Last updated: <strong style={{ color: '#111827' }}>{formatLocalDate(generatedAt)}</strong>
           {' • '}
           Total users: <strong style={{ color: '#111827' }}>{totalUsers}</strong>
           {dateRange.startDate || dateRange.endDate ? (
