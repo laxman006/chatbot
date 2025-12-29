@@ -7,9 +7,10 @@ from typing import List, Dict, Any
 
 # Define all teams with their leads and members
 TEAMS_STRUCTURE = {
+  
     "Content": {
-        "lead": None,
-        "lead_email": None,
+        "lead": Santosh Chintalapelli,
+        "lead_email": santosh@cloudfuze.com,
         "members": [
             {"name": "Santosh Chintalapelli", "email": "santosh@cloudfuze.com"},
             {"name": "Akhila Aenkoju", "email": "Akhila.Aenkoju@cloudfuze.com"},
@@ -27,8 +28,8 @@ TEAMS_STRUCTURE = {
         "description": "Content Development"
     },
     "M7 (Content)": {
-        "lead": None,
-        "lead_email": None,
+        "lead": Adi Nandyala,
+        "lead_email": adi.nandyala@cloudfuze.com,
         "members": [
             {"name": "Adi Nandyala", "email": "adi.nandyala@cloudfuze.com"},
             {"name": "Pranavi", "email": "pranavi@cloudfuze.com"},
@@ -37,8 +38,8 @@ TEAMS_STRUCTURE = {
         "description": "Content Team - M7"
     },
     "Messaging & Email": {
-        "lead": None,
-        "lead_email": None,
+        "lead": Ankit Mishra,
+        "lead_email": ankit@cloudfuze.com,
         "members": [
             {"name": "Ankit Mishra", "email": "ankit@cloudfuze.com"},
             {"name": "Bhagya", "email": "bhagyashri.deokar@cloudfuze.com"},
@@ -55,8 +56,8 @@ TEAMS_STRUCTURE = {
         "description": "Messaging & Email"
     },
     "CloudFuze Manage": {
-        "lead": None,
-        "lead_email": None,
+        "lead": Ravi Achakka Chandra,
+        "lead_email": ravic@cloudfuze.com,
         "members": [
             {"name": "Ravi Achakka Chandra", "email": "ravic@cloudfuze.com"},
             {"name": "Suraj Kumar", "email": "suraj.kumar@cloudfuze.com"},
@@ -69,8 +70,8 @@ TEAMS_STRUCTURE = {
         "description": "CloudFuze Manage"
     },
     "QA": {
-        "lead": None,
-        "lead_email": None,
+        "lead": Kamal Basha,
+        "lead_email": Kamal.Basha@cloudfuze.com,
         "members": [
             {"name": "Kamal Basha", "email": "Kamal.Basha@cloudfuze.com"},
             {"name": "Soumya G", "email": "soumya.gande@cloudfuze.com"},
@@ -86,8 +87,8 @@ TEAMS_STRUCTURE = {
         "description": "QA"
     },
     "Neutara Labs": {
-        "lead": None,
-        "lead_email": None,
+        "lead": Ravi Poli,
+        "lead_email": ravi.poli@cloudfuze.com,
         "members": [
             {"name": "Ravi Poli", "email": "ravi.poli@cloudfuze.com"},
             {"name": "Bharath Tummaganti", "email": "Bharath.Tummaganti@cloudfuze.com"},
@@ -106,8 +107,8 @@ TEAMS_STRUCTURE = {
         "description": "Neutara Labs"
     },
     "Infra": {
-        "lead": None,
-        "lead_email": None,
+        "lead": Pavan Bhagavathula,
+        "lead_email": pavan@cloudfuze.com,
         "members": [
             {"name": "Pavan Bhagavathula", "email": "pavan@cloudfuze.com"},
             {"name": "Gururaj Bhimrao", "email": "gururaj.bhimrao@cloudfuze.com"},
@@ -120,8 +121,8 @@ TEAMS_STRUCTURE = {
         "description": "Infra"
     },
     "Marketing": {
-        "lead": None,
-        "lead_email": None,
+        "lead": Arun Jyothi,
+        "lead_email": jyothi@cloudfuze.com,
         "members": [
             {"name": "Arun Jyothi", "email": "jyothi@cloudfuze.com"},
             {"name": "Hari Rowlo", "email": "hari.rowlo@cloudfuze.com"},
@@ -139,8 +140,8 @@ TEAMS_STRUCTURE = {
         "description": "Marketing"
     },
     "Pre-Sales": {
-        "lead": None,
-        "lead_email": None,
+        "lead": Nivas,
+        "lead_email": nivas@cloudfuze.com,
         "members": [
             {"name": "Nivas", "email": "nivas@cloudfuze.com"},
             {"name": "Sonali Lunia", "email": "sonali.lunia@cloudfuze.com"},
@@ -150,8 +151,8 @@ TEAMS_STRUCTURE = {
         "description": "Pre-Sales"
     },
     "M1": {
-        "lead": None,
-        "lead_email": None,
+        "lead": Nikhil Patel,
+        "lead_email": nikhil@cloudfuze.com,
         "members": [
             {"name": "Nikhil Patel", "email": "nikhil@cloudfuze.com"},
             {"name": "Arshiya Syed", "email": "arshiya.syed@cloudfuze.com"},
@@ -163,8 +164,8 @@ TEAMS_STRUCTURE = {
         "description": "M1"
     },
     "M2": {
-        "lead": None,
-        "lead_email": None,
+        "lead": Maheswari Aram,
+        "lead_email": maheswari.aram@cloudfuze.com,
         "members": [
             {"name": "Maheswari Aram", "email": "maheswari.aram@cloudfuze.com"},
             {"name": "Tejaswini Sivakumaram", "email": "sivakumaram.tejaswini@cloudfuze.com"},
@@ -177,8 +178,8 @@ TEAMS_STRUCTURE = {
         "description": "M2"
     },
     "M3": {
-        "lead": None,
-        "lead_email": None,
+        "lead": Lakshmi Prasanna,
+        "lead_email": Lakshmi.Prasanna@cloudfuze.com,
         "members": [
             {"name": "Lakshmi Prasanna", "email": "Lakshmi.Prasanna@cloudfuze.com"},
             {"name": "Meena Lakshmi Triveni", "email": "Meena.Lakshmi@cloudfuze.com"},
@@ -191,8 +192,8 @@ TEAMS_STRUCTURE = {
         "description": "M3"
     },
     "M4": {
-        "lead": None,
-        "lead_email": None,
+        "lead": Neelima Krotta,
+        "lead_email": neelima.krotta@cloudfuze.com,
         "members": [
             {"name": "Neelima Krotta", "email": "neelima.krotta@cloudfuze.com"},
             {"name": "Nandini Tirumalasetti", "email": "nandini.tirumalasetti@cloudfuze.com"},
@@ -205,8 +206,8 @@ TEAMS_STRUCTURE = {
         "description": "M4"
     },
     "M4 (M+E)": {
-        "lead": None,
-        "lead_email": None,
+        "lead": Ajay Singh,
+        "lead_email": ajay.singh@cloudfuze.com,
         "members": [
             {"name": "Ajay Singh", "email": "ajay.singh@cloudfuze.com"},
             {"name": "Aanchal Tyagi", "email": "aanchal.tyagi@cloudfuze.com"},
@@ -218,8 +219,8 @@ TEAMS_STRUCTURE = {
         "description": "M4 (Messaging + Email)"
     },
     "M6 (M+E)": {
-        "lead": None,
-        "lead_email": None,
+        "lead": Abhishek Sakala,
+        "lead_email": abhishek.sakala@cloudfuze.com,
         "members": [
             {"name": "Abhishek Sakala", "email": "abhishek.sakala@cloudfuze.com"},
             {"name": "Pallavi K", "email": "Pallavi.Kosuvaripalli@cloudfuze.com"},
@@ -231,8 +232,8 @@ TEAMS_STRUCTURE = {
         "description": "M6 (Messaging + Email)"
     },
     "M5": {
-        "lead": None,
-        "lead_email": None,
+        "lead": Abhishikth Yenugula,
+        "lead_email": Abhishikth.Yenugula@cloudfuze.com,
         "members": [
             {"name": "Abhishikth Yenugula", "email": "Abhishikth.Yenugula@cloudfuze.com"},
             {"name": "Ranadeep Muddam", "email": "Ranadeep.Muddam@cloudfuze.com"},
@@ -244,8 +245,8 @@ TEAMS_STRUCTURE = {
         "description": "M5"
     },
     "BD": {
-        "lead": None,
-        "lead_email": None,
+        "lead": Karthik Brahmakal,
+        "lead_email": karthik.brahmakal@cloudfuze.com,
         "members": [
             {"name": "Karthik Brahmakal", "email": "karthik.brahmakal@cloudfuze.com"},
             {"name": "Pruthvi Raygol", "email": "Pruthvi.Raygol@cloudfuze.com"},
@@ -261,9 +262,10 @@ TEAMS_STRUCTURE = {
         "description": "Business Development"
     },
     "Sales Ops": {
-        "lead": None,
-        "lead_email": None,
+        "lead": Harini Elangovan,
+        "lead_email": Harini.Elangovan@cloudfuze.com,
         "members": [
+            {"name": "Harini Elangovan", "email": "Harini.Elangovan@cloudfuze.com"},
             {"name": "Rahul Gowda", "email": "rahul.gowda@cloudfuze.com"},
             {"name": "Sakshi Priya", "email": "Sakshi.Priya@cloudfuze.com"},
             {"name": "Raya Durai", "email": "Raya.durai@cloudfuze.com"},
@@ -274,8 +276,8 @@ TEAMS_STRUCTURE = {
         "description": "Sales Operations"
     },
     "Sales [SMB]": {
-        "lead": None,
-        "lead_email": None,
+        "lead": Chitradip Saha,
+        "lead_email": chitradip.saha@cloudfuze.com,
         "members": [
             {"name": "Chitradip Saha", "email": "chitradip.saha@cloudfuze.com"},
             {"name": "Royston Aden", "email": "RoystonAden@cloudfuze.com"},
@@ -289,8 +291,8 @@ TEAMS_STRUCTURE = {
         "description": "Sales [SMB]"
     },
     "Sales [ENT]": {
-        "lead": None,
-        "lead_email": None,
+        "lead": Anthony Raymond,
+        "lead_email": anthony@cloudfuze.com,
         "members": [
             {"name": "Anthony Raymond", "email": "anthony@cloudfuze.com"},
             {"name": "Lukas Bohlander", "email": "Lukas.Bohlander@cloudfuze.com"},
@@ -300,8 +302,8 @@ TEAMS_STRUCTURE = {
         "description": "Sales [Enterprise]"
     },
     "Sales [AM]": {
-        "lead": None,
-        "lead_email": None,
+        "lead": Lawrence Lewis,
+        "lead_email": lawrence.lewis@cloudfuze.com,
         "members": [
             {"name": "Lawrence Lewis", "email": "lawrence.lewis@cloudfuze.com"},
             {"name": "Nikitha Shekher", "email": "nikita.shekher@cloudfuze.com"},
@@ -315,8 +317,8 @@ TEAMS_STRUCTURE = {
         "description": "Sales [Account Management]"
     },
     "HR": {
-        "lead": None,
-        "lead_email": None,
+        "lead": Gopi Krishna,
+        "lead_email": gopi@cloudfuze.com,
         "members": [
             {"name": "Gopi Krishna", "email": "gopi@cloudfuze.com"},
             {"name": "Vipra Mishra", "email": "vipra.mishra@cloudfuze.com"},
@@ -329,8 +331,8 @@ TEAMS_STRUCTURE = {
         "description": "Human Resources"
     },
     "Consultant": {
-        "lead": None,
-        "lead_email": None,
+        "lead": Raghavan Krishnan,
+        "lead_email": Raghavan.Krishnan@cloudfuze.com,
         "members": [
             {"name": "Raghavan Krishnan", "email": "Raghavan.Krishnan@cloudfuze.com"},  
         ],
@@ -338,8 +340,8 @@ TEAMS_STRUCTURE = {
         "description": "Consultant"
     },
     "Customer Success": {
-        "lead": None,
-        "lead_email": None,
+        "lead": Himansu Malla,
+        "lead_email": Himansu.Malla@cloudfuze.com,
         "members": [
             {"name": "Himansu Malla", "email": "Himansu.Malla@cloudfuze.com"},  
             {"name": "Ashim Upadhyay", "email": "Ashim.Upadhyay@cloudfuze.com"},
@@ -349,6 +351,7 @@ TEAMS_STRUCTURE = {
     },
     
 }
+
 
 
 def get_all_teams() -> Dict[str, dict]:
