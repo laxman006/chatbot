@@ -36,6 +36,7 @@ export default function ChatSidebar({
   const [showLogoutModal, setShowLogoutModal] = useState<boolean>(false);
   const [adminSubmenuOpen, setAdminSubmenuOpen] = useState<boolean>(false);
   const hasRenderedHistoryRef = useRef(false);
+  const adminSubmenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const currentUser = getCurrentUser();
@@ -498,22 +499,56 @@ export default function ChatSidebar({
     }
   };
 
+  // Handle admin menu navigation
+  const handleAdminNavigation = (path: string, e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      e.nativeEvent.stopImmediatePropagation();
+    }
+    console.log('[Admin Nav] Navigating to:', path);
+    const dropdown = document.getElementById('userDropdown');
+    if (dropdown) {
+      dropdown.classList.remove('show');
+    }
+    setAdminSubmenuOpen(false);
+    // Use window.location for more reliable navigation
+    setTimeout(() => {
+      window.location.href = path;
+    }, 10);
+  };
+
   // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       const dropdown = document.getElementById('userDropdown');
       const userMenu = document.getElementById('userMenu');
+      const adminSubmenu = document.querySelector('.admin-submenu');
+      const adminItems = document.querySelectorAll('.admin-submenu .admin-item');
 
       if (dropdown && userMenu) {
         const target = e.target as Node;
-        // Don't close if clicking inside userMenu or dropdown
-        if (!userMenu.contains(target) && !dropdown.contains(target)) {
-          dropdown.classList.remove('show');
-          setAdminSubmenuOpen(false);
+        // Check if click is on an admin menu item - if so, don't close
+        let isAdminItemClick = false;
+        adminItems.forEach(item => {
+          if (item.contains(target)) {
+            isAdminItemClick = true;
+          }
+        });
+        
+        // Don't close if clicking inside userMenu, dropdown, admin-submenu, or admin items
+        if (!userMenu.contains(target) && !dropdown.contains(target) && 
+            !(adminSubmenu && adminSubmenu.contains(target)) && !isAdminItemClick) {
+          // Use setTimeout to let click handlers fire first
+          setTimeout(() => {
+            dropdown.classList.remove('show');
+            setAdminSubmenuOpen(false);
+          }, 0);
         }
       }
     };
 
+    // Use bubble phase (not capture) so click handlers fire first
     document.addEventListener('click', handleClickOutside);
     return () => document.removeEventListener('click', handleClickOutside);
   }, []);
@@ -700,6 +735,11 @@ export default function ChatSidebar({
                   onClick={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
+                    // Ensure dropdown stays open when toggling submenu
+                    const dropdown = document.getElementById('userDropdown');
+                    if (dropdown && !dropdown.classList.contains('show')) {
+                      dropdown.classList.add('show');
+                    }
                     setAdminSubmenuOpen(!adminSubmenuOpen);
                   }}
                   style={{ cursor: 'pointer' }}
@@ -726,50 +766,98 @@ export default function ChatSidebar({
                   </svg>
                 </div>
                 {adminSubmenuOpen && (
-                  <div className="admin-submenu" onClick={(e) => e.stopPropagation()}>
-                    <div className="dropdown-item admin-item" onClick={(e) => {
-                      e.stopPropagation();
-                      router.push('/admin/teams');
-                      const dropdown = document.getElementById('userDropdown');
-                      if (dropdown) dropdown.classList.remove('show');
-                      setAdminSubmenuOpen(false);
-                    }}>
+                  <div 
+                    ref={adminSubmenuRef}
+                    className="admin-submenu" 
+                    style={{ pointerEvents: 'auto', position: 'relative', zIndex: 10000 }}
+                  >
+                    <div 
+                      className="dropdown-item admin-item" 
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.nativeEvent.stopImmediatePropagation();
+                        console.log('[Admin Nav] Team Analytics clicked - mousedown');
+                        handleAdminNavigation('/admin/teams', e);
+                      }}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.nativeEvent.stopImmediatePropagation();
+                        console.log('[Admin Nav] Team Analytics clicked - click');
+                        handleAdminNavigation('/admin/teams', e);
+                      }}
+                      style={{ cursor: 'pointer', pointerEvents: 'auto', position: 'relative', zIndex: 10000 }}
+                    >
                       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                         <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm9 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
                       </svg>
                       <span>Team Analytics</span>
                     </div>
-                    <div className="dropdown-item admin-item" onClick={(e) => {
-                      e.stopPropagation();
-                      router.push('/admin/teams-dashboard');
-                      const dropdown = document.getElementById('userDropdown');
-                      if (dropdown) dropdown.classList.remove('show');
-                      setAdminSubmenuOpen(false);
-                    }}>
+                    <div 
+                      className="dropdown-item admin-item" 
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.nativeEvent.stopImmediatePropagation();
+                        console.log('[Admin Nav] Team Leaderboard clicked - mousedown');
+                        handleAdminNavigation('/admin/teams-dashboard', e);
+                      }}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.nativeEvent.stopImmediatePropagation();
+                        console.log('[Admin Nav] Team Leaderboard clicked - click');
+                        handleAdminNavigation('/admin/teams-dashboard', e);
+                      }}
+                      style={{ cursor: 'pointer', pointerEvents: 'auto', position: 'relative', zIndex: 10000 }}
+                    >
                       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                         <path d="M3 3h18v18H3V3zm2 2v14h14V5H5zm2 2h10v2H7V7zm0 4h10v2H7v-2zm0 4h7v2H7v-2z" />
                       </svg>
                       <span>Team Leaderboard</span>
                     </div>
-                    <div className="dropdown-item admin-item" onClick={(e) => {
-                      e.stopPropagation();
-                      router.push('/admin/analytics');
-                      const dropdown = document.getElementById('userDropdown');
-                      if (dropdown) dropdown.classList.remove('show');
-                      setAdminSubmenuOpen(false);
-                    }}>
+                    <div 
+                      className="dropdown-item admin-item" 
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.nativeEvent.stopImmediatePropagation();
+                        console.log('[Admin Nav] Langfuse Analytics clicked - mousedown');
+                        handleAdminNavigation('/admin/analytics', e);
+                      }}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.nativeEvent.stopImmediatePropagation();
+                        console.log('[Admin Nav] Langfuse Analytics clicked - click');
+                        handleAdminNavigation('/admin/analytics', e);
+                      }}
+                      style={{ cursor: 'pointer', pointerEvents: 'auto', position: 'relative', zIndex: 10000 }}
+                    >
                       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                         <path d="M3 3v18h18M3 15l4-4 3 3 5-5 6 6M9 7h6M9 7v2" />
                       </svg>
                       <span>Langfuse Analytics</span>
                     </div>
-                    <div className="dropdown-item admin-item" onClick={(e) => {
-                      e.stopPropagation();
-                      router.push('/admin/top-questions');
-                      const dropdown = document.getElementById('userDropdown');
-                      if (dropdown) dropdown.classList.remove('show');
-                      setAdminSubmenuOpen(false);
-                    }}>
+                    <div 
+                      className="dropdown-item admin-item" 
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.nativeEvent.stopImmediatePropagation();
+                        console.log('[Admin Nav] Most Asked Questions clicked - mousedown');
+                        handleAdminNavigation('/admin/top-questions', e);
+                      }}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.nativeEvent.stopImmediatePropagation();
+                        console.log('[Admin Nav] Most Asked Questions clicked - click');
+                        handleAdminNavigation('/admin/top-questions', e);
+                      }}
+                      style={{ cursor: 'pointer', pointerEvents: 'auto', position: 'relative', zIndex: 10000 }}
+                    >
                       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                         <path d="M3 13h2v-2H3v2Zm4 0h2v-2H7v2Zm4 0h2v-2h-2v2Zm4 0h2v-2h-2v2Zm4 0h2v-2h-2v2ZM5 21h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2-3h-4l-2 3H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2Z" />
                       </svg>

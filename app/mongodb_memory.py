@@ -198,7 +198,7 @@ class MongoDBMemoryManager:
             logger.error(f"Error adding message to conversation for user {user_id}: {e}")
     
     async def get_conversation_context(self, user_id: str) -> str:
-        """Get formatted conversation context for a user."""
+        """Get formatted conversation context for a user (legacy method)."""
         conversation = await self.get_or_create_user_conversation(user_id)
         
         if not conversation:
@@ -1242,7 +1242,7 @@ async def add_to_conversation(user_id: str, role: str, content: str):
     await mongodb_memory.add_to_conversation(user_id, role, content)
 
 async def get_conversation_context(user_id: str) -> str:
-    """Get formatted conversation context for a user."""
+    """Get formatted conversation context for a user (legacy method)."""
     return await mongodb_memory.get_conversation_context(user_id)
 
 async def get_user_chat_history(user_id: str) -> List[Dict[str, str]]:

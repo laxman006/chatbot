@@ -1147,9 +1147,6 @@ async def chat(request: Request, auth_user: dict = Depends(require_auth)):
             ("human", "{question}")
         ])
         
-        # Don't use conversation context - treat each question independently
-        # conversation_context = await get_conversation_context(conversation_id)
-        # enhanced_query = f"{conversation_context}\n\nUser: {question}" if conversation_context else question
         enhanced_query = question  # Use current question only
         
         chain = conversational_prompt | llm
@@ -1278,9 +1275,16 @@ async def chat(request: Request, auth_user: dict = Depends(require_auth)):
                 from langchain_core.prompts import ChatPromptTemplate
                 from config import SYSTEM_PROMPT
                 
+                # Standard prompt
+                human_template = "Context: {context}\n\nQuestion: {question}"
+                prompt_vars = {
+                    "context": context,
+                    "question": enhanced_query
+                }
+                
                 prompt_template = ChatPromptTemplate.from_messages([
                     ("system", SYSTEM_PROMPT),
-                    ("human", "Context: {context}\n\nQuestion: {question}")
+                    ("human", human_template)
                 ])
                 
                 llm = get_llm(
@@ -1289,10 +1293,7 @@ async def chat(request: Request, auth_user: dict = Depends(require_auth)):
                 )
                 
                 chain = prompt_template | llm
-                result = chain.invoke({
-                    "context": context,
-                    "question": enhanced_query
-                })
+                result = chain.invoke(prompt_vars)
                 
                 answer = result.content
                 

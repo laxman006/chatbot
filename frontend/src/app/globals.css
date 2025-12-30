@@ -510,11 +510,21 @@ header img {
   font-size: 13px;
   color: #6b7280;
   background-color: #f9fafb;
+  pointer-events: auto;
+  cursor: pointer;
+  position: relative;
+  z-index: 1;
 }
 
 .admin-submenu .dropdown-item.admin-item:hover {
   background-color: #f3f4f6;
   color: #374151;
+}
+
+.admin-submenu {
+  pointer-events: auto;
+  position: relative;
+  z-index: 1;
 }
 
 .main-content {

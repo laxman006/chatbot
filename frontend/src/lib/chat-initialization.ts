@@ -4022,15 +4022,25 @@ export function initializeChatApp(options: InitOptions = {}) {
   document.addEventListener('click', (event) => {
     const userMenu = document.getElementById('userMenu');
     const dropdown = document.getElementById('userDropdown');
+    const target = event.target as HTMLElement;
     
+    // Don't close if clicking on admin menu items
+    const adminItems = document.querySelectorAll('.admin-submenu .admin-item');
+    let isAdminItemClick = false;
+    adminItems.forEach(item => {
+      if (item.contains(target as Node)) {
+        isAdminItemClick = true;
+      }
+    });
+    
+    // Don't close if clicking inside dropdown or admin items
     if (userMenu && !userMenu.contains(event.target as Node)) {
-      if (dropdown) {
+      if (dropdown && !dropdown.contains(event.target as Node) && !isAdminItemClick) {
         dropdown.classList.remove('show');
       }
     }
     
     // Close history item dropdowns when clicking outside
-    const target = event.target as HTMLElement;
     if (!target.closest('.history-item-menu') && !target.closest('.history-item-dropdown')) {
       document.querySelectorAll('.history-item-dropdown').forEach(dropdown => {
         (dropdown as HTMLElement).style.display = 'none';
