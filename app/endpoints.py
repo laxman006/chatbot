@@ -23,7 +23,8 @@ from app.mongodb_memory import (
     mongodb_memory,
     add_to_conversation, get_conversation_context, get_user_chat_history, 
     clear_user_chat_history, save_session, get_all_sessions, get_user_sessions, 
-    get_session_by_id, create_shared_chat, get_shared_chat
+    get_session_by_id, create_shared_chat, get_shared_chat,
+    get_user_statistics, get_rankers_by_date
 )
 from app.helpers import strip_markdown, preserve_markdown
 from app.langfuse_integration import langfuse_tracker
@@ -3355,7 +3356,7 @@ async def get_teams_summary_mongodb(
             time_range = "all_time"
         
         # Convert to list format and get team info from teams.py
-        from app.models.teams import get_team_by_name, get_all_teams, get_team_color
+        from app.models.teams import get_team_by_name, get_all_teams, get_team_color, TEAMS_STRUCTURE
         
         teams_list = []
         for team_name, team_data in teams_data.items():
@@ -3415,7 +3416,6 @@ async def get_teams_summary_mongodb(
         )
 
 
->>>>>>> aa938d4 (feat: Admin menu restructure, Team Leaderboard integration, and analytics improvements)
 @router.get("/dataset/corrected-responses")
 async def get_corrected_responses(current_user: dict = Depends(require_admin)):
     """Get all corrected responses from the dataset. Requires admin access."""
