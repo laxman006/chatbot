@@ -458,7 +458,7 @@ export default function TeamsAnalyticsPage() {
       {/* Fetch Time */}
       {lastFetchTime && (
         <div style={{ marginBottom: '16px', fontSize: '12px', color: colorPalette.typography.muted }}>
-          Last updated: {new Date(lastFetchTime).toLocaleTimeString()}
+          Last updated: {new Date(lastFetchTime).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
         </div>
       )}
 

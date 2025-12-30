@@ -113,11 +113,22 @@ export default function AdminTopQuestionsPage() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
         <div>
           <h1 style={{ fontSize: '28px', fontWeight: 700, marginBottom: '6px' }}>Most Asked Questions</h1>
-          <p style={{ color: '#6b7280', fontSize: '14px' }}>
-            Visible only to admins: {ADMIN_EMAILS.join(', ')}
-          </p>
         </div>
         <div style={{ display: 'flex', gap: '8px' }}>
+          <button
+            onClick={() => router.push('/admin/dashboard')}
+            style={{
+              padding: '10px 14px',
+              borderRadius: '10px',
+              border: '1px solid #d1d5db',
+              background: 'white',
+              cursor: 'pointer',
+              color: '#111827',
+              fontWeight: 600
+            }}
+          >
+            Dashboard
+          </button>
           <button
             onClick={() => router.push('/chat/new')}
             style={{

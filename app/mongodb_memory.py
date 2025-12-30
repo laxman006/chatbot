@@ -1,6 +1,6 @@
 from typing import List, Dict, Optional
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import ConnectionFailure, DuplicateKeyError
 import logging
@@ -103,6 +103,26 @@ class MongoDBMemoryManager:
             await shared_chats_collection.create_index("session_id")
             await shared_chats_collection.create_index("user_email")
             await shared_chats_collection.create_index("created_at")
+            
+            # Create indexes for user_activity collection (single source of truth for analytics)
+            user_activity_collection = self.database["user_activity"]
+            await user_activity_collection.create_index("user_id", unique=True)
+            await user_activity_collection.create_index("last_active")
+            await user_activity_collection.create_index("total_messages")
+            await user_activity_collection.create_index("total_sessions")
+            
+            # Create indexes for message_events collection (time-based analytics)
+            message_events_collection = self.database["message_events"]
+            await message_events_collection.create_index("created_at")
+            await message_events_collection.create_index([("user_id", 1), ("created_at", -1)])
+            await message_events_collection.create_index("user_email")  # For exclusion filtering
+            await message_events_collection.create_index("session_id")
+            
+            # Create indexes for faq_events collection (FAQ analytics)
+            faq_events_collection = self.database["faq_events"]
+            await faq_events_collection.create_index("created_at")
+            await faq_events_collection.create_index([("user_id", 1), ("created_at", -1)])
+            await faq_events_collection.create_index("question_hash")
             
             logger.info("MongoDB indexes created successfully")
         except Exception as e:
@@ -287,9 +307,172 @@ class MongoDBMemoryManager:
             
             logger.info(f"Saved session {session_data['session_id']} for user {session_data['user_id']}")
             
+            # Update user_activity collection (single source of truth for analytics)
+            await self._update_user_activity(session_data)
+            
         except Exception as e:
             logger.error(f"Error saving session: {e}")
             raise e
+    
+    async def _update_user_activity(self, session_data: Dict):
+        """
+        Update user_activity collection - single source of truth for analytics.
+        This ensures accurate statistics without aggregating from chat logs.
+        """
+        try:
+            user_activity_collection = self.database["user_activity"]
+            user_id = session_data["user_id"]
+            session_id = session_data["session_id"]
+            message_count = session_data.get("message_count", 0)
+            created_at = datetime.fromtimestamp(session_data["created_at"] / 1000)
+            updated_at = datetime.fromtimestamp(session_data.get("updated_at", session_data["created_at"]) / 1000)
+            
+            # Check if this is a new session (by checking if session exists in user_activity)
+            existing_activity = await user_activity_collection.find_one({"user_id": user_id})
+            
+            if existing_activity:
+                # User exists - update activity
+                sessions = existing_activity.get("sessions", [])
+                
+                # Check if this session already exists in sessions array
+                session_exists = any(s.get("session_id") == session_id for s in sessions)
+                
+                if not session_exists:
+                    # New session - add to sessions array
+                    sessions.append({
+                        "session_id": session_id,
+                        "started_at": created_at,
+                        "ended_at": None,  # Will be set when session ends
+                        "message_count": message_count
+                    })
+                else:
+                    # Update existing session
+                    for s in sessions:
+                        if s.get("session_id") == session_id:
+                            s["message_count"] = message_count
+                            # Update ended_at if session is being finalized
+                            if updated_at > created_at:
+                                s["ended_at"] = updated_at
+                            break
+                
+                # Calculate totals
+                total_messages = sum(s.get("message_count", 0) for s in sessions)
+                # Count sessions with messages (active or completed)
+                total_sessions = len([s for s in sessions if s.get("message_count", 0) > 0])
+                avg_messages = total_messages / total_sessions if total_sessions > 0 else 0
+                
+                # Update user activity document
+                await user_activity_collection.update_one(
+                    {"user_id": user_id},
+                    {
+                        "$set": {
+                            "user_email": session_data.get("user_email", existing_activity.get("user_email", "")),
+                            "user_name": session_data.get("user_name", existing_activity.get("user_name", "")),
+                            "sessions": sessions,
+                            "total_messages": total_messages,
+                            "total_sessions": total_sessions,
+                            "avg_messages_per_session": round(avg_messages, 2),
+                            "last_active": updated_at
+                        }
+                    }
+                )
+            else:
+                # New user - create activity document
+                sessions = [{
+                    "session_id": session_id,
+                    "started_at": created_at,
+                    "ended_at": None,
+                    "message_count": message_count
+                }]
+                
+                await user_activity_collection.insert_one({
+                    "user_id": user_id,
+                    "user_email": session_data.get("user_email", ""),
+                    "user_name": session_data.get("user_name", ""),
+                    "sessions": sessions,
+                    "total_messages": message_count,
+                    "total_sessions": 1,
+                    "avg_messages_per_session": float(message_count),
+                    "last_active": updated_at,
+                    "created_at": created_at
+                })
+            
+            logger.debug(f"Updated user_activity for user {user_id}")
+            
+        except Exception as e:
+            logger.error(f"Error updating user_activity: {e}")
+            # Don't raise - analytics update failure shouldn't break session save
+    
+    async def _increment_user_message_count(self, user_id: str, session_id: str):
+        """
+        Increment message count for a user in user_activity collection.
+        Called when a new message is sent.
+        """
+        try:
+            user_activity_collection = self.database["user_activity"]
+            now = datetime.utcnow()
+            
+            # Find or create user activity
+            existing = await user_activity_collection.find_one({"user_id": user_id})
+            
+            if existing:
+                # Update message count and last active
+                sessions = existing.get("sessions", [])
+                
+                # Find and update the current session
+                session_found = False
+                for s in sessions:
+                    if s.get("session_id") == session_id:
+                        s["message_count"] = s.get("message_count", 0) + 1
+                        session_found = True
+                        break
+                
+                # If session not found, create it
+                if not session_found:
+                    sessions.append({
+                        "session_id": session_id,
+                        "started_at": now,
+                        "ended_at": None,
+                        "message_count": 1
+                    })
+                
+                # Recalculate totals
+                total_messages = sum(s.get("message_count", 0) for s in sessions)
+                total_sessions = len([s for s in sessions if s.get("message_count", 0) > 0])
+                avg_messages = total_messages / total_sessions if total_sessions > 0 else 0
+                
+                await user_activity_collection.update_one(
+                    {"user_id": user_id},
+                    {
+                        "$set": {
+                            "sessions": sessions,
+                            "total_messages": total_messages,
+                            "total_sessions": total_sessions,
+                            "avg_messages_per_session": round(avg_messages, 2),
+                            "last_active": now
+                        }
+                    }
+                )
+            else:
+                # Create new user activity
+                await user_activity_collection.insert_one({
+                    "user_id": user_id,
+                    "sessions": [{
+                        "session_id": session_id,
+                        "started_at": now,
+                        "ended_at": None,
+                        "message_count": 1
+                    }],
+                    "total_messages": 1,
+                    "total_sessions": 1,
+                    "avg_messages_per_session": 1.0,
+                    "last_active": now,
+                    "created_at": now
+                })
+            
+        except Exception as e:
+            logger.error(f"Error incrementing message count: {e}")
+            # Don't raise - analytics update failure shouldn't break message sending
     
     async def get_all_sessions(self, limit: int = 30) -> List[Dict]:
         """Get recent sessions from all users."""
@@ -442,38 +625,491 @@ class MongoDBMemoryManager:
             logger.error(f"Error getting shared chat {share_token}: {e}")
             return None
     
-    async def find_session_by_share_token(self, user_id: str, share_token: str) -> Optional[Dict]:
-        """Find if user already has a copy from this share token."""
+    async def insert_message_event(self, user_id: str, session_id: str, user_email: str = None):
+        """
+        Insert a message event for time-based analytics.
+        This is called every time a user sends a message.
+        
+        Args:
+            user_id: User ID (Microsoft GUID)
+            session_id: Session ID
+            user_email: User email (for exclusion filtering)
+        """
+        try:
+            await self.connect()
+            message_events_collection = self.database["message_events"]
+            
+            event_doc = {
+                "user_id": user_id,
+                "session_id": session_id,
+                "created_at": datetime.utcnow()
+            }
+            
+            # Store email if provided (for exclusion filtering)
+            if user_email:
+                event_doc["user_email"] = user_email.lower()
+            
+            await message_events_collection.insert_one(event_doc)
+            
+            logger.info(f"[EVENT] Inserted message event for user {user_id} ({user_email or 'no email'}), session {session_id}")
+            
+        except Exception as e:
+            logger.error(f"Error inserting message event: {e}")
+            # Don't raise - event tracking should not break chat flow
+    
+    async def insert_faq_event(self, user_id: str, question: str, user_email: str = None):
+        """
+        Insert an FAQ event for analytics.
+        This is called when a user asks a question that should be tracked as FAQ.
+        
+        Args:
+            user_id: User ID (Microsoft GUID)
+            question: User's question
+            user_email: User email (for exclusion filtering)
+        """
+        try:
+            await self.connect()
+            import hashlib
+            
+            faq_events_collection = self.database["faq_events"]
+            
+            # Create hash for deduplication (normalized question)
+            question_normalized = question.lower().strip()
+            question_hash = hashlib.sha256(question_normalized.encode()).hexdigest()[:16]
+            
+            event_doc = {
+                "user_id": user_id,
+                "question": question,
+                "question_hash": question_hash,
+                "created_at": datetime.utcnow()
+            }
+            
+            # Store email if provided (for exclusion filtering)
+            if user_email:
+                event_doc["user_email"] = user_email.lower()
+            
+            await faq_events_collection.insert_one(event_doc)
+            
+            logger.info(f"[EVENT] Inserted FAQ event for user {user_id} ({user_email or 'no email'}), question hash {question_hash}")
+            
+        except Exception as e:
+            logger.error(f"Error inserting FAQ event: {e}")
+            # Don't raise - event tracking should not break chat flow
+    
+    async def get_user_statistics(
+        self, 
+        exclude_users: Optional[List[str]] = None
+    ) -> List[Dict]:
+        """
+        Get ALL-TIME user statistics from user_activity collection (single source of truth).
+        This reads pre-calculated lifetime metrics - NO date filtering.
+        
+        Args:
+            exclude_users: Optional list of user emails or names to exclude
+        """
         await self.connect()
         
         try:
-            sessions_collection = self.database["chat_sessions"]
-            doc = await sessions_collection.find_one({
-                "user_id": user_id,
-                "source_share_token": share_token
-            })
+            user_activity_collection = self.database["user_activity"]
             
-            if doc:
-                session = {
-                    "session_id": doc["session_id"],
-                    "title": doc["title"],
-                    "created_at": int(doc["created_at"].timestamp() * 1000),
-                    "updated_at": int(doc["updated_at"].timestamp() * 1000),
-                    "message_count": doc.get("message_count", 0)
-                }
-                
-                # Include messages if they exist
-                if "messages" in doc:
-                    session["messages"] = doc["messages"]
-                
-                logger.info(f"Found existing copy of shared chat for user {user_id}")
-                return session
+            # Query ALL user_activity documents (no date filtering - lifetime stats only)
+            logger.info(f"Querying user_activity (all-time) with exclude_users={exclude_users}")
             
-            return None
+            cursor = user_activity_collection.find({})
+            results = await cursor.to_list(length=None)
+            
+            logger.info(f"Raw user_activity results count: {len(results)}")
+            
+            # Format results and apply user exclusion filter
+            formatted = []
+            exclude_emails_lower = [email.lower() for email in (exclude_users or [])]
+            
+            for doc in results:
+                user_email = doc.get("user_email", "").lower()
+                user_name = doc.get("user_name", "").lower()
+                
+                # Skip excluded users (check both email and name)
+                if exclude_users:
+                    if user_email in exclude_emails_lower or user_name in exclude_emails_lower:
+                        continue
+                    # Also check if any excluded email/name is contained in user_email or user_name
+                    if any(excluded.lower() in user_email or excluded.lower() in user_name for excluded in exclude_users):
+                        continue
+                
+                last_active = doc.get("last_active")
+                if isinstance(last_active, datetime):
+                    last_active = last_active.isoformat()
+                
+                formatted.append({
+                    "user_id": doc.get("user_id", ""),
+                    "user_email": doc.get("user_email", ""),
+                    "user_name": doc.get("user_name", ""),
+                    "total_messages": doc.get("total_messages", 0),
+                    "total_sessions": doc.get("total_sessions", 0),
+                    "avg_messages_per_session": round(doc.get("avg_messages_per_session", 0), 2),
+                    "last_active": last_active
+                })
+            
+            # Sort by total_messages descending
+            formatted.sort(key=lambda x: x.get("total_messages", 0), reverse=True)
+            
+            logger.info(f"Final formatted results count (after exclusion): {len(formatted)}")
+            if formatted:
+                logger.info(f"Top user: {formatted[0].get('user_email', 'N/A')} with {formatted[0].get('total_messages', 0)} messages")
+            
+            return formatted
             
         except Exception as e:
-            logger.error(f"Error finding session by share token: {e}")
-            return None
+            logger.error(f"Error getting user statistics: {e}")
+            return []
+    
+    async def get_rankers_by_date(
+        self,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        exclude_users: Optional[List[str]] = None,
+        limit: int = 100
+    ) -> List[Dict]:
+        """
+        Get user rankers by date range from message_events collection.
+        This provides accurate time-based analytics.
+        
+        Args:
+            start_date: Start date for filtering (inclusive)
+            end_date: End date for filtering (inclusive)
+            exclude_users: Optional list of user emails or names to exclude
+            limit: Maximum number of results to return
+        """
+        await self.connect()
+        
+        try:
+            message_events_collection = self.database["message_events"]
+            
+            # First, check total events count (for debugging)
+            total_events = await message_events_collection.count_documents({})
+            logger.info(f"[RANKERS] Total events in message_events collection: {total_events}")
+            
+            # Build date filter
+            date_filter = {}
+            if start_date or end_date:
+                date_range = {}
+                if start_date:
+                    # Ensure timezone-aware comparison (MongoDB stores UTC)
+                    if start_date.tzinfo is None:
+                        start_date = start_date.replace(tzinfo=timezone.utc)
+                    date_range["$gte"] = start_date
+                    logger.info(f"[RANKERS] Start date filter: {start_date} (UTC)")
+                if end_date:
+                    # Ensure timezone-aware comparison
+                    if end_date.tzinfo is None:
+                        end_date = end_date.replace(tzinfo=timezone.utc)
+                    date_range["$lte"] = end_date
+                    logger.info(f"[RANKERS] End date filter: {end_date} (UTC)")
+                if date_range:
+                    date_filter["created_at"] = date_range
+            
+            # Build exclusion filter (apply BEFORE grouping for correct ranking)
+            exclude_filter = {}
+            if exclude_users:
+                exclude_emails_lower = [email.lower() for email in exclude_users]
+                # Exclude users by email (case-insensitive)
+                exclude_filter["user_email"] = {"$nin": exclude_emails_lower}
+                logger.info(f"[RANKERS] Excluding users in aggregation: {exclude_users}")
+                logger.info(f"[RANKERS] Exclude emails (lowercase): {exclude_emails_lower}")
+            
+            # Combine filters for $match stage
+            match_filter = {}
+            if date_filter:
+                match_filter.update(date_filter)
+            if exclude_filter:
+                match_filter.update(exclude_filter)
+            
+            # Check how many events match the combined filter
+            if match_filter:
+                matching_count = await message_events_collection.count_documents(match_filter)
+                logger.info(f"[RANKERS] Events matching date + exclusion filter: {matching_count}")
+            
+            # Aggregate: EXCLUDE → GROUP → SORT (correct order for analytics)
+            # FIX: Compute sessions dynamically from distinct session_id for date-based views
+            pipeline = [
+                {"$match": match_filter} if match_filter else {"$match": {}},
+                {
+                    "$group": {
+                        "_id": "$user_id",
+                        "message_count": {"$sum": 1},
+                        "sessions": {"$addToSet": "$session_id"},  # Collect unique session_ids
+                        "last_message_at": {"$max": "$created_at"},
+                        "user_email": {"$first": "$user_email"}  # Get email from event if stored
+                    }
+                },
+                {
+                    "$project": {
+                        "message_count": 1,
+                        "sessions": {"$size": "$sessions"},  # Count distinct sessions
+                        "last_message_at": 1,
+                        "user_email": 1
+                    }
+                },
+                {"$sort": {"message_count": -1}},
+                {"$limit": limit}
+            ]
+            
+            results = await message_events_collection.aggregate(pipeline).to_list(length=limit)
+            
+            logger.info(f"Found {len(results)} users in message_events after exclusion + grouping")
+            if results and exclude_users:
+                result_emails = [r.get("user_email", "NO_EMAIL") for r in results]
+                logger.info(f"[RANKERS] Result emails after exclusion: {result_emails}")
+                excluded_in_results = [email for email in exclude_emails_lower if email in [e.lower() if e else "" for e in result_emails]]
+                if excluded_in_results:
+                    logger.warning(f"[RANKERS] ⚠️ WARNING: Excluded emails still in results: {excluded_in_results}")
+            
+            # Get user details from user_activity (but don't skip if not found)
+            # Note: Exclusion already applied in aggregation, but we also check here as a safety net
+            user_activity_collection = self.database["user_activity"]
+            formatted = []
+            exclude_emails_lower_set = set([email.lower() for email in (exclude_users or [])])
+            
+            for doc in results:
+                user_id = doc.get("_id")
+                if not user_id:
+                    continue
+                
+                # Get email from event first (most reliable), then try user_activity, then fallback
+                event_email = doc.get("user_email", "").lower() if doc.get("user_email") else None
+                
+                # Try to get user details from user_activity (for name and other details)
+                user_activity = await user_activity_collection.find_one({"user_id": user_id})
+                
+                # Determine user_email and user_name
+                if event_email:
+                    # Email stored in event - use it (most reliable)
+                    user_email = event_email
+                    user_name = user_activity.get("user_name", "") if user_activity else event_email.split("@")[0]
+                elif user_activity:
+                    # Fallback to user_activity
+                    user_email = user_activity.get("user_email", "").lower() if user_activity.get("user_email") else ""
+                    user_name = user_activity.get("user_name", "")
+                else:
+                    # Last resort: try to extract from user_id (unlikely to work for Microsoft GUIDs)
+                    user_id_str = str(user_id)
+                    if "@" in user_id_str:
+                        user_email = user_id_str.lower()
+                        user_name = user_id_str.split("@")[0]
+                    else:
+                        # Microsoft GUID - can't extract email
+                        user_email = ""
+                        user_name = user_id_str
+                
+                # SAFETY NET: Double-check exclusion (in case email format differs between event and user_activity)
+                if exclude_users and user_email and user_email.lower() in exclude_emails_lower_set:
+                    logger.warning(f"[RANKERS] Filtering out excluded user in formatting step: {user_email}")
+                    continue
+                
+                last_message_at = doc.get("last_message_at")
+                if isinstance(last_message_at, datetime):
+                    last_message_at = last_message_at.isoformat()
+                
+                # Get sessions count from aggregation (date-based, computed from distinct session_ids)
+                sessions_count = doc.get("sessions", 0)
+                
+                formatted.append({
+                    "user_id": user_id,
+                    "user_email": user_email or (user_activity.get("user_email", "") if user_activity else ""),
+                    "user_name": user_name or (user_activity.get("user_name", "") if user_activity else str(user_id)),
+                    "total_messages": doc.get("message_count", 0),
+                    "sessions": sessions_count,  # Date-based sessions (distinct session_ids)
+                    "last_active": last_message_at
+                })
+            
+            logger.info(f"Rankers by date: {len(formatted)} users (start_date={start_date}, end_date={end_date})")
+            return formatted
+            
+        except Exception as e:
+            logger.error(f"Error getting rankers by date: {e}")
+            return []
+    
+    async def get_faqs_by_date(
+        self,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        limit: int = 50
+    ) -> List[Dict]:
+        """
+        Get most frequently asked questions by date range from faq_events collection.
+        
+        Args:
+            start_date: Start date for filtering (inclusive)
+            end_date: End date for filtering (inclusive)
+            limit: Maximum number of results to return
+        """
+        await self.connect()
+        
+        try:
+            faq_events_collection = self.database["faq_events"]
+            
+            # Build date filter
+            date_filter = {}
+            if start_date or end_date:
+                date_range = {}
+                if start_date:
+                    date_range["$gte"] = start_date
+                if end_date:
+                    date_range["$lte"] = end_date
+                if date_range:
+                    date_filter["created_at"] = date_range
+            
+            # Aggregate: group by question_hash, count occurrences
+            pipeline = [
+                {"$match": date_filter} if date_filter else {"$match": {}},
+                {
+                    "$group": {
+                        "_id": "$question_hash",
+                        "question": {"$first": "$question"},
+                        "count": {"$sum": 1},
+                        "last_asked": {"$max": "$created_at"}
+                    }
+                },
+                {"$sort": {"count": -1, "last_asked": -1}},
+                {"$limit": limit}
+            ]
+            
+            results = await faq_events_collection.aggregate(pipeline).to_list(length=limit)
+            
+            formatted = []
+            for doc in results:
+                last_asked = doc.get("last_asked")
+                if isinstance(last_asked, datetime):
+                    last_asked = last_asked.isoformat()
+                
+                formatted.append({
+                    "question": doc.get("question", ""),
+                    "count": doc.get("count", 0),
+                    "last_asked": last_asked
+                })
+            
+            logger.info(f"FAQs by date: {len(formatted)} questions (start_date={start_date}, end_date={end_date})")
+            return formatted
+            
+        except Exception as e:
+            logger.error(f"Error getting FAQs by date: {e}")
+            return []
+    
+    async def mark_session_ended(self, user_id: str, session_id: str):
+        """
+        Mark a session as ended in user_activity collection.
+        This should be called when a session is explicitly closed or times out.
+        """
+        try:
+            await self.connect()
+            user_activity_collection = self.database["user_activity"]
+            now = datetime.utcnow()
+            
+            # Find user activity
+            user_activity = await user_activity_collection.find_one({"user_id": user_id})
+            
+            if user_activity:
+                sessions = user_activity.get("sessions", [])
+                
+                # Find and update the session
+                for s in sessions:
+                    if s.get("session_id") == session_id and s.get("ended_at") is None:
+                        s["ended_at"] = now
+                        break
+                
+                # Recalculate totals (only count completed sessions)
+                completed_sessions = [s for s in sessions if s.get("ended_at") is not None]
+                total_messages = sum(s.get("message_count", 0) for s in sessions)
+                total_sessions = len(completed_sessions)
+                avg_messages = total_messages / total_sessions if total_sessions > 0 else 0
+                
+                await user_activity_collection.update_one(
+                    {"user_id": user_id},
+                    {
+                        "$set": {
+                            "sessions": sessions,
+                            "total_sessions": total_sessions,
+                            "avg_messages_per_session": round(avg_messages, 2)
+                        }
+                    }
+                )
+                
+                logger.info(f"Marked session {session_id} as ended for user {user_id}")
+            
+        except Exception as e:
+            logger.error(f"Error marking session as ended: {e}")
+    
+    async def migrate_existing_data_to_user_activity(self):
+        """
+        Migration helper: Backfill user_activity collection from existing chat_sessions.
+        This should be run once to migrate existing data.
+        """
+        try:
+            await self.connect()
+            sessions_collection = self.database["chat_sessions"]
+            user_activity_collection = self.database["user_activity"]
+            
+            logger.info("Starting migration: chat_sessions -> user_activity")
+            
+            # Get all sessions
+            all_sessions = await sessions_collection.find({}).to_list(length=None)
+            
+            # Group by user_id
+            user_sessions_map = {}
+            for session in all_sessions:
+                user_id = session.get("user_id")
+                if not user_id:
+                    continue
+                
+                if user_id not in user_sessions_map:
+                    user_sessions_map[user_id] = {
+                        "user_id": user_id,
+                        "user_email": session.get("user_email", ""),
+                        "user_name": session.get("user_name", ""),
+                        "sessions": [],
+                        "total_messages": 0,
+                        "total_sessions": 0,
+                        "last_active": session.get("updated_at") or session.get("created_at"),
+                        "created_at": session.get("created_at")
+                    }
+                
+                # Count user messages in this session
+                messages = session.get("messages", [])
+                user_message_count = sum(1 for msg in messages if msg.get("role") == "user")
+                
+                user_sessions_map[user_id]["sessions"].append({
+                    "session_id": session.get("session_id"),
+                    "started_at": session.get("created_at"),
+                    "ended_at": session.get("updated_at"),  # Assume ended if updated_at exists
+                    "message_count": user_message_count
+                })
+                user_sessions_map[user_id]["total_messages"] += user_message_count
+            
+            # Calculate totals and upsert user_activity documents
+            migrated_count = 0
+            for user_id, activity_data in user_sessions_map.items():
+                # Calculate totals
+                completed_sessions = [s for s in activity_data["sessions"] if s.get("ended_at") is not None]
+                activity_data["total_sessions"] = len(completed_sessions)
+                activity_data["avg_messages_per_session"] = (
+                    activity_data["total_messages"] / activity_data["total_sessions"]
+                    if activity_data["total_sessions"] > 0 else 0
+                )
+                
+                # Upsert user activity
+                await user_activity_collection.update_one(
+                    {"user_id": user_id},
+                    {"$set": activity_data},
+                    upsert=True
+                )
+                migrated_count += 1
+            
+            logger.info(f"Migration complete: {migrated_count} users migrated to user_activity")
+            return {"migrated_users": migrated_count, "total_sessions": len(all_sessions)}
+            
+        except Exception as e:
+            logger.error(f"Error migrating data: {e}")
+            raise e
 
 # Global instance
 mongodb_memory = MongoDBMemoryManager()
@@ -537,6 +1173,33 @@ async def get_shared_chat(share_token: str) -> Optional[Dict]:
     """Get shared chat information by token."""
     return await mongodb_memory.get_shared_chat(share_token)
 
-async def find_session_by_share_token(user_id: str, share_token: str) -> Optional[Dict]:
-    """Find if user already has a copy from this share token."""
-    return await mongodb_memory.find_session_by_share_token(user_id, share_token)
+async def get_user_statistics(
+    exclude_users: Optional[List[str]] = None
+) -> List[Dict]:
+    """Get ALL-TIME user statistics from user_activity collection (single source of truth)."""
+    return await mongodb_memory.get_user_statistics(exclude_users=exclude_users)
+
+async def get_rankers_by_date(
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    exclude_users: Optional[List[str]] = None,
+    limit: int = 100
+) -> List[Dict]:
+    """Get user rankers by date range from message_events collection."""
+    return await mongodb_memory.get_rankers_by_date(start_date, end_date, exclude_users, limit)
+
+async def get_faqs_by_date(
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    limit: int = 50
+) -> List[Dict]:
+    """Get most frequently asked questions by date range from faq_events collection."""
+    return await mongodb_memory.get_faqs_by_date(start_date, end_date, limit)
+
+async def mark_session_ended(user_id: str, session_id: str):
+    """Mark a session as ended in user_activity collection."""
+    return await mongodb_memory.mark_session_ended(user_id, session_id)
+
+async def migrate_existing_data_to_user_activity():
+    """Migration helper: Backfill user_activity collection from existing chat_sessions."""
+    return await mongodb_memory.migrate_existing_data_to_user_activity()

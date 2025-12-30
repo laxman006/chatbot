@@ -31,6 +31,18 @@ ADMIN_EMAILS: Set[str] = {
     "nirosh.reddy@cloudfuze.com"
 }
 
+# Developer emails to exclude from dashboard statistics
+# Can be overridden via EXCLUDED_DEVELOPER_EMAILS environment variable (comma-separated)
+import os
+_excluded_devs_env = os.getenv("EXCLUDED_DEVELOPER_EMAILS", "")
+if _excluded_devs_env:
+    EXCLUDED_DEVELOPER_EMAILS: Set[str] = {
+        email.strip().lower() for email in _excluded_devs_env.split(",") if email.strip()
+    }
+else:
+    # Default to admin emails if not specified
+    EXCLUDED_DEVELOPER_EMAILS: Set[str] = ADMIN_EMAILS.copy()
+
 
 def _normalize_email(email: str) -> str:
     """Normalize email for case-insensitive comparisons."""

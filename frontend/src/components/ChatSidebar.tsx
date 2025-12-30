@@ -34,6 +34,7 @@ export default function ChatSidebar({
   const [user, setUser] = useState<User | null>(null);
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [showLogoutModal, setShowLogoutModal] = useState<boolean>(false);
+  const [adminSubmenuOpen, setAdminSubmenuOpen] = useState<boolean>(false);
   const hasRenderedHistoryRef = useRef(false);
 
   useEffect(() => {
@@ -428,6 +429,25 @@ export default function ChatSidebar({
     renderSessionHistory(!hasRenderedHistoryRef.current);
   }, [renderSessionHistory]);
 
+  // Close submenu when dropdown closes
+  useEffect(() => {
+    const dropdown = document.getElementById('userDropdown');
+    if (!dropdown) return;
+
+    const observer = new MutationObserver(() => {
+      if (!dropdown.classList.contains('show')) {
+        setAdminSubmenuOpen(false);
+      }
+    });
+
+    observer.observe(dropdown, {
+      attributes: true,
+      attributeFilter: ['class']
+    });
+
+    return () => observer.disconnect();
+  }, []);
+
   // Show logout confirmation modal
   const handleLogoutClick = () => {
     setShowLogoutModal(true);
@@ -489,6 +509,7 @@ export default function ChatSidebar({
         // Don't close if clicking inside userMenu or dropdown
         if (!userMenu.contains(target) && !dropdown.contains(target)) {
           dropdown.classList.remove('show');
+          setAdminSubmenuOpen(false);
         }
       }
     };
@@ -671,42 +692,93 @@ export default function ChatSidebar({
             <span className="user-email-small" id="userEmailSidebar">{user?.email || ''}</span>
           </div>
           <div className="user-dropdown-sidebar" id="userDropdown">
-            {isAdmin && (
-              <div className="dropdown-section">
-                <div className="dropdown-section-title">ADMIN</div>
-                <div className="dropdown-item admin-item" onClick={() => {
-                  router.push('/admin/teams');
-                  const dropdown = document.getElementById('userDropdown');
-                  if (dropdown) dropdown.classList.remove('show');
-                }}>
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm9 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
-                  </svg>
-                  <span>Team Analytics</span>
-                </div>
-                <div className="dropdown-item admin-item" onClick={() => {
-                  router.push('/admin/analytics');
-                  const dropdown = document.getElementById('userDropdown');
-                  if (dropdown) dropdown.classList.remove('show');
-                }}>
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                    <path d="M3 3v18h18M3 15l4-4 3 3 5-5 6 6M9 7h6M9 7v2" />
-                  </svg>
-                  <span>Langfuse Analytics</span>
-                </div>
-                <div className="dropdown-item admin-item" onClick={() => {
-                  router.push('/admin/top-questions');
-                  const dropdown = document.getElementById('userDropdown');
-                  if (dropdown) dropdown.classList.remove('show');
-                }}>
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                    <path d="M3 13h2v-2H3v2Zm4 0h2v-2H7v2Zm4 0h2v-2h-2v2Zm4 0h2v-2h-2v2Zm4 0h2v-2h-2v2ZM5 21h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2-3h-4l-2 3H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2Z" />
-                  </svg>
-                  <span>Most Asked Questions</span>
-                </div>
-              </div>
-            )}
             <div className="dropdown-item" id="userEmail">{user?.email || ''}</div>
+            {isAdmin && (
+              <>
+                <div 
+                  className="dropdown-item admin-parent" 
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setAdminSubmenuOpen(!adminSubmenuOpen);
+                  }}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                    <rect x="3" y="3" width="18" height="18" rx="2" />
+                    <path d="M3 9h18M9 21V9" />
+                  </svg>
+                  <span>Admin</span>
+                  <svg 
+                    width="16" 
+                    height="16" 
+                    viewBox="0 0 24 24" 
+                    fill="none" 
+                    stroke="currentColor" 
+                    strokeWidth="2"
+                    style={{ 
+                      marginLeft: 'auto',
+                      transform: adminSubmenuOpen ? 'rotate(90deg)' : 'rotate(0deg)',
+                      transition: 'transform 0.2s ease'
+                    }}
+                  >
+                    <path d="M9 18l6-6-6-6" />
+                  </svg>
+                </div>
+                {adminSubmenuOpen && (
+                  <div className="admin-submenu" onClick={(e) => e.stopPropagation()}>
+                    <div className="dropdown-item admin-item" onClick={(e) => {
+                      e.stopPropagation();
+                      router.push('/admin/teams');
+                      const dropdown = document.getElementById('userDropdown');
+                      if (dropdown) dropdown.classList.remove('show');
+                      setAdminSubmenuOpen(false);
+                    }}>
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm9 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
+                      </svg>
+                      <span>Team Analytics</span>
+                    </div>
+                    <div className="dropdown-item admin-item" onClick={(e) => {
+                      e.stopPropagation();
+                      router.push('/admin/teams-dashboard');
+                      const dropdown = document.getElementById('userDropdown');
+                      if (dropdown) dropdown.classList.remove('show');
+                      setAdminSubmenuOpen(false);
+                    }}>
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                        <path d="M3 3h18v18H3V3zm2 2v14h14V5H5zm2 2h10v2H7V7zm0 4h10v2H7v-2zm0 4h7v2H7v-2z" />
+                      </svg>
+                      <span>Team Leaderboard</span>
+                    </div>
+                    <div className="dropdown-item admin-item" onClick={(e) => {
+                      e.stopPropagation();
+                      router.push('/admin/analytics');
+                      const dropdown = document.getElementById('userDropdown');
+                      if (dropdown) dropdown.classList.remove('show');
+                      setAdminSubmenuOpen(false);
+                    }}>
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                        <path d="M3 3v18h18M3 15l4-4 3 3 5-5 6 6M9 7h6M9 7v2" />
+                      </svg>
+                      <span>Langfuse Analytics</span>
+                    </div>
+                    <div className="dropdown-item admin-item" onClick={(e) => {
+                      e.stopPropagation();
+                      router.push('/admin/top-questions');
+                      const dropdown = document.getElementById('userDropdown');
+                      if (dropdown) dropdown.classList.remove('show');
+                      setAdminSubmenuOpen(false);
+                    }}>
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                        <path d="M3 13h2v-2H3v2Zm4 0h2v-2H7v2Zm4 0h2v-2h-2v2Zm4 0h2v-2h-2v2Zm4 0h2v-2h-2v2ZM5 21h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2-3h-4l-2 3H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2Z" />
+                      </svg>
+                      <span>Most Asked Questions</span>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
             <div className="dropdown-item logout" onClick={handleLogoutClick}>
               <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                 <path d="M3.50171 12.6663V7.33333C3.50171 6.64424 3.50106 6.08728 3.53784 5.63704C3.57525 5.17925 3.65463 4.77342 3.84644 4.39681L3.96851 4.17806C4.2726 3.68235 4.70919 3.2785 5.23023 3.01302L5.3728 2.94661C5.7091 2.80238 6.06981 2.73717 6.47046 2.70443C6.9207 2.66764 7.47766 2.66829 8.16675 2.66829H9.16675L9.30054 2.68197C9.60367 2.7439 9.83179 3.0119 9.83179 3.33333C9.83179 3.65476 9.60367 3.92277 9.30054 3.9847L9.16675 3.99837H8.16675C7.45571 3.99837 6.96238 3.99926 6.57886 4.0306C6.297 4.05363 6.10737 4.09049 5.96362 4.14193L5.83374 4.19857C5.53148 4.35259 5.27861 4.58671 5.1023 4.87435L5.03198 5.00032C4.95147 5.15833 4.89472 5.36974 4.86401 5.74544C4.83268 6.12896 4.83179 6.6223 4.83179 7.33333V12.6663C4.83179 13.3772 4.8327 13.8707 4.86401 14.2542C4.8947 14.6298 4.95153 14.8414 5.03198 14.9993L5.1023 15.1263C5.27861 15.4137 5.53163 15.6482 5.83374 15.8021L5.96362 15.8577C6.1074 15.9092 6.29691 15.947 6.57886 15.9701C6.96238 16.0014 7.45571 16.0013 8.16675 16.0013H9.16675L9.30054 16.015C9.6036 16.0769 9.83163 16.345 9.83179 16.6663C9.83179 16.9877 9.60363 17.2558 9.30054 17.3177L9.16675 17.3314H8.16675C7.47766 17.3314 6.9207 17.332 6.47046 17.2952C6.06978 17.2625 5.70912 17.1973 5.3728 17.0531L5.23023 16.9867C4.70911 16.7211 4.27261 16.3174 3.96851 15.8216L3.84644 15.6038C3.65447 15.2271 3.57526 14.8206 3.53784 14.3626C3.50107 13.9124 3.50171 13.3553 3.50171 12.6663ZM13.8035 13.804C13.5438 14.0634 13.1226 14.0635 12.863 13.804C12.6033 13.5443 12.6033 13.1223 12.863 12.8626L13.8035 13.804ZM12.863 6.19661C13.0903 5.96939 13.4409 5.94126 13.699 6.11165L13.8035 6.19661L17.1375 9.52962C17.3969 9.78923 17.3968 10.2104 17.1375 10.4701L13.8035 13.804L13.3337 13.3333L12.863 12.8626L15.0603 10.6654H9.16675C8.79959 10.6654 8.50189 10.3674 8.50171 10.0003C8.50171 9.63306 8.79948 9.33529 9.16675 9.33529H15.0613L12.863 7.13704L12.7781 7.03255C12.6077 6.77449 12.6359 6.42386 12.863 6.19661Z" />
