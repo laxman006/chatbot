@@ -11,18 +11,29 @@ function buildBackendUrl(token: string) {
 }
 
 // Helper function to get CORS headers
-function getCorsHeaders(origin: string | null) {
+function getCorsHeaders(origin: string | null, request?: NextRequest) {
   const allowedOrigins = [
     'http://localhost:3000',
     'http://127.0.0.1:3000',
     'https://ai.cloudfuze.com',
   ];
 
-  const originHeader = origin || '';
+  // If no origin header (same-origin request), use the request URL's origin
+  let originHeader = origin;
+  if (!originHeader && request) {
+    const url = new URL(request.url);
+    originHeader = `${url.protocol}//${url.host}`;
+  }
+
+  // Default to production origin if still no origin
+  if (!originHeader) {
+    originHeader = 'https://ai.cloudfuze.com';
+  }
+
   const isAllowedOrigin = allowedOrigins.includes(originHeader);
 
   return {
-    'Access-Control-Allow-Origin': isAllowedOrigin ? originHeader : allowedOrigins[0],
+    'Access-Control-Allow-Origin': isAllowedOrigin ? originHeader : allowedOrigins[allowedOrigins.length - 1], // Use production origin as fallback
     'Access-Control-Allow-Methods': 'GET, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Accept, Cookie, Authorization',
     'Access-Control-Allow-Credentials': 'true',
@@ -61,7 +72,7 @@ async function proxySharedChatRequest(token: string, request: NextRequest) {
     // Build response headers with CORS
     const responseHeaders = new Headers({
       'Content-Type': backendResponse.headers.get('content-type') || 'application/json',
-      ...getCorsHeaders(origin),
+      ...getCorsHeaders(origin, request),
     });
 
     // Forward CORS headers from backend if present
@@ -97,7 +108,7 @@ export async function OPTIONS(
   
   return new NextResponse(null, {
     status: 204,
-    headers: getCorsHeaders(origin),
+    headers: getCorsHeaders(origin, request),
   });
 }
 
@@ -114,7 +125,7 @@ export async function GET(
       { error: 'Missing share token' },
       { 
         status: 400,
-        headers: getCorsHeaders(origin),
+        headers: getCorsHeaders(origin, request),
       }
     );
   }
@@ -128,7 +139,7 @@ export async function GET(
       { error: 'Failed to proxy shared chat request' },
       { 
         status: 502,
-        headers: getCorsHeaders(origin),
+        headers: getCorsHeaders(origin, request),
       }
     );
   }
