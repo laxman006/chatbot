@@ -210,6 +210,10 @@ LANGFUSE_HOST = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
 if not LANGFUSE_PUBLIC_KEY or not LANGFUSE_SECRET_KEY:
     raise ValueError("LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY environment variables are required")
 
+# Conversational Memory Configuration
+ENABLE_SEMANTIC_SIMILARITY_CHECK = os.getenv("ENABLE_SEMANTIC_SIMILARITY_CHECK", "true").lower() == "true"
+CONTEXT_SIMILARITY_THRESHOLD = float(os.getenv("CONTEXT_SIMILARITY_THRESHOLD", "0.65"))
+
 CHROMA_DB_PATH = "./data/chroma_db"
 
 # JSON Memory Storage Configuration

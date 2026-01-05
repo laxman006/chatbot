@@ -162,55 +162,124 @@ class MongoDBMemoryManager:
             logger.error(f"Error getting/creating conversation for user {user_id}: {e}")
             return []
     
-    async def add_to_conversation(self, user_id: str, role: str, content: str):
-        """Add a message to the user's conversation history."""
+    async def add_to_conversation(self, conversation_id: str, role: str, content: str):
+        """
+        Add a message to a specific conversation session.
+        
+        CRITICAL: Uses conversation_id (session_id) to ensure session-scoped writes.
+        This prevents cross-chat leakage.
+        """
         await self.connect()
         
         try:
-            # Get current conversation
-            conversation = await self.get_or_create_user_conversation(user_id)
+            sessions_collection = self.database["chat_sessions"]
             
-            # Add new message
+            # Get current session
+            session_doc = await sessions_collection.find_one({"session_id": conversation_id})
+            
+            # Create new message
             new_message = {
                 "role": role,
                 "content": content,
                 "timestamp": datetime.utcnow()
             }
-            conversation.append(new_message)
             
-            # Keep only last 20 messages to prevent context overflow
-            if len(conversation) > 20:
-                conversation = conversation[-20:]
-            
-            # Update in database
-            await self.collection.update_one(
-                {"user_id": user_id},
-                {
-                    "$set": {
-                        "messages": conversation,
-                        "last_updated": datetime.utcnow()
+            if session_doc:
+                # Session exists - append message
+                messages = session_doc.get("messages", [])
+                messages.append(new_message)
+                
+                # Keep only last 20 messages to prevent context overflow
+                if len(messages) > 20:
+                    messages = messages[-20:]
+                
+                # Update session with new message
+                await sessions_collection.update_one(
+                    {"session_id": conversation_id},
+                    {
+                        "$set": {
+                            "messages": messages,
+                            "updated_at": datetime.utcnow(),
+                            "message_count": len(messages)
+                        }
                     }
-                },
-                upsert=True
-            )
+                )
+            else:
+                # Session doesn't exist - this shouldn't happen, but create it
+                logger.warning(f"Session {conversation_id} not found when adding message. Creating new session.")
+                await sessions_collection.insert_one({
+                    "session_id": conversation_id,
+                    "messages": [new_message],
+                    "created_at": datetime.utcnow(),
+                    "updated_at": datetime.utcnow(),
+                    "message_count": 1
+                })
             
         except Exception as e:
-            logger.error(f"Error adding message to conversation for user {user_id}: {e}")
+            logger.error(f"Error adding message to conversation {conversation_id}: {e}")
     
-    async def get_conversation_context(self, user_id: str) -> str:
-        """Get formatted conversation context for a user (legacy method)."""
-        conversation = await self.get_or_create_user_conversation(user_id)
+    async def get_conversation_context(self, conversation_id: str) -> str:
+        """
+        Get formatted conversation context for a specific conversation session.
         
-        if not conversation:
+        CRITICAL: Uses conversation_id (session_id) to ensure session-scoped context.
+        This prevents cross-chat leakage.
+        """
+        await self.connect()
+        
+        try:
+            sessions_collection = self.database["chat_sessions"]
+            session_doc = await sessions_collection.find_one({"session_id": conversation_id})
+            
+            if not session_doc or "messages" not in session_doc:
+                return ""
+            
+            messages = session_doc["messages"]
+            if not messages:
+                return ""
+            
+            context = "\n\nPrevious conversation:\n"
+            # Get last 5 messages for context
+            for msg in messages[-5:]:
+                role = "User" if msg.get("role") == "user" else "Assistant"
+                context += f"{role}: {msg.get('content', '')}\n"
+            
+            return context
+            
+        except Exception as e:
+            logger.error(f"Error getting conversation context for {conversation_id}: {e}")
             return ""
+    
+    async def get_last_assistant_message(self, conversation_id: str) -> Optional[str]:
+        """
+        Get the last assistant message from conversation history for a specific session.
         
-        context = "\n\nPrevious conversation:\n"
-        # Get last 5 messages for context
-        for msg in conversation[-5:]:
-            role = "User" if msg["role"] == "user" else "Assistant"
-            context += f"{role}: {msg['content']}\n"
+        CRITICAL: Uses conversation_id (session_id) to ensure session-scoped retrieval.
+        Used for topic continuity checking via semantic similarity.
+        """
+        await self.connect()
         
-        return context
+        try:
+            sessions_collection = self.database["chat_sessions"]
+            session_doc = await sessions_collection.find_one({"session_id": conversation_id})
+            
+            if not session_doc or "messages" not in session_doc:
+                return None
+            
+            messages = session_doc["messages"]
+            if not messages:
+                return None
+            
+            # Find last assistant message (iterate backwards)
+            for msg in reversed(messages):
+                if msg.get("role") == "assistant":
+                    return msg.get("content", "")
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error getting last assistant message for {conversation_id}: {e}")
+            return None
     
     async def get_user_chat_history(self, user_id: str) -> List[Dict[str, str]]:
         """Get full chat history for a user."""
@@ -1237,13 +1306,21 @@ async def get_or_create_user_conversation(user_id: str) -> List[Dict[str, str]]:
     """Get or create a conversation for a specific user."""
     return await mongodb_memory.get_or_create_user_conversation(user_id)
 
-async def add_to_conversation(user_id: str, role: str, content: str):
-    """Add a message to the user's conversation history."""
-    await mongodb_memory.add_to_conversation(user_id, role, content)
+async def add_to_conversation(conversation_id: str, role: str, content: str):
+    """
+    Add a message to a specific conversation session.
+    
+    CRITICAL: Uses conversation_id (session_id) to ensure session-scoped writes.
+    """
+    await mongodb_memory.add_to_conversation(conversation_id, role, content)
 
-async def get_conversation_context(user_id: str) -> str:
-    """Get formatted conversation context for a user (legacy method)."""
-    return await mongodb_memory.get_conversation_context(user_id)
+async def get_conversation_context(conversation_id: str) -> str:
+    """
+    Get formatted conversation context for a specific conversation session.
+    
+    CRITICAL: Uses conversation_id (session_id) to ensure session-scoped context.
+    """
+    return await mongodb_memory.get_conversation_context(conversation_id)
 
 async def get_user_chat_history(user_id: str) -> List[Dict[str, str]]:
     """Get full chat history for a user."""

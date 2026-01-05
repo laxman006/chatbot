@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Request, HTTPException, Header, Depends, Query, Path, status
 from fastapi.responses import PlainTextResponse, StreamingResponse, JSONResponse
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Tuple
 import uuid
 import httpx
 import os
@@ -861,6 +861,303 @@ def is_conversational_query(question: str) -> bool:
     
     return False
 
+def normalize_user_input(question: str) -> str:
+    """
+    Normalize user input for consistent matching.
+    Removes extra whitespace, trailing punctuation, and converts to lowercase.
+    """
+    import re
+    # Remove trailing punctuation (?, !, .) but keep internal punctuation
+    q = question.strip()
+    q = re.sub(r'[?!.]+$', '', q)
+    # Normalize whitespace
+    q = re.sub(r'\s+', ' ', q)
+    return q.lower().strip()
+
+def is_continuation_intent(question: str) -> bool:
+    """
+    Gate 0: Detect continuation intent for dialogue acts.
+    
+    These are NOT semantic questions - they are dialogue acts that mean
+    "continue/expand on the previous topic" without semantic content.
+    
+    Continuation commands can be single-word OR multi-word phrases.
+    
+    Examples: "more", "explain more", "tell me more", "continue", "elaborate"
+    
+    Returns True if this is a continuation intent, False otherwise.
+    """
+    q = normalize_user_input(question)
+    
+    # Multi-word continuation phrases (MUST come first to catch "explain more" before keyword matching)
+    CONTINUATION_PHRASES = {
+        "more",
+        "explain more",
+        "tell me more",
+        "elaborate",
+        "elaborate more",
+        "expand",
+        "expand more",
+        "go on",
+        "continue",
+        "explain further",
+        "give more details",
+        "add more details",
+        "more details",
+        "more info",
+        "more information",
+        "yes",
+        "yeah",
+        "ok",
+        "okay",
+        "what else",
+        "and",
+        "also"
+    }
+    
+    # Check if normalized input matches any continuation phrase
+    if q in CONTINUATION_PHRASES:
+        print(f"[CONTEXT] Gate 0: Continuation intent detected - '{question}' (normalized: '{q}')")
+        return True
+    
+    return False
+
+def is_follow_up_question(question: str) -> bool:
+    """
+    Gate 1: Detect if a question is a follow-up that explicitly depends on prior context.
+    Uses keyword heuristics to catch 80-90% of conversational dependencies.
+    
+    Returns True if question is a follow-up, False otherwise.
+    
+    ⚠️ CRITICAL: This function MUST receive the RAW user input, not enhanced_query.
+    """
+    import re
+    # Normalize whitespace and ensure clean string matching
+    question_lower = re.sub(r"\s+", " ", question.lower()).strip()
+    
+    # Follow-up keywords and patterns (ordered by specificity - longer phrases first)
+    FOLLOW_UP_KEYWORDS = [
+        "explain briefly", "explain more", "explain it", "explain that",
+        "tell me more", "what about", "how about",
+        "can you elaborate", "can you explain",
+        "same thing", "as you said", "earlier", "before",
+        "you mentioned", "you said", "according to you",
+        "in that", "for that", "about that",
+        "the same", "similar", "also",
+        "what else", "anything else", "more details",
+        "go on", "continue",
+        "how does it", "why does it", "when does it",
+        "which one", "which of those"
+    ]
+    
+    # Debug: log the question being checked
+    print(f"[CONTEXT] Gate 1: Checking question '{question}' (lowercase: '{question_lower}')")
+    
+    # Check for follow-up keywords (longer phrases first to avoid partial matches)
+    # ✅ HARDENED: Use word-boundary matching to avoid partial token matches
+    for keyword in FOLLOW_UP_KEYWORDS:
+        # Use space-padding to ensure whole-word matching
+        if f" {keyword} " in f" {question_lower} " or question_lower.startswith(f"{keyword} ") or question_lower.endswith(f" {keyword}"):
+            print(f"[CONTEXT] Gate 1: Matched keyword '{keyword}'")
+            return True
+    
+    # Check for pronouns (after checking phrases to avoid false positives)
+    if any(word in question_lower for word in ["it", "that", "this", "those", "these", "they", "them"]):
+        # Only match if question is short or contains these pronouns
+        words = question.split()
+        if len(words) <= 5:  # Short questions with pronouns are likely follow-ups
+            return True
+    
+    # Check for very short questions with pronouns (likely follow-ups)
+    words = question.split()
+    if len(words) <= 3:
+        if any(word in question_lower for word in ["it", "that", "this", "they", "them"]):
+            return True
+    
+    return False
+
+def _word_overlap_similarity(text1: str, text2: str) -> float:
+    """Fallback similarity using word overlap (Jaccard similarity)."""
+    words1 = set(text1.lower().split())
+    words2 = set(text2.lower().split())
+    
+    if not words1 or not words2:
+        return 0.0
+    
+    intersection = words1.intersection(words2)
+    union = words1.union(words2)
+    
+    return len(intersection) / len(union) if union else 0.0
+
+def calculate_semantic_similarity(text1: str, text2: str) -> float:
+    """
+    Gate 2: Calculate semantic similarity between two texts using embeddings.
+    Returns similarity score between 0 and 1. Higher score = more similar.
+    
+    Uses OpenAI embeddings (same as vectorstore) for consistency.
+    Falls back to word overlap if embeddings unavailable.
+    """
+    try:
+        from langchain_openai import OpenAIEmbeddings
+        from config import OPENAI_API_KEY
+        
+        if not OPENAI_API_KEY:
+            # Fallback to word overlap
+            return _word_overlap_similarity(text1, text2)
+        
+        # Use OpenAI embeddings (same model as vectorstore)
+        embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+        
+        # Get embeddings
+        emb1 = embeddings.embed_query(text1)
+        emb2 = embeddings.embed_query(text2)
+        
+        # Calculate cosine similarity
+        import numpy as np
+        dot_product = np.dot(emb1, emb2)
+        norm1 = np.linalg.norm(emb1)
+        norm2 = np.linalg.norm(emb2)
+        
+        if norm1 == 0 or norm2 == 0:
+            return 0.0
+        
+        similarity = dot_product / (norm1 * norm2)
+        return float(similarity)
+        
+    except Exception as e:
+        print(f"[CONTEXT] Semantic similarity calculation failed: {e}, using word overlap")
+        return _word_overlap_similarity(text1, text2)
+
+async def should_use_conversation_context(
+    question: str, 
+    conversation_id: str
+) -> Tuple[str, str]:
+    """
+    Four-Gate System: Decide if conversation context should be used.
+    
+    This is the SINGLE SOURCE OF TRUTH for context injection decisions.
+    
+    Decision Logic:
+    0. Gate 0: Continuation intent (dialogue acts like "more", "continue") → USE context, SKIP RAG
+    1. Gate 1: Explicit follow-up keywords → USE context, ALLOW RAG
+    2. Gate 2: Semantic similarity >= threshold → USE context, ALLOW RAG
+    3. Gate 3: Otherwise → DROP context (new topic)
+    
+    Returns:
+        (mode: str, conversation_context: str)
+        
+    Modes:
+        - "continuation": Continuation intent detected - SKIP RAG, expand previous answer
+        - "followup": Explicit follow-up question - ALLOW RAG
+        - "topic": Same topic detected - ALLOW RAG
+        - "new": New topic - no context
+    """
+    # 🚨 CRITICAL: Debug logs at the very top to confirm function is called
+    print(f"[CONTEXT] should_use_conversation_context CALLED")
+    print(f"[CONTEXT] conversation_id={conversation_id}")
+    print(f"[CONTEXT] Raw question repr: {repr(question)}")
+    print(f"[CONTEXT] Question type: {type(question)}")
+    print(f"[CONTEXT] Question length: {len(question) if isinstance(question, str) else 'N/A'}")
+    
+    # 🔴 HARD SCOPE GUARD: Reject user_id/email being passed as conversation_id
+    if conversation_id and "@" in str(conversation_id):
+        print(f"[CONTEXT] ❌ INVALID conversation_id (user_id/email passed): {conversation_id}")
+        print(f"[CONTEXT] conversation_id must be a chat session ID (e.g., cf.conversation.20251231.abcd1234)")
+        return ("new", "")
+    
+    # Assert question is a string and is the RAW user input (not enhanced_query)
+    assert isinstance(question, str), f"Gate 0 received non-string question: {type(question)}"
+    # Ensure we're not accidentally passing enhanced_query (should not contain "Previous conversation")
+    if "Previous conversation" in question or "\n\nCurrent question:" in question:
+        print(f"[CONTEXT] ⚠️ WARNING: Question appears to be enhanced_query, not raw input!")
+        print(f"[CONTEXT] This will cause gates to fail. Ensure you pass raw 'question' variable.")
+    
+    # Normalize input for consistent matching
+    normalized_q = normalize_user_input(question)
+    print(f"[CONTEXT] Normalized question: '{normalized_q}'")
+    
+    from config import ENABLE_SEMANTIC_SIMILARITY_CHECK, CONTEXT_SIMILARITY_THRESHOLD
+    
+    # 🔴 HARD OVERRIDE: Gate 0 - Continuation intent detection (CRITICAL)
+    # This MUST override everything - continuation commands skip RAG entirely
+    if is_continuation_intent(question):
+        print(f"[CONTEXT] ✓ CONTINUATION MODE: '{question}' - SKIP RAG")
+        print(f"[CONTEXT] Fetching context for conversation_id={conversation_id}")
+        context = await get_conversation_context(conversation_id)
+        
+        # 🔴 HARD SCOPE GUARD: Verify session exists for this conversation_id
+        # This prevents cross-chat leakage even if there's a bug elsewhere
+        session = await mongodb_memory.get_session_by_id(conversation_id, include_messages=False)
+        if context and not session:
+            print(f"[CONTEXT] ❌ Scope violation: Context returned but session not found. Clearing context.")
+            context = ""
+        elif context and session.get("session_id") != conversation_id:
+            print(f"[CONTEXT] ❌ Scope violation: session_id mismatch (context={session.get('session_id')}, request={conversation_id}). Clearing context.")
+            context = ""
+        
+        # Guardrail: If continuation mode is triggered without history, fallback gracefully
+        if not context:
+            print(f"[CONTEXT] ⚠️ Fallback: Continuation mode detected but no history found. Treating as new topic.")
+            return ("new", "")
+        
+        return ("continuation", context)
+    
+    # Gate 1: Follow-up detection (explicit follow-up questions - ALLOW RAG)
+    gate1_result = is_follow_up_question(question)
+    if gate1_result:
+        print(f"[CONTEXT] ✓ FOLLOW-UP MODE: '{question}' - ALLOW RAG")
+        print(f"[CONTEXT] Fetching context for conversation_id={conversation_id}")
+        context = await get_conversation_context(conversation_id)
+        
+        # 🔴 HARD SCOPE GUARD: Verify session exists for this conversation_id
+        session = await mongodb_memory.get_session_by_id(conversation_id, include_messages=False)
+        if context and not session:
+            print(f"[CONTEXT] ❌ Scope violation: Context returned but session not found. Clearing context.")
+            context = ""
+        elif context and session.get("session_id") != conversation_id:
+            print(f"[CONTEXT] ❌ Scope violation: session_id mismatch (context={session.get('session_id')}, request={conversation_id}). Clearing context.")
+            context = ""
+        
+        return ("followup", context)
+    else:
+        print(f"[CONTEXT] ✗ Gate 1 FAILED: Not a follow-up - '{question}'")
+    
+    # Gate 2: Topic continuity check (semantic similarity - ALLOW RAG)
+    if ENABLE_SEMANTIC_SIMILARITY_CHECK:
+        last_message = await mongodb_memory.get_last_assistant_message(conversation_id)
+        
+        if not last_message:
+            # No previous conversation
+            print(f"[CONTEXT] ✗ No previous conversation - treating as new topic")
+            return ("new", "")
+        
+        # Calculate semantic similarity
+        similarity = calculate_semantic_similarity(question, last_message)
+        print(f"[CONTEXT] Gate 2: Semantic similarity = {similarity:.3f} (threshold: {CONTEXT_SIMILARITY_THRESHOLD})")
+        
+        if similarity >= CONTEXT_SIMILARITY_THRESHOLD:
+            print(f"[CONTEXT] ✓ SAME TOPIC MODE: similarity {similarity:.3f} - ALLOW RAG")
+            print(f"[CONTEXT] Fetching context for conversation_id={conversation_id}")
+            context = await get_conversation_context(conversation_id)
+            
+            # 🔴 HARD SCOPE GUARD: Verify session exists for this conversation_id
+            session = await mongodb_memory.get_session_by_id(conversation_id, include_messages=False)
+            if context and not session:
+                print(f"[CONTEXT] ❌ Scope violation: Context returned but session not found. Clearing context.")
+                context = ""
+            elif context and session.get("session_id") != conversation_id:
+                print(f"[CONTEXT] ❌ Scope violation: session_id mismatch (context={session.get('session_id')}, request={conversation_id}). Clearing context.")
+                context = ""
+            
+            return ("topic", context)
+        else:
+            print(f"[CONTEXT] ✗ Gate 2 FAILED: Topic switch detected - dropping context")
+            return ("new", "")
+    else:
+        # Semantic check disabled - only use context for explicit follow-ups
+        print(f"[CONTEXT] Semantic check disabled - no context for non-follow-ups")
+        return ("new", "")
+
 def analyze_retrieved_documents(docs_with_scores):
     """Analyze retrieved documents and extract metadata."""
     if not docs_with_scores:
@@ -1125,8 +1422,9 @@ async def chat(request: Request, auth_user: dict = Depends(require_auth)):
     user_name = auth_user["name"]
     user_email = auth_user["email"]
 
-    # Use user_id if provided, otherwise fall back to session_id for backward compatibility
-    conversation_id = user_id if user_id else session_id
+    # ✅ CRITICAL: conversation_id MUST be the chat session ID, never user_id/email
+    # session_id from request is the chat session ID (e.g., cf.conversation.20251231.abcd1234)
+    conversation_id = session_id
 
     # FIRST: Check if we have a corrected response for this question
     corrected_answer = find_similar_corrected_response(question)
@@ -1136,8 +1434,18 @@ async def chat(request: Request, auth_user: dict = Depends(require_auth)):
         answer = corrected_answer
     # Check if this is a conversational query
     elif is_conversational_query(question):
-        # Handle conversational queries directly without document retrieval
+        # Handle conversational queries - check if context needed for follow-ups
         from langchain_core.prompts import ChatPromptTemplate
+        
+        # Check if this conversational query is a follow-up
+        if is_follow_up_question(question):
+            conversation_context = await get_conversation_context(conversation_id)
+            if conversation_context:
+                enhanced_query = f"{conversation_context}\n\nCurrent message: {question}"
+            else:
+                enhanced_query = question
+        else:
+            enhanced_query = question
         
         llm = get_llm(temperature=0.7)
         
@@ -1147,161 +1455,195 @@ async def chat(request: Request, auth_user: dict = Depends(require_auth)):
             ("human", "{question}")
         ])
         
-        enhanced_query = question  # Use current question only
-        
         chain = conversational_prompt | llm
         result = chain.invoke({"question": enhanced_query})
         answer = result.content
     else:
         # Handle informational queries with document retrieval
-        # Don't use conversation context - treat each question independently
-        # conversation_context = await get_conversation_context(conversation_id)
-        enhanced_query = question  # Use current question only
+        # Use four-gate system for relevance-aware conversation context
+        mode, conversation_context = await should_use_conversation_context(
+            question, 
+            conversation_id
+        )
         
-        # ============ INTENT CLASSIFICATION ============
-        # Classify user intent to enable branch-specific retrieval
-        intent_result = classify_intent(question)
-        intent = intent_result["intent"]
-        intent_confidence = intent_result["confidence"]
-        intent_method = intent_result.get("method", "unknown")
-        
-        print(f"[INTENT] Classified as '{intent}' (confidence: {intent_confidence:.2f}, method: {intent_method})")
-        
-        # Check if vectorstore is available
-        if vectorstore is None:
-            print("Warning: Vectorstore not initialized. Using default qa_chain.")
-            result = qa_chain.invoke({"query": enhanced_query})
-            answer = result["result"]
+        # 🚨 CRITICAL: Handle continuation mode - SKIP RAG, expand previous answer
+        if mode == "continuation":
+            # For continuation intents, bypass RAG and ask LLM to expand previous answer
+            print(f"[CONTEXT] ⚠️ CONTINUATION MODE: Bypassing RAG retrieval")
+            enhanced_query = f"""
+Continue and expand on the previous explanation.
+
+Rules:
+- Do NOT repeat content verbatim
+- Add new details, examples, or structure
+- Assume the user already read the previous answer
+
+Conversation so far:
+{conversation_context}
+"""
+            # Use LLM directly without RAG
+            llm = get_llm(temperature=0.7)
+            from langchain_core.prompts import ChatPromptTemplate
+            continuation_prompt = ChatPromptTemplate.from_messages([
+                ("system", "You are a CloudFuze AI assistant. The user wants you to continue or expand on your previous explanation. Provide more detail, examples, and clarity. Do not introduce new topics."),
+                ("human", "{question}")
+            ])
+            chain = continuation_prompt | llm
+            result = chain.invoke({"question": enhanced_query})
+            answer = result.content
+        elif mode in ("followup", "topic") and conversation_context:
+            # Include conversation context in the query - ALLOW RAG
+            enhanced_query = f"{conversation_context}\n\nCurrent question: {question}"
         else:
-            try:
-                # ============ QUERY EXPANSION ============
-                # Expand query with intent-specific terms for better retrieval
-                expanded_query = expand_query_with_intent(enhanced_query, intent)
-                
-                # ============ BRANCH-SPECIFIC RETRIEVAL ============
-                # Use intent-based filtering to retrieve relevant documents
-                RETRIEVAL_K = 50  # Number of documents to retrieve from vectorstore
-                doc_results = retrieve_with_branch_filter(
-                    query=expanded_query,
-                    intent=intent,
-                    k=RETRIEVAL_K
-                )
-                
-                print(f"[RETRIEVAL] Retrieved {len(doc_results)} documents from '{intent}' branch")
-                
-                # ============ DETAILED VECTORDB LOGGING ============
-                print(f"[VECTORDB] Detailed retrieval info:")
-                for i, (doc, score) in enumerate(doc_results[:10]):  # Log top 10
-                    metadata = doc.metadata if hasattr(doc, 'metadata') else {}
-                    tag = metadata.get('tag', 'N/A')
-                    source_type = metadata.get('source_type', 'N/A')
-                    title = metadata.get('post_title', metadata.get('title', 'N/A'))
-                    content_preview = doc.page_content[:100] if hasattr(doc, 'page_content') else 'N/A'
-                    print(f"  [{i+1}] Score: {score:.4f} | Tag: {tag} | Source: {source_type} | Title: {title[:60]}")
-                    print(f"      Content preview: {content_preview}...")
-                
-                # ============ CONFIDENCE-BASED FALLBACK ============
-                # If confidence is low, try alternative retrieval strategies
-                doc_results, fallback_strategy = confidence_based_fallback(
-                    doc_results=doc_results,
-                    intent=intent,
-                    intent_confidence=intent_confidence,
-                    query=enhanced_query
-                )
-                
-                if fallback_strategy != "no_fallback":
-                    print(f"[FALLBACK] Applied strategy: {fallback_strategy}, now have {len(doc_results)} docs")
-                
-                # ============ SOURCE PRIORITIZATION ============
-                # Boost SharePoint documents to prioritize internal documentation
-                PRIORITIZE_SHAREPOINT = True  # Set to False to disable prioritization
-                SHAREPOINT_BOOST = 0.6  # Lower score = higher priority (0.6 = 40% boost)
-                EMAIL_BOOST = 0.8  # 20% boost for emails
-                
-                if PRIORITIZE_SHAREPOINT:
-                    boosted_docs = []
-                    sharepoint_count = 0
-                    email_count = 0
-                    blog_count = 0
-                    
-                    for doc, score in doc_results:
-                        metadata = doc.metadata if hasattr(doc, 'metadata') else {}
-                        tag = metadata.get('tag', '').lower()
-                        source_type = metadata.get('source_type', '').lower()
-                        
-                        # Apply source-based boosting
-                        adjusted_score = score
-                        if 'sharepoint' in tag or source_type == 'sharepoint':
-                            adjusted_score = score * SHAREPOINT_BOOST
-                            sharepoint_count += 1
-                        elif 'email' in tag or source_type == 'email' or 'outlook' in tag:
-                            adjusted_score = score * EMAIL_BOOST
-                            email_count += 1
-                        else:
-                            blog_count += 1
-                        
-                        boosted_docs.append((doc, adjusted_score))
-                    
-                    # Re-sort by adjusted scores (lower is better)
-                    boosted_docs.sort(key=lambda x: x[1])
-                    doc_results = boosted_docs
-                    
-                    print(f"[PRIORITIZATION] Boosted sources - SharePoint: {sharepoint_count}, Email: {email_count}, Blog: {blog_count}")
-                
-                # ============ HYBRID RANKING ============
-                # Combine semantic similarity with keyword matching
-                doc_results = hybrid_ranking(
-                    doc_results=doc_results,
-                    query=question,  # Use original query for keyword matching
-                    intent=intent,
-                    alpha=0.7  # 70% semantic, 30% keyword
-                )
-                
-                print(f"[HYBRID RANKING] Reranked {len(doc_results)} documents with semantic + keyword scores")
-                
-                # ============ DOCUMENT DIVERSITY ============
-                # Calculate diversity metrics for retrieved documents
-                diversity_metrics = calculate_document_diversity(doc_results)
-                print(f"[DIVERSITY] Overall: {diversity_metrics['overall']:.2f}, Sources: {diversity_metrics['unique_sources']}, Tags: {diversity_metrics['unique_tags']}")
-                
-                final_docs = [doc for doc, score in doc_results]  # Extract just the documents
-                
-                # Format the documents for the context
-                from app.llm import format_docs
-                formatted_docs = format_docs(final_docs)
-                context = "\n\n".join(formatted_docs)
-                
-                # Create prompt and get answer
-                from langchain_core.prompts import ChatPromptTemplate
-                from config import SYSTEM_PROMPT
-                
-                # Standard prompt
-                human_template = "Context: {context}\n\nQuestion: {question}"
-                prompt_vars = {
-                    "context": context,
-                    "question": enhanced_query
-                }
-                
-                prompt_template = ChatPromptTemplate.from_messages([
-                    ("system", SYSTEM_PROMPT),
-                    ("human", human_template)
-                ])
-                
-                llm = get_llm(
-                    temperature=0.1,  # Low temperature for consistent responses
-                    max_tokens=1500
-                )
-                
-                chain = prompt_template | llm
-                result = chain.invoke(prompt_vars)
-                
-                answer = result.content
-                
-            except Exception as e:
-                print(f"[ERROR] Intent-based retrieval failed: {e}")
-                # Fallback to original qa_chain if something goes wrong
+            # New topic - no context
+            enhanced_query = question
+        
+        # Skip RAG if continuation mode (already handled above)
+        if mode != "continuation":
+            # ============ INTENT CLASSIFICATION ============
+            # Classify user intent to enable branch-specific retrieval
+            intent_result = classify_intent(question)
+            intent = intent_result["intent"]
+            intent_confidence = intent_result["confidence"]
+            intent_method = intent_result.get("method", "unknown")
+            
+            print(f"[INTENT] Classified as '{intent}' (confidence: {intent_confidence:.2f}, method: {intent_method})")
+            
+            # Check if vectorstore is available
+            if vectorstore is None:
+                print("Warning: Vectorstore not initialized. Using default qa_chain.")
                 result = qa_chain.invoke({"query": enhanced_query})
                 answer = result["result"]
+            else:
+                try:
+                    # ============ QUERY EXPANSION ============
+                    # Expand query with intent-specific terms for better retrieval
+                    expanded_query = expand_query_with_intent(enhanced_query, intent)
+                
+                    # ============ BRANCH-SPECIFIC RETRIEVAL ============
+                    # Use intent-based filtering to retrieve relevant documents
+                    RETRIEVAL_K = 50  # Number of documents to retrieve from vectorstore
+                    doc_results = retrieve_with_branch_filter(
+                        query=expanded_query,
+                        intent=intent,
+                        k=RETRIEVAL_K
+                    )
+                    
+                    print(f"[RETRIEVAL] Retrieved {len(doc_results)} documents from '{intent}' branch")
+                
+                    # ============ DETAILED VECTORDB LOGGING ============
+                    print(f"[VECTORDB] Detailed retrieval info:")
+                    for i, (doc, score) in enumerate(doc_results[:10]):  # Log top 10
+                        metadata = doc.metadata if hasattr(doc, 'metadata') else {}
+                        tag = metadata.get('tag', 'N/A')
+                        source_type = metadata.get('source_type', 'N/A')
+                        title = metadata.get('post_title', metadata.get('title', 'N/A'))
+                        content_preview = doc.page_content[:100] if hasattr(doc, 'page_content') else 'N/A'
+                        print(f"  [{i+1}] Score: {score:.4f} | Tag: {tag} | Source: {source_type} | Title: {title[:60]}")
+                        print(f"      Content preview: {content_preview}...")
+                    
+                    # ============ CONFIDENCE-BASED FALLBACK ============
+                    # If confidence is low, try alternative retrieval strategies
+                    doc_results, fallback_strategy = confidence_based_fallback(
+                        doc_results=doc_results,
+                        intent=intent,
+                        intent_confidence=intent_confidence,
+                        query=enhanced_query
+                    )
+                    
+                    if fallback_strategy != "no_fallback":
+                        print(f"[FALLBACK] Applied strategy: {fallback_strategy}, now have {len(doc_results)} docs")
+                
+                    # ============ SOURCE PRIORITIZATION ============
+                    # Boost SharePoint documents to prioritize internal documentation
+                    PRIORITIZE_SHAREPOINT = True  # Set to False to disable prioritization
+                    SHAREPOINT_BOOST = 0.6  # Lower score = higher priority (0.6 = 40% boost)
+                    EMAIL_BOOST = 0.8  # 20% boost for emails
+                    
+                    if PRIORITIZE_SHAREPOINT:
+                        boosted_docs = []
+                        sharepoint_count = 0
+                        email_count = 0
+                        blog_count = 0
+                        
+                        for doc, score in doc_results:
+                            metadata = doc.metadata if hasattr(doc, 'metadata') else {}
+                            tag = metadata.get('tag', '').lower()
+                            source_type = metadata.get('source_type', '').lower()
+                            
+                            # Apply source-based boosting
+                            adjusted_score = score
+                            if 'sharepoint' in tag or source_type == 'sharepoint':
+                                adjusted_score = score * SHAREPOINT_BOOST
+                                sharepoint_count += 1
+                            elif 'email' in tag or source_type == 'email' or 'outlook' in tag:
+                                adjusted_score = score * EMAIL_BOOST
+                                email_count += 1
+                            else:
+                                blog_count += 1
+                            
+                            boosted_docs.append((doc, adjusted_score))
+                        
+                        # Re-sort by adjusted scores (lower is better)
+                        boosted_docs.sort(key=lambda x: x[1])
+                        doc_results = boosted_docs
+                        
+                        print(f"[PRIORITIZATION] Boosted sources - SharePoint: {sharepoint_count}, Email: {email_count}, Blog: {blog_count}")
+                
+                    # ============ HYBRID RANKING ============
+                    # Combine semantic similarity with keyword matching
+                    doc_results = hybrid_ranking(
+                        doc_results=doc_results,
+                        query=question,  # Use original query for keyword matching
+                        intent=intent,
+                        alpha=0.7  # 70% semantic, 30% keyword
+                    )
+                    
+                    print(f"[HYBRID RANKING] Reranked {len(doc_results)} documents with semantic + keyword scores")
+                    
+                    # ============ DOCUMENT DIVERSITY ============
+                    # Calculate diversity metrics for retrieved documents
+                    diversity_metrics = calculate_document_diversity(doc_results)
+                    print(f"[DIVERSITY] Overall: {diversity_metrics['overall']:.2f}, Sources: {diversity_metrics['unique_sources']}, Tags: {diversity_metrics['unique_tags']}")
+                    
+                    final_docs = [doc for doc, score in doc_results]  # Extract just the documents
+                    
+                    # Format the documents for the context
+                    from app.llm import format_docs
+                    formatted_docs = format_docs(final_docs)
+                    context = "\n\n".join(formatted_docs)
+                    
+                    # Create prompt and get answer
+                    from langchain_core.prompts import ChatPromptTemplate
+                    from config import SYSTEM_PROMPT
+                    
+                    # Standard prompt
+                    human_template = "Context: {context}\n\nQuestion: {question}"
+                    prompt_vars = {
+                        "context": context,
+                        "question": enhanced_query
+                    }
+                    
+                    prompt_template = ChatPromptTemplate.from_messages([
+                        ("system", SYSTEM_PROMPT),
+                        ("human", human_template)
+                    ])
+                    
+                    llm = get_llm(
+                        temperature=0.1,  # Low temperature for consistent responses
+                        max_tokens=1500
+                    )
+                    
+                    chain = prompt_template | llm
+                    result = chain.invoke(prompt_vars)
+                    
+                    answer = result.content
+                
+                except Exception as e:
+                    print(f"[ERROR] Intent-based retrieval failed: {e}")
+                    # Fallback to original qa_chain if something goes wrong
+                    result = qa_chain.invoke({"query": enhanced_query})
+                    answer = result["result"]
 
     # Track message event for analytics (non-blocking)
     try:
@@ -1315,7 +1657,7 @@ async def chat(request: Request, auth_user: dict = Depends(require_auth)):
 
     # Log to Langfuse for observability
     trace_id = langfuse_tracker.create_trace(
-        user_id=conversation_id,
+        user_id=user_id,
         question=question,
         answer=answer,
         session_id=session_id,
@@ -1361,8 +1703,9 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
             detail="Invalid user identity. Please log in again."
         )
     
-    # ✅ IDENTITY RULE: conversation_id = user_id (always email, never session_id)
-    conversation_id = user_id
+    # ✅ CRITICAL: conversation_id MUST be the chat session ID, never user_id/email
+    # session_id from request is the chat session ID (e.g., cf.conversation.20251231.abcd1234)
+    conversation_id = session_id
 
     async def generate_stream():
         try:
@@ -1388,7 +1731,7 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
                 trace_id = None
                 try:
                     trace_id = langfuse_tracker.create_trace(
-                        user_id=conversation_id,
+                        user_id=user_id,
                         question=question,
                         answer=full_response,
                         session_id=session_id,
@@ -1397,6 +1740,7 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
                         metadata={
                             "user_id": user_id or "anonymous",
                             "session_id": session_id,
+                            "conversation_id": conversation_id,
                             "user_name": user_name,
                             "user_email": user_email,
                             "request": {
@@ -1434,20 +1778,115 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
                 yield f"data: {json.dumps({'type': 'done', 'full_response': full_response, 'trace_id': trace_id, 'recommended_questions': recommended_questions})}\n\n"
                 return
             
-            # Don't use conversation context - treat each question independently
-            # conversation_context = await get_conversation_context(conversation_id)
-            # enhanced_query = f"{conversation_context}\n\nUser: {question}" if conversation_context else question
-            enhanced_query = question  # Use current question only
-            conversation_context = None  # Set to None for metadata logging
+            # Use three-gate system for relevance-aware conversation context
+            mode, conversation_context_str = await should_use_conversation_context(
+                question,
+                conversation_id
+            )
+            
+            # 🚨 CRITICAL: Handle continuation mode - SKIP RAG, expand previous answer
+            if mode == "continuation":
+                # For continuation intents, bypass RAG and ask LLM to expand previous answer
+                print(f"[CONTEXT] ⚠️ CONTINUATION MODE: Bypassing RAG retrieval")
+                enhanced_query = f"""
+Continue and expand on the previous explanation.
+
+Rules:
+- Do NOT repeat content verbatim
+- Add new details, examples, or structure
+- Assume the user already read the previous answer
+
+Conversation so far:
+{conversation_context_str}
+"""
+                conversation_context = conversation_context_str  # For metadata logging
+                # Skip RAG and use LLM directly for continuation
+                is_continuation_mode = True
+            elif mode in ("followup", "topic") and conversation_context_str:
+                enhanced_query = f"{conversation_context_str}\n\nCurrent question: {question}"
+                conversation_context = conversation_context_str  # For metadata logging
+                is_continuation_mode = False
+            else:
+                enhanced_query = question
+                conversation_context = None  # Set to None for metadata logging
+                is_continuation_mode = False
+            
+            # 🚨 CRITICAL: Handle continuation mode - SKIP RAG, stream LLM expansion
+            if is_continuation_mode:
+                print(f"[CONTEXT] ⚠️ CONTINUATION MODE: Streaming LLM expansion (skipping RAG)")
+                yield f"data: {json.dumps({'type': 'thinking_complete'})}\n\n"
+                
+                from langchain_core.prompts import ChatPromptTemplate
+                
+                llm = get_llm(
+                    streaming=True, 
+                    temperature=0.7,
+                    max_tokens=1000  # More tokens for expansion
+                )
+                
+                # Continuation prompt - ask LLM to expand previous answer
+                continuation_prompt = ChatPromptTemplate.from_messages([
+                    ("system", "You are a CloudFuze AI assistant. The user wants you to continue or expand on your previous explanation. Provide more detail, examples, and clarity. Do not introduce new topics. Build naturally on what was already discussed."),
+                    ("human", "{question}")
+                ])
+                
+                # Stream the response
+                full_response = ""
+                messages = continuation_prompt.format_messages(question=enhanced_query)
+                async for chunk in llm.astream(messages):
+                    if hasattr(chunk, 'content'):
+                        token = chunk.content
+                        full_response += token
+                        yield f"data: {json.dumps({'token': token, 'type': 'token'})}\n\n"
+                        await asyncio.sleep(0.01)
+                
+                # Add to conversation
+                await add_to_conversation(conversation_id, "user", question)
+                await add_to_conversation(conversation_id, "assistant", full_response)
+                
+                # Log to Langfuse
+                trace_id = None
+                try:
+                    trace_id = langfuse_tracker.create_trace(
+                        user_id=user_id,
+                        question=question,
+                        answer=full_response,
+                        session_id=session_id,
+                        user_name=user_name,
+                        user_email=user_email,
+                        metadata={
+                            "user_id": user_id or "anonymous",
+                            "session_id": session_id,
+                            "conversation_id": conversation_id,
+                            "mode": "continuation",
+                            "conversation_context": "used",
+                            "rag_used": False
+                        }
+                    )
+                except Exception as e:
+                    print(f"[LANGFUSE] Failed to log continuation trace: {e}")
+                
+                yield f"data: {json.dumps({'type': 'done', 'full_response': full_response, 'trace_id': trace_id})}\n\n"
+                return
             
             # Check if this is a conversational query
             is_conv = is_conversational_query(question)
             
             if is_conv:
-                # Handle conversational queries directly without document retrieval
+                # Handle conversational queries - check if context needed for follow-ups
                 yield f"data: {json.dumps({'type': 'thinking_complete'})}\n\n"
                 
                 from langchain_core.prompts import ChatPromptTemplate
+                
+                # Check if this conversational query is a follow-up
+                if is_follow_up_question(question):
+                    conv_context = await get_conversation_context(conversation_id)
+                    if conv_context:
+                        enhanced_query = f"{conv_context}\n\nCurrent message: {question}"
+                    else:
+                        enhanced_query = question
+                else:
+                    enhanced_query = question
                 
                 llm = get_llm(
                     streaming=True, 
@@ -1479,7 +1918,7 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
                 trace_id = None
                 try:
                     trace_id = langfuse_tracker.create_trace(
-                        user_id=conversation_id,
+                        user_id=user_id,
                         question=question,
                         answer=full_response,
                         session_id=session_id,
@@ -1488,6 +1927,7 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
                         metadata={
                             "user_id": user_id or "anonymous",
                             "session_id": session_id,
+                            "conversation_id": conversation_id,
                             "user_name": user_name,
                             "user_email": user_email,
                             "request": {
@@ -1534,7 +1974,7 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
             rag_trace = None
             try:
                 rag_trace = langfuse_tracker.create_rag_pipeline_trace(
-                    user_id=conversation_id,
+                    user_id=user_id,
                     question=question,
                     session_id=session_id,
                     user_name=user_name,
@@ -2156,7 +2596,7 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
                 else:
                     # Fallback to simple trace if RAG trace failed
                     trace_id = langfuse_tracker.create_trace(
-                        user_id=conversation_id,
+                        user_id=user_id,
                         question=question,
                         answer=full_response,
                         session_id=session_id,
