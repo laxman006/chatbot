@@ -101,22 +101,6 @@ export default function RootLayout({
           strategy="beforeInteractive"
         />
         
-        {/* Set cursor images dynamically with absolute URLs */}
-        <Script id="cursor-setup" strategy="afterInteractive">
-          {`
-            (function() {
-              const baseUrl = window.location.origin;
-              // Use simple filenames (no encoding needed)
-              const cursorTreeFile = "christmas-cursor.png";
-              const cursorBulbFile = "christmas-pointer.png";
-              const cursorTree = baseUrl + "/images/" + cursorTreeFile;
-              const cursorBulb = baseUrl + "/images/" + cursorBulbFile;
-              
-              document.documentElement.style.setProperty('--cursor-tree', 'url("' + cursorTree + '") 2 2, auto');
-              document.documentElement.style.setProperty('--cursor-bulb', 'url("' + cursorBulb + '") 2 2, pointer');
-            })();
-          `}
-        </Script>
       </head>
       <body>
         {/* Google Tag Manager (noscript) */}

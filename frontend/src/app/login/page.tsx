@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
-import Snowfall from 'react-snowfall';
 import { apiFetch } from '@/lib/api';
 import { checkSession } from '@/lib/session-utils';
 import UserOnboardingModal from '@/components/UserOnboardingModal';
@@ -40,10 +39,6 @@ export default function LoginPage() {
 
   return (
     <>
-      <Snowfall
-  snowflakeCount={150}
-  color="#CAE7FF"
-/>
       {showOnboarding && (
         <UserOnboardingModal
           userEmail={userEmail}
