@@ -31,12 +31,31 @@ class CrossEncoderReranker:
             return candidates[:top_k]
 
         pairs = [[query, d.page_content] for d, _ in candidates]
-        scores = self.model.predict(pairs)  # higher is better
+        ce_scores = self.model.predict(pairs)  # Raw logits (can be negative)
+        
+        # Normalize cross-encoder scores to 0-1 range
+        # This prevents negative scores from dominating the final score
+        if len(ce_scores) > 0:
+            ce_min = float(min(ce_scores))
+            ce_max = float(max(ce_scores))
+            
+            if ce_max != ce_min:
+                # Normalize: (score - min) / (max - min) -> maps to [0, 1]
+                normalized_ce_scores = [
+                    (float(ce_score) - ce_min) / (ce_max - ce_min)
+                    for ce_score in ce_scores
+                ]
+            else:
+                # All scores are the same, set to 0.5 (neutral)
+                normalized_ce_scores = [0.5] * len(ce_scores)
+        else:
+            normalized_ce_scores = []
 
         reranked = []
-        for (doc, base_score), ce_score in zip(candidates, scores):
-            # Combine: 80% cross-encoder, 20% base score
-            final_score = 0.8 * float(ce_score) + 0.2 * float(base_score)
+        for (doc, base_score), ce_score_norm in zip(candidates, normalized_ce_scores):
+            # Combine: 80% normalized cross-encoder (0-1), 20% base score (0-1)
+            # Now both components are in 0-1 range, so final_score will be 0-1
+            final_score = 0.8 * float(ce_score_norm) + 0.2 * float(base_score)
             reranked.append((doc, final_score))
 
         reranked.sort(key=lambda x: x[1], reverse=True)

@@ -116,5 +116,23 @@ class SharePointAuthenticator:
             print(f"[ERROR] SharePoint connection test failed: {e}")
             return False
 
-# Global authenticator instance
-sharepoint_auth = SharePointAuthenticator()
+# Global authenticator instance (lazy initialization)
+_sharepoint_auth_instance = None
+
+def get_sharepoint_auth():
+    """Get or create the global SharePoint authenticator instance (lazy initialization)."""
+    global _sharepoint_auth_instance
+    if _sharepoint_auth_instance is None:
+        _sharepoint_auth_instance = SharePointAuthenticator()
+    return _sharepoint_auth_instance
+
+# For backward compatibility, create a property-like accessor
+class _SharePointAuthProxy:
+    """Proxy class to maintain backward compatibility with direct sharepoint_auth access."""
+    def __getattr__(self, name):
+        return getattr(get_sharepoint_auth(), name)
+    
+    def __call__(self, *args, **kwargs):
+        return get_sharepoint_auth()(*args, **kwargs)
+
+sharepoint_auth = _SharePointAuthProxy()

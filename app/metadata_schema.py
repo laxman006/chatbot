@@ -72,6 +72,20 @@ class UnifiedMetadata:
     relevance_count: int = 1  # Incremented when duplicates are merged
     original_sources: Optional[str] = None  # Comma-separated doc_ids of merged duplicates
     
+    # Transcript/Demo Call specific metadata (Secondary KB)
+    kb_tier: Optional[str] = None  # "primary" | "secondary" - None means primary
+    customer: Optional[str] = None  # Customer name (e.g., "Phillips Exeter Academy")
+    industry: Optional[str] = None  # Industry sector (e.g., "Education")
+    speaker_roles: Optional[str] = None  # Comma-separated "Customer | CloudFuze"
+    topic: Optional[str] = None  # Comma-separated topics (e.g., "Shadow IT | Pricing | Integrations")
+    artifact_type: Optional[str] = None  # "Q&A | Objection | Feature | Pricing | Decision Driver"
+    priority: Optional[str] = None  # "High | Medium | Low"
+    reliability: Optional[str] = None  # "contextual" | "official" - defaults to "contextual" for transcripts
+    not_contractual: bool = False  # True for transcripts (not official commitments)
+    internal_use_only: bool = False  # True for customer-identifiable content
+    contains_pricing: bool = False  # True if transcript contains pricing discussions
+    customer_identifiable: bool = False  # True if transcript contains customer-specific info
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert metadata to dictionary, removing None values."""
         data = asdict(self)
