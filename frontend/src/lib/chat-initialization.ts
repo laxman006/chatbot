@@ -1047,7 +1047,7 @@ export function initializeChatApp(options: InitOptions = {}) {
     ` : '';
     
     const continueButton = isReadOnly ? `
-      <button class="header-btn continue-button" onclick="window.continueInThisThread()" title="Copy this chat to your own chats and continue">
+      <button class="header-btn continue-button" data-action="continue-thread" title="Copy this chat to your own chats and continue">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
           <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
@@ -1058,7 +1058,7 @@ export function initializeChatApp(options: InitOptions = {}) {
     
     // Share button is only for own chats (not read-only/others' chats)
     const shareButton = !isReadOnly ? `
-      <button class="header-btn share-button" onclick="window.shareChat()" title="Share this chat">
+      <button class="header-btn share-button" data-action="share-chat" title="Share this chat">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="18" cy="5" r="3"></circle>
           <circle cx="6" cy="12" r="3"></circle>
@@ -1224,14 +1224,14 @@ export function initializeChatApp(options: InitOptions = {}) {
         div.innerHTML = `
           <div class="message-content">${contentWithLinks}</div>
           <div class="feedback-buttons">
-            <button class="copy-button" onclick="window.copyMessage(this)" title="Copy message">
+            <button class="copy-button" data-action="copy-message" title="Copy message">
               <img src="/images/copy-icon.svg?v=2" alt="Copy" width="16" height="16">
             </button>
             ${!isReadOnly ? `
-            <button class="feedback-btn thumbs-up" onclick="window.submitFeedback(this, 'thumbs_up')" title="Good response">
+            <button class="feedback-btn thumbs-up" data-action="feedback" data-rating="thumbs_up" title="Good response">
               <img src="/images/thumbs-up-icon.svg?v=2" alt="Thumbs up" width="16" height="16">
             </button>
-            <button class="feedback-btn thumbs-down" onclick="window.submitFeedback(this, 'thumbs_down')" title="Bad response">
+            <button class="feedback-btn thumbs-down" data-action="feedback" data-rating="thumbs_down" title="Bad response">
               <img src="/images/thumbs-down-icon.svg?v=2" alt="Thumbs down" width="16" height="16">
             </button>
             ` : ''}
@@ -1905,7 +1905,7 @@ export function initializeChatApp(options: InitOptions = {}) {
     
     const questionsHTML = questions
       .map((q: string) => `
-        <button class="recommended-question-btn" onclick="window.askRecommendedQuestion(this)" data-question="${q.replace(/"/g, '&quot;')}">
+        <button class="recommended-question-btn" data-action="ask-recommended-question" data-question="${q.replace(/"/g, '&quot;')}">
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M5 10 L12 10 M10 7 L13 10 L10 13" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
@@ -1976,7 +1976,7 @@ export function initializeChatApp(options: InitOptions = {}) {
       // For user messages, create wrapper with message and edit button below
       // Hide edit button in read-only mode
       const editButtonHTML = isReadOnlyMode ? '' : `
-          <button class="edit-btn" onclick="window.editMessage(this)" title="Edit message">
+          <button class="edit-btn" data-action="edit-message" title="Edit message">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path>
             </svg>
@@ -1988,7 +1988,7 @@ export function initializeChatApp(options: InitOptions = {}) {
       wrapper.innerHTML = `
         <div class="message user">${content}</div>
         <div class="edit-button-container">
-          <button class="copy-button-user" onclick="window.copyUserMessage(this)" title="Copy message">
+          <button class="copy-button-user" data-action="copy-user-message" title="Copy message">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
               <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
@@ -2024,13 +2024,13 @@ export function initializeChatApp(options: InitOptions = {}) {
       div.innerHTML = `
         <div class="message-content">${content}</div>
         <div class="feedback-buttons">
-          <button class="copy-button" onclick="window.copyMessage(this)" title="Copy message">
+          <button class="copy-button" data-action="copy-message" title="Copy message">
             <img src="/images/copy-icon.svg?v=2" alt="Copy" width="16" height="16">
           </button>
-          <button class="feedback-btn thumbs-up" onclick="window.submitFeedback(this, 'thumbs_up')" title="Good response">
+          <button class="feedback-btn thumbs-up" data-action="feedback" data-rating="thumbs_up" title="Good response">
             <img src="/images/thumbs-up-icon.svg?v=2" alt="Thumbs up" width="16" height="16">
           </button>
-          <button class="feedback-btn thumbs-down" onclick="window.submitFeedback(this, 'thumbs_down')" title="Bad response">
+          <button class="feedback-btn thumbs-down" data-action="feedback" data-rating="thumbs_down" title="Bad response">
             <img src="/images/thumbs-down-icon.svg?v=2" alt="Thumbs down" width="16" height="16">
           </button>
           <span class="feedback-text"></span>
@@ -2415,17 +2415,19 @@ export function initializeChatApp(options: InitOptions = {}) {
                 botDiv.innerHTML = `
                   <div class="message-content">${contentWithLinks}</div>
                   <div class="feedback-buttons">
-                    <button class="copy-button" onclick="window.copyMessage(this)" title="Copy message">
+                    <button class="copy-button" data-action="copy-message" title="Copy message">
                       <img src="/images/copy-icon.svg?v=2" alt="Copy" width="16" height="16">
                     </button>
                     <button class="feedback-btn thumbs-up ${feedbackDisabledClass}" 
-                            onclick="window.submitFeedback(this, 'thumbs_up')" 
+                            data-action="feedback" 
+                            data-rating="thumbs_up"
                             title="${feedbackDisabled ? 'Feedback unavailable (trace_id missing)' : 'Good response'}"
                             ${feedbackDisabledAttr}>
                       <img src="/images/thumbs-up-icon.svg?v=2" alt="Thumbs up" width="16" height="16">
                     </button>
                     <button class="feedback-btn thumbs-down ${feedbackDisabledClass}" 
-                            onclick="window.submitFeedback(this, 'thumbs_down')" 
+                            data-action="feedback" 
+                            data-rating="thumbs_down"
                             title="${feedbackDisabled ? 'Feedback unavailable (trace_id missing)' : 'Bad response'}"
                             ${feedbackDisabledAttr}>
                       <img src="/images/thumbs-down-icon.svg?v=2" alt="Thumbs down" width="16" height="16">
@@ -3116,8 +3118,8 @@ export function initializeChatApp(options: InitOptions = {}) {
     messageDiv.innerHTML = `
       <textarea class="edit-textarea" rows="1">${originalText}</textarea>
       <div class="edit-actions">
-        <button class="edit-action-btn edit-cancel-btn" onclick="window.cancelEdit(this)">Cancel</button>
-        <button class="edit-action-btn edit-save-btn" onclick="window.saveEdit(this)" title="Send">
+        <button class="edit-action-btn edit-cancel-btn" data-action="cancel-edit">Cancel</button>
+        <button class="edit-action-btn edit-save-btn" data-action="save-edit" title="Send">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
             <path d="M8 1a1 1 0 011 1v10.586l2.293-2.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L7 12.586V2a1 1 0 011-1z" transform="rotate(180 8 8)"/>
           </svg>
@@ -3176,13 +3178,13 @@ export function initializeChatApp(options: InitOptions = {}) {
     
     // Restore original buttons
     editContainer.innerHTML = `
-      <button class="copy-button-user" onclick="window.copyUserMessage(this)" title="Copy message">
+      <button class="copy-button-user" data-action="copy-user-message" title="Copy message">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
           <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
         </svg>
       </button>
-      <button class="edit-btn" onclick="window.editMessage(this)" title="Edit message">
+      <button class="edit-btn" data-action="edit-message" title="Edit message">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path>
         </svg>
@@ -3228,13 +3230,13 @@ export function initializeChatApp(options: InitOptions = {}) {
     
     // Restore original buttons
     editContainer.innerHTML = `
-      <button class="copy-button-user" onclick="window.copyUserMessage(this)" title="Copy message">
+      <button class="copy-button-user" data-action="copy-user-message" title="Copy message">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
           <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
         </svg>
       </button>
-      <button class="edit-btn" onclick="window.editMessage(this)" title="Edit message">
+      <button class="edit-btn" data-action="edit-message" title="Edit message">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path>
         </svg>
@@ -3623,13 +3625,13 @@ export function initializeChatApp(options: InitOptions = {}) {
               div.innerHTML = `
                 <div class="message-content">${contentWithLinks}</div>
                 <div class="feedback-buttons">
-                  <button class="copy-button" onclick="window.copyMessage(this)" title="Copy message">
+                  <button class="copy-button" data-action="copy-message" title="Copy message">
                     <img src="/images/copy-icon.svg?v=2" alt="Copy" width="16" height="16">
                   </button>
-                  <button class="feedback-btn thumbs-up" onclick="window.submitFeedback(this, 'thumbs_up')" title="Good response">
+                  <button class="feedback-btn thumbs-up" data-action="feedback" data-rating="thumbs_up" title="Good response">
                     <img src="/images/thumbs-up-icon.svg?v=2" alt="Thumbs up" width="16" height="16">
                   </button>
-                  <button class="feedback-btn thumbs-down" onclick="window.submitFeedback(this, 'thumbs_down')" title="Bad response">
+                  <button class="feedback-btn thumbs-down" data-action="feedback" data-rating="thumbs_down" title="Bad response">
                     <img src="/images/thumbs-down-icon.svg?v=2" alt="Thumbs down" width="16" height="16">
                   </button>
                   <span class="feedback-text"></span>
@@ -4125,6 +4127,75 @@ export function initializeChatApp(options: InitOptions = {}) {
       document.querySelectorAll('.history-item-dropdown').forEach(d => d.remove());
     }
   });
+
+  // ============================================================================
+  // MOBILE-FRIENDLY EVENT DELEGATION FOR BUTTONS
+  // ============================================================================
+  // Use event delegation to handle all button clicks, including dynamically created ones
+  // This ensures buttons work on mobile devices where inline onclick handlers can fail
+  // ============================================================================
+  
+  function setupButtonEventDelegation() {
+    // Use capture phase and handle both click and touchstart for better mobile support
+    const handleButtonAction = (e: Event) => {
+      const target = e.target as HTMLElement;
+      // Find the button element (might be clicking on an icon inside the button)
+      const button = target.closest('[data-action]') as HTMLElement;
+      if (!button) return;
+      
+      const action = button.getAttribute('data-action');
+      if (!action) return;
+      
+      // Prevent default and stop propagation to avoid double-firing
+      e.preventDefault();
+      e.stopPropagation();
+      
+      // Handle different button actions
+      switch (action) {
+        case 'copy-message':
+          copyMessage(button);
+          break;
+        case 'copy-user-message':
+          copyUserMessage(button);
+          break;
+        case 'feedback':
+          const rating = button.getAttribute('data-rating');
+          if (rating) {
+            submitFeedback(button, rating);
+          }
+          break;
+        case 'edit-message':
+          editMessage(button);
+          break;
+        case 'cancel-edit':
+          cancelEdit(button);
+          break;
+        case 'save-edit':
+          saveEdit(button);
+          break;
+        case 'continue-thread':
+          continueInThisThread();
+          break;
+        case 'share-chat':
+          shareChat();
+          break;
+        case 'ask-recommended-question':
+          const question = button.getAttribute('data-question');
+          if (question) {
+            askRecommendedQuestion(button);
+          }
+          break;
+      }
+    };
+    
+    // Add listeners for both click and touchstart events for better mobile support
+    // Use capture phase to ensure we catch events before they bubble
+    document.addEventListener('click', handleButtonAction, true);
+    document.addEventListener('touchend', handleButtonAction, true);
+  }
+  
+  // Set up event delegation immediately
+  setupButtonEventDelegation();
 
   initAuth();
 }
