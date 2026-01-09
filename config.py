@@ -233,6 +233,7 @@ ENABLE_EXCEL_SOURCE = os.getenv("ENABLE_EXCEL_SOURCE", "false").lower() == "true
 ENABLE_DOC_SOURCE = os.getenv("ENABLE_DOC_SOURCE", "false").lower() == "true"
 ENABLE_SHAREPOINT_SOURCE = os.getenv("ENABLE_SHAREPOINT_SOURCE", "false").lower() == "true"
 ENABLE_OUTLOOK_SOURCE = os.getenv("ENABLE_OUTLOOK_SOURCE", "false").lower() == "true"
+ENABLE_JIRA_SOURCE = os.getenv("ENABLE_JIRA_SOURCE", "false").lower() == "true"
 
 # Source-specific settings
 WEB_SOURCE_URL = os.getenv("WEB_SOURCE_URL", "https://cloudfuze.com/wp-json/wp/v2/posts?per_page=49")
@@ -268,6 +269,30 @@ OUTLOOK_USER_EMAIL = os.getenv("OUTLOOK_USER_EMAIL", "")  # Email address to acc
 OUTLOOK_FOLDER_NAME = os.getenv("OUTLOOK_FOLDER_NAME", "Inbox")  # Folder name to extract emails from
 OUTLOOK_MAX_EMAILS = int(os.getenv("OUTLOOK_MAX_EMAILS", "500"))  # Maximum number of emails to fetch
 OUTLOOK_DATE_FILTER = os.getenv("OUTLOOK_DATE_FILTER", "")  # Options: last_month, last_3_months, last_6_months, last_year, or empty for all
+
+# Jira Configuration
+JIRA_SERVER = os.getenv("JIRA_SERVER", "https://cf2020.atlassian.net")
+JIRA_EMAIL = os.getenv("JIRA_EMAIL", "")
+JIRA_API_TOKEN = os.getenv("JIRA_API_TOKEN", "")
+# Jira query settings
+# Helper function to clean env values (remove inline comments)
+def _clean_env_value(value: str, default: str = "") -> str:
+    """Remove inline comments from environment variable values."""
+    if not value:
+        return default
+    # Split by # and take first part, then strip
+    cleaned = value.split('#')[0].strip()
+    return cleaned if cleaned else default
+
+JIRA_PROJECT_KEYS = _clean_env_value(os.getenv("JIRA_PROJECT_KEYS", ""), "")  # Comma-separated project keys, empty for all projects
+JIRA_MAX_ISSUES = int(os.getenv("JIRA_MAX_ISSUES", "100"))  # Maximum issues to fetch (changed to 100 for recent tickets)
+JIRA_JQL_QUERY = _clean_env_value(os.getenv("JIRA_JQL_QUERY", ""), "")  # Optional: Custom JQL query (overrides project keys)
+JIRA_DATE_FILTER = _clean_env_value(os.getenv("JIRA_DATE_FILTER", "last_3_months"), "last_3_months")  # Options: last_month, last_3_months, last_6_months, last_year, or empty for all
+
+# Separate Jira Vectorstore Configuration
+JIRA_VECTORSTORE_PATH = os.getenv("JIRA_VECTORSTORE_PATH", "./data/jira_chroma_db")
+ENABLE_JIRA_VECTORSTORE = os.getenv("ENABLE_JIRA_VECTORSTORE", "true").lower() == "true"
+INITIALIZE_JIRA_VECTORSTORE = os.getenv("INITIALIZE_JIRA_VECTORSTORE", "false").lower() == "true"
 
 # SharePoint Downloadable Folders (files in these folders can be downloaded)
 # Add folder paths that contain files users can download (certificates, policy documents, guides, etc.)
@@ -331,6 +356,13 @@ SHAREPOINT_DOWNLOADABLE_FOLDERS = [f.lower().strip() for f in DOWNLOADABLE_FOLDE
 CHUNK_TARGET_TOKENS = int(os.getenv("CHUNK_TARGET_TOKENS", "800"))  # Target tokens per chunk
 CHUNK_OVERLAP_TOKENS = int(os.getenv("CHUNK_OVERLAP_TOKENS", "200"))  # Overlap between chunks
 CHUNK_MIN_TOKENS = int(os.getenv("CHUNK_MIN_TOKENS", "150"))  # Minimum chunk size (merge smaller chunks)
+
+# Jira-Specific Chunking Configuration (Field-Aware)
+# Smaller chunks (400-600 tokens) for better retrieval precision
+# Only Description section is chunked; Summary, Root Cause, Comments remain intact
+JIRA_CHUNK_TARGET_TOKENS = int(os.getenv("JIRA_CHUNK_TARGET_TOKENS", "500"))  # 400-600 tokens for Description section
+JIRA_CHUNK_OVERLAP_TOKENS = int(os.getenv("JIRA_CHUNK_OVERLAP_TOKENS", "100"))  # 80-120 tokens overlap
+JIRA_CHUNK_MIN_TOKENS = int(os.getenv("JIRA_CHUNK_MIN_TOKENS", "120"))  # Minimum chunk size
 
 # Deduplication Configuration
 ENABLE_DEDUPLICATION = os.getenv("ENABLE_DEDUPLICATION", "true").lower() == "true"

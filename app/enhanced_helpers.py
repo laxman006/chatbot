@@ -21,7 +21,8 @@ from config import (
     CHUNK_TARGET_TOKENS, CHUNK_OVERLAP_TOKENS, CHUNK_MIN_TOKENS,
     ENABLE_DEDUPLICATION, DEDUP_THRESHOLD,
     ENABLE_UNSTRUCTURED, ENABLE_OCR, OCR_LANGUAGE,
-    ENABLE_GRAPH_STORAGE, GRAPH_DB_PATH
+    ENABLE_GRAPH_STORAGE, GRAPH_DB_PATH,
+    JIRA_CHUNK_TARGET_TOKENS, JIRA_CHUNK_OVERLAP_TOKENS, JIRA_CHUNK_MIN_TOKENS
 )
 
 import os
@@ -73,13 +74,13 @@ class EnhancedVectorstoreBuilder:
         
         Steps:
         1. Add unified metadata and doc_id
-        2. Chunk semantically
+        2. Chunk semantically (field-aware for Jira tickets)
         3. Deduplicate (if enabled)
         4. Store graph relationships (if enabled)
         
         Args:
             raw_docs: Raw documents from source
-            source_type: Source type (sharepoint, email, blog)
+            source_type: Source type (sharepoint, email, blog, jira)
         
         Returns:
             Processed and chunked documents
@@ -98,10 +99,15 @@ class EnhancedVectorstoreBuilder:
         
         self.reporter.add_documents(raw_docs, source_type)
         
-        # Step 2: Semantic chunking
-        print(f"[*] Chunking with semantic strategy (target={CHUNK_TARGET_TOKENS} tokens)...")
-        chunks = self.chunker.chunk_documents(raw_docs)
-        print(f"[OK] Created {len(chunks)} chunks")
+        # Step 2: Field-aware chunking for Jira tickets, standard chunking for others
+        if source_type == "jira":
+            chunks = self._chunk_jira_documents(raw_docs)
+            print(f"[OK] Created {len(chunks)} field-aware chunks for Jira tickets")
+        else:
+            # Standard semantic chunking for other sources
+            print(f"[*] Chunking with semantic strategy (target={CHUNK_TARGET_TOKENS} tokens)...")
+            chunks = self.chunker.chunk_documents(raw_docs)
+            print(f"[OK] Created {len(chunks)} chunks")
         
         # Add chunk_id to each chunk
         for chunk in chunks:
@@ -124,6 +130,56 @@ class EnhancedVectorstoreBuilder:
             graph_stats = self.graph_store.get_stats()
             self.reporter.add_graph_stats(graph_stats)
             print(f"[OK] Graph relationships stored")
+        
+        return chunks
+    
+    def _chunk_jira_documents(self, docs: List[Document]) -> List[Document]:
+        """
+        Field-aware chunking for Jira tickets.
+        
+        Strategy:
+        - Summary: No chunking (single chunk)
+        - Root Cause: No chunking (NEVER split - critical section)
+        - Comments: No chunking (one chunk per comment)
+        - AI Suggestions: No chunking (single chunk)
+        - Description: Semantic chunking only (400-500 tokens)
+        
+        This preserves field integrity and improves retrieval accuracy.
+        """
+        chunks = []
+        
+        # Jira-specific chunker with smaller size (400-600 tokens)
+        jira_chunker = SemanticChunker(
+            target_tokens=JIRA_CHUNK_TARGET_TOKENS,
+            overlap_tokens=JIRA_CHUNK_OVERLAP_TOKENS,
+            min_tokens=JIRA_CHUNK_MIN_TOKENS
+        )
+        
+        for doc in docs:
+            section = doc.metadata.get("section", "unknown")
+            section_priority = doc.metadata.get("section_priority", "medium")
+            
+            # Never chunk these sections - keep them intact
+            if section in ["summary", "root_cause", "comment", "ai_suggestions"]:
+                chunks.append(doc)
+                continue
+            
+            # Only chunk Description section semantically
+            if section == "description":
+                # Use semantic chunking for description (400-500 tokens)
+                description_chunks = jira_chunker.chunk_documents([doc])
+                # Preserve section metadata in all chunks
+                for chunk in description_chunks:
+                    chunk.metadata["section"] = "description"
+                    chunk.metadata["section_priority"] = "high"
+                    # Preserve ticket metadata
+                    for key in ["ticket_key", "ticket_summary", "combination", "root_cause"]:
+                        if key in doc.metadata:
+                            chunk.metadata[key] = doc.metadata[key]
+                chunks.extend(description_chunks)
+            else:
+                # Unknown section - keep as-is
+                chunks.append(doc)
         
         return chunks
     

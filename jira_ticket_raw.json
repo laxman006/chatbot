@@ -1,0 +1,1570 @@
+{
+  "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations,customfield_11000.properties,customfield_10010.requestTypePractice,customfield_10998.properties,customfield_10999.properties",
+  "id": "133226",
+  "self": "https://cf2020.atlassian.net/rest/api/3/issue/133226",
+  "key": "CFITS-2065",
+  "renderedFields": {
+    "statuscategorychangedate": "Today 2:45 PM",
+    "customfield_11040": null,
+    "fixVersions": null,
+    "statusCategory": null,
+    "resolution": null,
+    "customfield_10467": null,
+    "customfield_10468": null,
+    "lastViewed": null,
+    "customfield_10060": "",
+    "customfield_10061": null,
+    "customfield_10062": null,
+    "priority": null,
+    "customfield_10698": "",
+    "customfield_10699": "",
+    "customfield_10734": null,
+    "timeestimate": null,
+    "aggregatetimeoriginalestimate": null,
+    "issuelinks": null,
+    "assignee": null,
+    "status": null,
+    "customfield_10050": "",
+    "customfield_11140": "",
+    "customfield_10051": null,
+    "customfield_10052": null,
+    "customfield_11141": "",
+    "customfield_10053": "",
+    "customfield_10054": "",
+    "customfield_10055": "",
+    "customfield_10056": null,
+    "customfield_10057": null,
+    "customfield_10058": null,
+    "customfield_10059": "",
+    "customfield_10566": null,
+    "customfield_10203": null,
+    "customfield_11139": "",
+    "aggregatetimeestimate": null,
+    "customfield_10848": null,
+    "customfield_10849": null,
+    "creator": null,
+    "subtasks": null,
+    "customfield_10040": null,
+    "customfield_10041": null,
+    "customfield_10163": null,
+    "customfield_10042": null,
+    "customfield_10043": null,
+    "customfield_10164": null,
+    "reporter": null,
+    "aggregateprogress": null,
+    "customfield_10165": null,
+    "customfield_10440": null,
+    "customfield_10044": null,
+    "customfield_10441": null,
+    "customfield_10045": null,
+    "customfield_10166": [],
+    "customfield_10442": "",
+    "customfield_10201": null,
+    "customfield_10443": "",
+    "customfield_10202": null,
+    "customfield_11006": null,
+    "customfield_10038": null,
+    "customfield_10434": null,
+    "customfield_10039": null,
+    "customfield_10435": null,
+    "customfield_11007": null,
+    "customfield_10436": null,
+    "customfield_10437": null,
+    "customfield_10438": "",
+    "customfield_10439": null,
+    "progress": null,
+    "votes": null,
+    "worklog": {
+      "startAt": 0,
+      "maxResults": 20,
+      "total": 0,
+      "worklogs": []
+    },
+    "issuetype": null,
+    "timespent": null,
+    "project": null,
+    "customfield_11000": null,
+    "customfield_11242": null,
+    "customfield_11001": "",
+    "aggregatetimespent": null,
+    "customfield_11002": null,
+    "customfield_11003": null,
+    "customfield_10035": null,
+    "customfield_11004": null,
+    "customfield_10037": "",
+    "customfield_11005": null,
+    "customfield_10269": null,
+    "customfield_10302": null,
+    "customfield_10027": null,
+    "customfield_10028": null,
+    "customfield_10700": "",
+    "customfield_10701": "",
+    "customfield_10702": null,
+    "customfield_10306": "12/Jan/26 2:45 PM",
+    "customfield_10703": null,
+    "customfield_10704": null,
+    "customfield_10308": null,
+    "resolutiondate": null,
+    "customfield_10705": null,
+    "customfield_10309": "Today 2:45 PM",
+    "customfield_10706": null,
+    "customfield_10707": null,
+    "workratio": null,
+    "customfield_10708": null,
+    "customfield_10709": null,
+    "watches": null,
+    "customfield_11073": null,
+    "created": "Today 2:45 PM",
+    "customfield_10020": null,
+    "customfield_10021": null,
+    "customfield_10022": null,
+    "customfield_10023": null,
+    "customfield_10016": null,
+    "customfield_11106": null,
+    "customfield_10017": "",
+    "customfield_10019": null,
+    "updated": "Today 2:45 PM",
+    "timeoriginalestimate": null,
+    "customfield_10370": null,
+    "customfield_10130": null,
+    "description": "<p>Server:<a href=\"https://casepoint.cloudfuze.com/\" class=\"external-link\" rel=\"nofollow noreferrer\">CloudFuze</a> <br/>\nUser Id: <tt>694af35fd7289a4241b5c13c</tt></p>\n\n<p>Hi Team,</p>\n\n<p>For the below paths CSV is not generating. we identified that for below users in destination there is no root folder ID please check.</p>\n\n<div class='table-wrap'>\n<table class='confluenceTable'><tbody>\n<tr>\n<td class='confluenceTd'>source</td>\n<td class='confluenceTd'>&nbsp;</td>\n<td class='confluenceTd'>Destination</td>\n<td class='confluenceTd'>&nbsp;</td>\n</tr>\n<tr>\n<td class='confluenceTd'><a href=\"mailto:chris.ji@mlinqs.net\" class=\"external-link\" rel=\"nofollow noreferrer\">chris.ji@mlinqs.net</a></td>\n<td class='confluenceTd'>/</td>\n<td class='confluenceTd'><a href=\"mailto:chris.ji@casepoint.com\" class=\"external-link\" rel=\"nofollow noreferrer\">chris.ji@casepoint.com</a></td>\n<td class='confluenceTd'>/</td>\n</tr>\n<tr>\n<td class='confluenceTd'><a href=\"mailto:helpdesk@mlinqs.net\" class=\"external-link\" rel=\"nofollow noreferrer\">helpdesk@mlinqs.net</a></td>\n<td class='confluenceTd'>/</td>\n<td class='confluenceTd'><a href=\"mailto:helpdesk1@casepoint.com\" class=\"external-link\" rel=\"nofollow noreferrer\">helpdesk1@casepoint.com</a></td>\n<td class='confluenceTd'>/</td>\n</tr>\n<tr>\n<td class='confluenceTd'><a href=\"mailto:joe.cucchiaro@mlinqs.net\" class=\"external-link\" rel=\"nofollow noreferrer\">joe.cucchiaro@mlinqs.net</a></td>\n<td class='confluenceTd'>/</td>\n<td class='confluenceTd'><a href=\"mailto:joe.cucchiaro@casepoint.com\" class=\"external-link\" rel=\"nofollow noreferrer\">joe.cucchiaro@casepoint.com</a></td>\n<td class='confluenceTd'>/</td>\n</tr>\n<tr>\n<td class='confluenceTd'><a href=\"mailto:kristen.brockman@mlinqs.net\" class=\"external-link\" rel=\"nofollow noreferrer\">kristen.brockman@mlinqs.net</a></td>\n<td class='confluenceTd'>/</td>\n<td class='confluenceTd'><a href=\"mailto:kristen.brockman@casepoint.com\" class=\"external-link\" rel=\"nofollow noreferrer\">kristen.brockman@casepoint.com</a></td>\n<td class='confluenceTd'>/</td>\n</tr>\n<tr>\n<td class='confluenceTd'><a href=\"mailto:laoleng.xiong@mlinqs.net\" class=\"external-link\" rel=\"nofollow noreferrer\">laoleng.xiong@mlinqs.net</a></td>\n<td class='confluenceTd'>/</td>\n<td class='confluenceTd'><a href=\"mailto:laoleng.xiong@casepoint.com\" class=\"external-link\" rel=\"nofollow noreferrer\">laoleng.xiong@casepoint.com</a></td>\n<td class='confluenceTd'>/</td>\n</tr>\n<tr>\n<td class='confluenceTd'><a href=\"mailto:lilian.sanda@mlinqs.net\" class=\"external-link\" rel=\"nofollow noreferrer\">lilian.sanda@mlinqs.net</a></td>\n<td class='confluenceTd'>/</td>\n<td class='confluenceTd'><a href=\"mailto:lilian.sanda@casepoint.com\" class=\"external-link\" rel=\"nofollow noreferrer\">lilian.sanda@casepoint.com</a></td>\n<td class='confluenceTd'>/</td>\n</tr>\n<tr>\n<td class='confluenceTd'><a href=\"mailto:nick.mcintyre@mlinqs.net\" class=\"external-link\" rel=\"nofollow noreferrer\">nick.mcintyre@mlinqs.net</a></td>\n<td class='confluenceTd'>/</td>\n<td class='confluenceTd'><a href=\"mailto:nick.mcintyre@casepoint.com\" class=\"external-link\" rel=\"nofollow noreferrer\">nick.mcintyre@casepoint.com</a></td>\n<td class='confluenceTd'>/</td>\n</tr>\n<tr>\n<td class='confluenceTd'><a href=\"mailto:tia.brookover@mlinqs.net\" class=\"external-link\" rel=\"nofollow noreferrer\">tia.brookover@mlinqs.net</a></td>\n<td class='confluenceTd'>/</td>\n<td class='confluenceTd'><a href=\"mailto:tia.brookover@casepoint.com\" class=\"external-link\" rel=\"nofollow noreferrer\">tia.brookover@casepoint.com</a></td>\n<td class='confluenceTd'>/</td>\n</tr>\n</tbody></table>\n</div>\n",
+    "customfield_10010": null,
+    "customfield_10131": null,
+    "customfield_10014": null,
+    "timetracking": {},
+    "customfield_10015": null,
+    "customfield_10005": null,
+    "customfield_10401": null,
+    "customfield_10006": null,
+    "customfield_10402": "",
+    "customfield_10007": null,
+    "security": null,
+    "customfield_10008": null,
+    "customfield_10767": null,
+    "attachment": [],
+    "customfield_10009": null,
+    "summary": null,
+    "customfield_10084": null,
+    "customfield_11174": null,
+    "customfield_10085": null,
+    "customfield_10086": null,
+    "customfield_11175": null,
+    "customfield_11176": "None",
+    "customfield_10087": null,
+    "customfield_10000": null,
+    "customfield_10001": null,
+    "customfield_10089": null,
+    "customfield_10002": null,
+    "customfield_10883": null,
+    "customfield_10004": null,
+    "customfield_10599": "",
+    "customfield_10236": null,
+    "environment": "",
+    "customfield_10998": null,
+    "customfield_10999": null,
+    "customfield_11209": null,
+    "duedate": null,
+    "customfield_10917": null,
+    "comment": {
+      "comments": [],
+      "self": "https://cf2020.atlassian.net/rest/api/3/issue/133226/comment",
+      "maxResults": 0,
+      "total": 0,
+      "startAt": 0
+    }
+  },
+  "names": {
+    "statuscategorychangedate": "Status Category Changed",
+    "customfield_11040": "Issue Type",
+    "fixVersions": "Fix versions",
+    "statusCategory": "Status Category",
+    "resolution": "Resolution",
+    "customfield_10467": "CF Start Time",
+    "customfield_10468": "CF Resolved Time",
+    "lastViewed": "Last Viewed",
+    "customfield_10060": "Workaround",
+    "customfield_10061": "Time to close after resolution",
+    "customfield_10062": "Time to review normal change",
+    "priority": "Priority",
+    "customfield_10698": "Sales opportunity",
+    "customfield_10699": "Type",
+    "customfield_10734": "SLA Breach1",
+    "timeestimate": "Remaining Estimate",
+    "aggregatetimeoriginalestimate": "Σ Original Estimate",
+    "issuelinks": "Linked Issues",
+    "assignee": "Assignee",
+    "status": "Status",
+    "customfield_10050": "Affected hardware",
+    "customfield_11140": "Short-Term Fix / Mitigation: -",
+    "customfield_10051": "Severity",
+    "customfield_10052": "Source",
+    "customfield_11141": "Long - Term Fix / Prevention : -",
+    "customfield_10053": "Implementation plan",
+    "customfield_10054": "Backout plan",
+    "customfield_10055": "Test plan",
+    "customfield_10056": "Planned start date",
+    "customfield_10057": "Planned end date",
+    "customfield_10058": "Investigation reason",
+    "customfield_10059": "Root Cause :- Describe the root cause.(why, where, when)",
+    "customfield_10566": "Focus Areas",
+    "customfield_10203": "Product Type",
+    "customfield_11139": "RCA (Technical RCA/Human/process root cause/Env factors):-",
+    "aggregatetimeestimate": "Σ Remaining Estimate",
+    "customfield_10848": "First Response SLA Breach",
+    "customfield_10849": "Resolution SLA Breach",
+    "creator": "Creator",
+    "subtasks": "Sub-tasks",
+    "customfield_10040": "Satisfaction",
+    "customfield_10041": "Satisfaction date",
+    "customfield_10163": "Design",
+    "customfield_10042": "Affected services",
+    "customfield_10043": "Time to resolution",
+    "customfield_10164": "Work category",
+    "reporter": "Reporter",
+    "aggregateprogress": "Σ Progress",
+    "customfield_10165": "Major incident",
+    "customfield_10440": "Comments",
+    "customfield_10044": "Time to first response",
+    "customfield_10441": "Linked items",
+    "customfield_10045": "Request language",
+    "customfield_10166": "Responders",
+    "customfield_10442": "Delivery progress",
+    "customfield_10201": "Sentiment",
+    "customfield_10443": "Delivery status",
+    "customfield_10202": "Goals",
+    "customfield_11006": "Response SLA metric",
+    "customfield_10038": "Approvals",
+    "customfield_10434": "Idea archived",
+    "customfield_10039": "Request participants",
+    "customfield_10435": "Idea archived by",
+    "customfield_11007": "Resolution SLA Metric",
+    "customfield_10436": "Idea archived on",
+    "customfield_10437": "Atlassian project",
+    "customfield_10438": "Atlassian project status",
+    "customfield_10439": "Insights",
+    "progress": "Progress",
+    "votes": "Votes",
+    "worklog": "Log Work",
+    "issuetype": "Issue Type",
+    "timespent": "Time Spent",
+    "project": "Project",
+    "customfield_11000": "Risk consequence",
+    "customfield_11242": "Manage Client Name",
+    "customfield_11001": "Program Increment",
+    "aggregatetimespent": "Σ Time Spent",
+    "customfield_11002": "Baseline start date",
+    "customfield_11003": "Baseline end date",
+    "customfield_10035": "Begin Date",
+    "customfield_11004": "Scheduling mode",
+    "customfield_10037": "Test Environment",
+    "customfield_11005": "Task progress",
+    "customfield_10269": "Developer",
+    "customfield_10302": "Request Type",
+    "customfield_10027": "Target start",
+    "customfield_10028": "Target end",
+    "customfield_10700": "Support team",
+    "customfield_10701": "sd.premade.project.servicedesk.esm.issuetype.field.related.projects.field.name.galaxia",
+    "customfield_10702": "Reviewers",
+    "customfield_10306": "SLA Due Time",
+    "customfield_10703": "Time to first response for Demos and POC",
+    "customfield_10704": "Time to firts response on SecurityAssessments",
+    "customfield_10308": "Migration Engineer",
+    "resolutiondate": "Resolved",
+    "customfield_10705": "Demo resolution SLA",
+    "customfield_10309": "SLA Start Time",
+    "customfield_10706": "POC resolution SLA",
+    "customfield_10707": "SecurityAssessment rosulution SLA",
+    "workratio": "Work Ratio",
+    "customfield_10708": "Technical Assistance response SLA",
+    "customfield_10709": "Technical assistance resolve SLA",
+    "watches": "Watchers",
+    "customfield_11073": "Type of Fix",
+    "created": "Created",
+    "customfield_10020": "Sprint",
+    "customfield_10021": "Flagged",
+    "customfield_10022": "[CHART] Date of First Response",
+    "customfield_10023": "[CHART] Time in Status",
+    "customfield_10016": "Story point estimate",
+    "customfield_11106": "Severity Level",
+    "customfield_10017": "Issue color",
+    "customfield_10019": "Rank",
+    "updated": "Updated",
+    "timeoriginalestimate": "Original estimate",
+    "customfield_10370": "Root Cause Category ",
+    "customfield_10130": "Project overview key",
+    "description": "Description",
+    "customfield_10010": "Request Type",
+    "customfield_10131": "Project overview status",
+    "customfield_10014": "Epic Link",
+    "timetracking": "Time tracking",
+    "customfield_10015": "Start date",
+    "customfield_10005": "Change type",
+    "customfield_10401": "Customer Name",
+    "customfield_10006": "Change risk",
+    "customfield_10402": "Fix description",
+    "customfield_10007": "Change reason",
+    "security": "Security Level",
+    "customfield_10008": "Change start date",
+    "customfield_10767": "TEST",
+    "attachment": "Attachment",
+    "customfield_10009": "Change completion date",
+    "summary": "Summary",
+    "customfield_10084": "Open forms",
+    "customfield_11174": "Time to second response",
+    "customfield_10085": "Submitted forms",
+    "customfield_10086": "Locked forms",
+    "customfield_11175": "Second Response SLA Breach",
+    "customfield_11176": "Log work (WP)",
+    "customfield_10087": "Total forms",
+    "customfield_10000": "Development",
+    "customfield_10001": "Team",
+    "customfield_10089": "Category",
+    "customfield_10002": "Organizations",
+    "customfield_10883": "Client Name",
+    "customfield_10004": "Impact",
+    "customfield_10599": "Insights",
+    "customfield_10236": "Combination",
+    "environment": "Environment",
+    "customfield_10998": "Risk probability",
+    "customfield_10999": "Task mode",
+    "customfield_11209": "Complexity",
+    "duedate": "Due date",
+    "customfield_10917": "SLA Breached",
+    "comment": "Comment"
+  },
+  "fields": {
+    "statuscategorychangedate": "2026-01-08T14:45:24.341+0200",
+    "customfield_11040": null,
+    "fixVersions": [],
+    "statusCategory": {
+      "self": "https://cf2020.atlassian.net/rest/api/3/statuscategory/4",
+      "id": 4,
+      "key": "indeterminate",
+      "colorName": "yellow",
+      "name": "In Progress"
+    },
+    "resolution": null,
+    "customfield_10467": null,
+    "customfield_10468": null,
+    "lastViewed": null,
+    "customfield_10060": null,
+    "customfield_10061": null,
+    "customfield_10062": null,
+    "priority": {
+      "self": "https://cf2020.atlassian.net/rest/api/3/priority/3",
+      "iconUrl": "https://cf2020.atlassian.net/images/icons/priorities/medium_new.svg",
+      "name": "Medium",
+      "id": "3"
+    },
+    "customfield_10698": null,
+    "customfield_10699": null,
+    "customfield_10734": null,
+    "timeestimate": null,
+    "aggregatetimeoriginalestimate": null,
+    "issuelinks": [
+      {
+        "id": "25263",
+        "self": "https://cf2020.atlassian.net/rest/api/3/issueLink/25263",
+        "type": {
+          "id": "10003",
+          "name": "Relates",
+          "inward": "relates to",
+          "outward": "relates to",
+          "self": "https://cf2020.atlassian.net/rest/api/3/issueLinkType/10003"
+        },
+        "inwardIssue": {
+          "id": "133227",
+          "key": "PRI-9330",
+          "self": "https://cf2020.atlassian.net/rest/api/3/issue/133227",
+          "fields": {
+            "summary": "Case Point - CSV is not generating ",
+            "status": {
+              "self": "https://cf2020.atlassian.net/rest/api/3/status/11175",
+              "description": "",
+              "iconUrl": "https://cf2020.atlassian.net/",
+              "name": "Waiting for Migration Team",
+              "id": "11175",
+              "statusCategory": {
+                "self": "https://cf2020.atlassian.net/rest/api/3/statuscategory/4",
+                "id": 4,
+                "key": "indeterminate",
+                "colorName": "yellow",
+                "name": "In Progress"
+              }
+            },
+            "priority": {
+              "self": "https://cf2020.atlassian.net/rest/api/3/priority/3",
+              "iconUrl": "https://cf2020.atlassian.net/images/icons/priorities/medium_new.svg",
+              "name": "Medium",
+              "id": "3"
+            },
+            "issuetype": {
+              "self": "https://cf2020.atlassian.net/rest/api/3/issuetype/10049",
+              "id": "10049",
+              "description": "A small, distinct piece of work.",
+              "iconUrl": "https://cf2020.atlassian.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10318?size=medium",
+              "name": "Task",
+              "subtask": false,
+              "avatarId": 10318,
+              "hierarchyLevel": 0
+            }
+          }
+        }
+      }
+    ],
+    "assignee": null,
+    "status": {
+      "self": "https://cf2020.atlassian.net/rest/api/3/status/10048",
+      "description": "This was auto-generated by Jira Service Desk during workflow import",
+      "iconUrl": "https://cf2020.atlassian.net/images/icons/status_generic.gif",
+      "name": "Pending with dev",
+      "id": "10048",
+      "statusCategory": {
+        "self": "https://cf2020.atlassian.net/rest/api/3/statuscategory/4",
+        "id": 4,
+        "key": "indeterminate",
+        "colorName": "yellow",
+        "name": "In Progress"
+      }
+    },
+    "customfield_10050": null,
+    "customfield_11140": null,
+    "customfield_10051": null,
+    "customfield_10052": null,
+    "customfield_11141": null,
+    "customfield_10053": null,
+    "customfield_10054": null,
+    "customfield_10055": null,
+    "customfield_10056": null,
+    "customfield_10057": null,
+    "customfield_10058": null,
+    "customfield_10059": null,
+    "customfield_10566": null,
+    "customfield_10203": {
+      "self": "https://cf2020.atlassian.net/rest/api/3/customFieldOption/10396",
+      "value": "Content Migration",
+      "id": "10396"
+    },
+    "customfield_11139": null,
+    "aggregatetimeestimate": null,
+    "customfield_10848": [
+      {
+        "self": "https://cf2020.atlassian.net/rest/api/3/customFieldOption/11292",
+        "value": "No",
+        "id": "11292"
+      }
+    ],
+    "customfield_10849": [
+      {
+        "self": "https://cf2020.atlassian.net/rest/api/3/customFieldOption/11294",
+        "value": "No",
+        "id": "11294"
+      }
+    ],
+    "creator": {
+      "self": "https://cf2020.atlassian.net/rest/api/3/user?accountId=712020%3A9afda965-d55f-4ba5-a679-72105de21980",
+      "accountId": "712020:9afda965-d55f-4ba5-a679-72105de21980",
+      "avatarUrls": {
+        "48x48": "https://secure.gravatar.com/avatar/03bfe1e082af6b4ed8d81bb07ef809f6?d=https%3A%2F%2Favatar-management--avatars.us-west-2.prod.public.atl-paas.net%2Finitials%2FDD-2.png",
+        "24x24": "https://secure.gravatar.com/avatar/03bfe1e082af6b4ed8d81bb07ef809f6?d=https%3A%2F%2Favatar-management--avatars.us-west-2.prod.public.atl-paas.net%2Finitials%2FDD-2.png",
+        "16x16": "https://secure.gravatar.com/avatar/03bfe1e082af6b4ed8d81bb07ef809f6?d=https%3A%2F%2Favatar-management--avatars.us-west-2.prod.public.atl-paas.net%2Finitials%2FDD-2.png",
+        "32x32": "https://secure.gravatar.com/avatar/03bfe1e082af6b4ed8d81bb07ef809f6?d=https%3A%2F%2Favatar-management--avatars.us-west-2.prod.public.atl-paas.net%2Finitials%2FDD-2.png"
+      },
+      "displayName": "Davidraj Dumpala",
+      "active": true,
+      "timeZone": "Asia/Kolkata",
+      "accountType": "atlassian"
+    },
+    "subtasks": [],
+    "customfield_10040": null,
+    "customfield_10041": null,
+    "customfield_10163": null,
+    "customfield_10042": null,
+    "customfield_10043": {
+      "id": "21",
+      "name": "Time to resolution",
+      "_links": {
+        "self": "https://cf2020.atlassian.net/rest/servicedeskapi/request/133226/sla/21"
+      },
+      "completedCycles": [],
+      "ongoingCycle": {
+        "startTime": {
+          "iso8601": "2026-01-08T14:45:23+0200",
+          "jira": "2026-01-08T14:45:23.979+0200",
+          "friendly": "Today 2:45 PM",
+          "epochMillis": 1767876323979
+        },
+        "breachTime": {
+          "iso8601": "2026-01-12T15:30:14+0200",
+          "jira": "2026-01-12T15:30:14.313+0200",
+          "friendly": "12/Jan/26 3:30 PM",
+          "epochMillis": 1768224614313
+        },
+        "breached": false,
+        "paused": true,
+        "withinCalendarHours": true,
+        "goalDuration": {
+          "millis": 345600000,
+          "friendly": "96h"
+        },
+        "elapsedTime": {
+          "millis": 21186,
+          "friendly": "0m"
+        },
+        "remainingTime": {
+          "millis": 345578814,
+          "friendly": "95h 59m"
+        }
+      },
+      "slaDisplayFormat": "NEW_SLA_FORMAT"
+    },
+    "customfield_10164": "Service requests",
+    "reporter": {
+      "self": "https://cf2020.atlassian.net/rest/api/3/user?accountId=712020%3A9afda965-d55f-4ba5-a679-72105de21980",
+      "accountId": "712020:9afda965-d55f-4ba5-a679-72105de21980",
+      "avatarUrls": {
+        "48x48": "https://secure.gravatar.com/avatar/03bfe1e082af6b4ed8d81bb07ef809f6?d=https%3A%2F%2Favatar-management--avatars.us-west-2.prod.public.atl-paas.net%2Finitials%2FDD-2.png",
+        "24x24": "https://secure.gravatar.com/avatar/03bfe1e082af6b4ed8d81bb07ef809f6?d=https%3A%2F%2Favatar-management--avatars.us-west-2.prod.public.atl-paas.net%2Finitials%2FDD-2.png",
+        "16x16": "https://secure.gravatar.com/avatar/03bfe1e082af6b4ed8d81bb07ef809f6?d=https%3A%2F%2Favatar-management--avatars.us-west-2.prod.public.atl-paas.net%2Finitials%2FDD-2.png",
+        "32x32": "https://secure.gravatar.com/avatar/03bfe1e082af6b4ed8d81bb07ef809f6?d=https%3A%2F%2Favatar-management--avatars.us-west-2.prod.public.atl-paas.net%2Finitials%2FDD-2.png"
+      },
+      "displayName": "Davidraj Dumpala",
+      "active": true,
+      "timeZone": "Asia/Kolkata",
+      "accountType": "atlassian"
+    },
+    "aggregateprogress": {
+      "progress": 0,
+      "total": 0
+    },
+    "customfield_10165": null,
+    "customfield_10440": null,
+    "customfield_10044": {
+      "id": "22",
+      "name": "Time to first response",
+      "_links": {
+        "self": "https://cf2020.atlassian.net/rest/servicedeskapi/request/133226/sla/22"
+      },
+      "completedCycles": [],
+      "ongoingCycle": {
+        "startTime": {
+          "iso8601": "2026-01-08T14:45:23+0200",
+          "jira": "2026-01-08T14:45:23.979+0200",
+          "friendly": "Today 2:45 PM",
+          "epochMillis": 1767876323979
+        },
+        "breachTime": {
+          "iso8601": "2026-01-08T17:30:14+0200",
+          "jira": "2026-01-08T17:30:14.354+0200",
+          "friendly": "Today 5:30 PM",
+          "epochMillis": 1767886214354
+        },
+        "breached": false,
+        "paused": true,
+        "withinCalendarHours": true,
+        "goalDuration": {
+          "millis": 7200000,
+          "friendly": "2h"
+        },
+        "elapsedTime": {
+          "millis": 21186,
+          "friendly": "0m"
+        },
+        "remainingTime": {
+          "millis": 7178814,
+          "friendly": "1h 59m"
+        }
+      },
+      "slaDisplayFormat": "NEW_SLA_FORMAT"
+    },
+    "customfield_10441": null,
+    "customfield_10045": {
+      "languageCode": "en",
+      "displayName": "English"
+    },
+    "customfield_10166": [],
+    "customfield_10442": null,
+    "customfield_10201": null,
+    "customfield_10443": null,
+    "customfield_10202": null,
+    "customfield_11006": null,
+    "customfield_10038": null,
+    "customfield_10434": null,
+    "customfield_10039": [],
+    "customfield_10435": null,
+    "customfield_11007": null,
+    "customfield_10436": null,
+    "customfield_10437": null,
+    "customfield_10438": null,
+    "customfield_10439": null,
+    "progress": {
+      "progress": 0,
+      "total": 0
+    },
+    "votes": {
+      "self": "https://cf2020.atlassian.net/rest/api/3/issue/CFITS-2065/votes",
+      "votes": 0,
+      "hasVoted": false
+    },
+    "worklog": {
+      "startAt": 0,
+      "maxResults": 20,
+      "total": 0,
+      "worklogs": []
+    },
+    "issuetype": {
+      "self": "https://cf2020.atlassian.net/rest/api/3/issuetype/10064",
+      "id": "10064",
+      "description": "A request that follows ITSM workflows.",
+      "iconUrl": "https://cf2020.atlassian.net/rest/api/2/universal_avatar/view/type/issuetype/avatar/10563?size=medium",
+      "name": "[System] Service request",
+      "subtask": false,
+      "avatarId": 10563,
+      "hierarchyLevel": 0
+    },
+    "timespent": null,
+    "project": {
+      "self": "https://cf2020.atlassian.net/rest/api/3/project/10496",
+      "id": "10496",
+      "key": "CFITS",
+      "name": "CloudFuze Support",
+      "projectTypeKey": "service_desk",
+      "simplified": false,
+      "avatarUrls": {
+        "48x48": "https://cf2020.atlassian.net/rest/api/3/universal_avatar/view/type/project/avatar/10423",
+        "24x24": "https://cf2020.atlassian.net/rest/api/3/universal_avatar/view/type/project/avatar/10423?size=small",
+        "16x16": "https://cf2020.atlassian.net/rest/api/3/universal_avatar/view/type/project/avatar/10423?size=xsmall",
+        "32x32": "https://cf2020.atlassian.net/rest/api/3/universal_avatar/view/type/project/avatar/10423?size=medium"
+      },
+      "projectCategory": {
+        "self": "https://cf2020.atlassian.net/rest/api/3/projectCategory/10033",
+        "id": "10033",
+        "description": "Migration Team Support",
+        "name": "Migration Support"
+      }
+    },
+    "customfield_11000": null,
+    "customfield_11242": null,
+    "customfield_11001": null,
+    "aggregatetimespent": null,
+    "customfield_11002": null,
+    "customfield_11003": null,
+    "customfield_10035": null,
+    "customfield_11004": null,
+    "customfield_10037": null,
+    "customfield_11005": null,
+    "customfield_10269": null,
+    "customfield_10302": null,
+    "customfield_10027": null,
+    "customfield_10028": null,
+    "customfield_10700": null,
+    "customfield_10701": null,
+    "customfield_10702": null,
+    "customfield_10306": "2026-01-12T14:45:00.000+0200",
+    "customfield_10703": null,
+    "customfield_10704": null,
+    "customfield_10308": null,
+    "resolutiondate": null,
+    "customfield_10705": null,
+    "customfield_10309": "2026-01-08T14:45:00.000+0200",
+    "customfield_10706": null,
+    "customfield_10707": null,
+    "workratio": -1,
+    "customfield_10708": null,
+    "customfield_10709": null,
+    "watches": {
+      "self": "https://cf2020.atlassian.net/rest/api/3/issue/CFITS-2065/watchers",
+      "watchCount": 1,
+      "isWatching": false
+    },
+    "customfield_11073": null,
+    "created": "2026-01-08T14:45:23.979+0200",
+    "customfield_10020": null,
+    "customfield_10021": null,
+    "customfield_10022": null,
+    "customfield_10023": null,
+    "customfield_10016": null,
+    "customfield_11106": null,
+    "customfield_10017": null,
+    "customfield_10019": "0|i0hn6v:",
+    "updated": "2026-01-08T14:45:50.592+0200",
+    "timeoriginalestimate": null,
+    "customfield_10370": null,
+    "customfield_10130": null,
+    "description": {
+      "type": "doc",
+      "version": 1,
+      "content": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "Server:"
+            },
+            {
+              "type": "text",
+              "text": "CloudFuze",
+              "marks": [
+                {
+                  "type": "link",
+                  "attrs": {
+                    "href": "https://casepoint.cloudfuze.com/"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "text": " "
+            },
+            {
+              "type": "hardBreak"
+            },
+            {
+              "type": "text",
+              "text": "User Id: "
+            },
+            {
+              "type": "text",
+              "text": "694af35fd7289a4241b5c13c",
+              "marks": [
+                {
+                  "type": "code"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "Hi Team,"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "For the below paths CSV is not generating. we identified that for below users in destination there is no root folder ID please check."
+            }
+          ]
+        },
+        {
+          "type": "table",
+          "attrs": {
+            "isNumberColumnEnabled": false,
+            "layout": "center",
+            "localId": "675eda4b-74fc-4eb5-a847-badc296111bb"
+          },
+          "content": [
+            {
+              "type": "tableRow",
+              "content": [
+                {
+                  "type": "tableCell",
+                  "attrs": {},
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "source"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "tableCell",
+                  "attrs": {},
+                  "content": [
+                    {
+                      "type": "paragraph"
+                    }
+                  ]
+                },
+                {
+                  "type": "tableCell",
+                  "attrs": {},
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "Destination"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "tableCell",
+                  "attrs": {},
+                  "content": [
+                    {
+                      "type": "paragraph"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "tableRow",
+              "content": [
+                {
+                  "type": "tableCell",
+                  "attrs": {},
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "chris.ji@mlinqs.net",
+                          "marks": [
+                            {
+                              "type": "link",
+                              "attrs": {
+                                "href": "mailto:chris.ji@mlinqs.net"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "tableCell",
+                  "attrs": {},
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "/"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "tableCell",
+                  "attrs": {},
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "chris.ji@casepoint.com",
+                          "marks": [
+                            {
+                              "type": "link",
+                              "attrs": {
+                                "href": "mailto:chris.ji@casepoint.com"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "tableCell",
+                  "attrs": {},
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "/"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "tableRow",
+              "content": [
+                {
+                  "type": "tableCell",
+                  "attrs": {},
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "helpdesk@mlinqs.net",
+                          "marks": [
+                            {
+                              "type": "link",
+                              "attrs": {
+                                "href": "mailto:helpdesk@mlinqs.net"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "tableCell",
+                  "attrs": {},
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "/"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "tableCell",
+                  "attrs": {},
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "helpdesk1@casepoint.com",
+                          "marks": [
+                            {
+                              "type": "link",
+                              "attrs": {
+                                "href": "mailto:helpdesk1@casepoint.com"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "tableCell",
+                  "attrs": {},
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "/"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "tableRow",
+              "content": [
+                {
+                  "type": "tableCell",
+                  "attrs": {},
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "joe.cucchiaro@mlinqs.net",
+                          "marks": [
+                            {
+                              "type": "link",
+                              "attrs": {
+                                "href": "mailto:joe.cucchiaro@mlinqs.net"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "tableCell",
+                  "attrs": {},
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "/"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "tableCell",
+                  "attrs": {},
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "joe.cucchiaro@casepoint.com",
+                          "marks": [
+                            {
+                              "type": "link",
+                              "attrs": {
+                                "href": "mailto:joe.cucchiaro@casepoint.com"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "tableCell",
+                  "attrs": {},
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "/"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "tableRow",
+              "content": [
+                {
+                  "type": "tableCell",
+                  "attrs": {},
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "kristen.brockman@mlinqs.net",
+                          "marks": [
+                            {
+                              "type": "link",
+                              "attrs": {
+                                "href": "mailto:kristen.brockman@mlinqs.net"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "tableCell",
+                  "attrs": {},
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "/"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "tableCell",
+                  "attrs": {},
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "kristen.brockman@casepoint.com",
+                          "marks": [
+                            {
+                              "type": "link",
+                              "attrs": {
+                                "href": "mailto:kristen.brockman@casepoint.com"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "tableCell",
+                  "attrs": {},
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "/"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "tableRow",
+              "content": [
+                {
+                  "type": "tableCell",
+                  "attrs": {},
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "laoleng.xiong@mlinqs.net",
+                          "marks": [
+                            {
+                              "type": "link",
+                              "attrs": {
+                                "href": "mailto:laoleng.xiong@mlinqs.net"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "tableCell",
+                  "attrs": {},
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "/"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "tableCell",
+                  "attrs": {},
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "laoleng.xiong@casepoint.com",
+                          "marks": [
+                            {
+                              "type": "link",
+                              "attrs": {
+                                "href": "mailto:laoleng.xiong@casepoint.com"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "tableCell",
+                  "attrs": {},
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "/"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "tableRow",
+              "content": [
+                {
+                  "type": "tableCell",
+                  "attrs": {},
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "lilian.sanda@mlinqs.net",
+                          "marks": [
+                            {
+                              "type": "link",
+                              "attrs": {
+                                "href": "mailto:lilian.sanda@mlinqs.net"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "tableCell",
+                  "attrs": {},
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "/"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "tableCell",
+                  "attrs": {},
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "lilian.sanda@casepoint.com",
+                          "marks": [
+                            {
+                              "type": "link",
+                              "attrs": {
+                                "href": "mailto:lilian.sanda@casepoint.com"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "tableCell",
+                  "attrs": {},
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "/"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "tableRow",
+              "content": [
+                {
+                  "type": "tableCell",
+                  "attrs": {},
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "nick.mcintyre@mlinqs.net",
+                          "marks": [
+                            {
+                              "type": "link",
+                              "attrs": {
+                                "href": "mailto:nick.mcintyre@mlinqs.net"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "tableCell",
+                  "attrs": {},
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "/"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "tableCell",
+                  "attrs": {},
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "nick.mcintyre@casepoint.com",
+                          "marks": [
+                            {
+                              "type": "link",
+                              "attrs": {
+                                "href": "mailto:nick.mcintyre@casepoint.com"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "tableCell",
+                  "attrs": {},
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "/"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "tableRow",
+              "content": [
+                {
+                  "type": "tableCell",
+                  "attrs": {},
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "tia.brookover@mlinqs.net",
+                          "marks": [
+                            {
+                              "type": "link",
+                              "attrs": {
+                                "href": "mailto:tia.brookover@mlinqs.net"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "tableCell",
+                  "attrs": {},
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "/"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "tableCell",
+                  "attrs": {},
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "tia.brookover@casepoint.com",
+                          "marks": [
+                            {
+                              "type": "link",
+                              "attrs": {
+                                "href": "mailto:tia.brookover@casepoint.com"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "tableCell",
+                  "attrs": {},
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "/"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "customfield_10010": {
+      "_links": {
+        "jiraRest": "https://cf2020.atlassian.net/rest/api/2/issue/133226",
+        "web": "https://cf2020.atlassian.net/servicedesk/customer/portal/9/CFITS-2065",
+        "agent": "https://cf2020.atlassian.net/browse/CFITS-2065",
+        "self": "https://cf2020.atlassian.net/rest/servicedeskapi/request/133226"
+      },
+      "requestType": {
+        "_expands": [
+          "field"
+        ],
+        "id": "86",
+        "_links": {
+          "self": "https://cf2020.atlassian.net/rest/servicedeskapi/servicedesk/9/requesttype/86"
+        },
+        "name": "Support question",
+        "description": "Get answers or support from our team",
+        "helpText": "",
+        "defaultName": "Support question",
+        "issueTypeId": "10064",
+        "serviceDeskId": "9",
+        "portalId": "9",
+        "groupIds": [
+          "19"
+        ],
+        "icon": {
+          "id": "10540",
+          "_links": {
+            "iconUrls": {
+              "48x48": "https://cf2020.atlassian.net/rest/api/3/universal_avatar/view/type/SD_REQTYPE/avatar/10540?size=large",
+              "24x24": "https://cf2020.atlassian.net/rest/api/3/universal_avatar/view/type/SD_REQTYPE/avatar/10540?size=small",
+              "16x16": "https://cf2020.atlassian.net/rest/api/3/universal_avatar/view/type/SD_REQTYPE/avatar/10540?size=xsmall",
+              "32x32": "https://cf2020.atlassian.net/rest/api/3/universal_avatar/view/type/SD_REQTYPE/avatar/10540?size=medium"
+            }
+          }
+        }
+      },
+      "currentStatus": {
+        "status": "Pending with dev",
+        "statusCategory": "INDETERMINATE",
+        "statusDate": {
+          "iso8601": "2026-01-08T14:45:45+0200",
+          "jira": "2026-01-08T14:45:45.165+0200",
+          "friendly": "Today 2:45 PM",
+          "epochMillis": 1767876345165
+        }
+      }
+    },
+    "customfield_10131": null,
+    "customfield_10014": null,
+    "timetracking": {},
+    "customfield_10015": null,
+    "customfield_10005": null,
+    "customfield_10401": [
+      "casepoint"
+    ],
+    "customfield_10006": null,
+    "customfield_10402": null,
+    "customfield_10007": null,
+    "security": null,
+    "customfield_10008": null,
+    "customfield_10767": null,
+    "attachment": [],
+    "customfield_10009": null,
+    "summary": "Case Point - CSV is not generating ",
+    "customfield_10084": null,
+    "customfield_11174": null,
+    "customfield_10085": null,
+    "customfield_10086": null,
+    "customfield_11175": null,
+    "customfield_11176": null,
+    "customfield_10087": null,
+    "customfield_10000": "{}",
+    "customfield_10001": null,
+    "customfield_10089": null,
+    "customfield_10002": [],
+    "customfield_10883": null,
+    "customfield_10004": null,
+    "customfield_10599": null,
+    "customfield_10236": [
+      {
+        "self": "https://cf2020.atlassian.net/rest/api/3/customFieldOption/10452",
+        "value": "Onedrive - Onedrive",
+        "id": "10452"
+      }
+    ],
+    "environment": null,
+    "customfield_10998": null,
+    "customfield_10999": null,
+    "customfield_11209": null,
+    "duedate": null,
+    "customfield_10917": null,
+    "comment": {
+      "comments": [],
+      "self": "https://cf2020.atlassian.net/rest/api/3/issue/133226/comment",
+      "maxResults": 0,
+      "total": 0,
+      "startAt": 0
+    }
+  }
+}

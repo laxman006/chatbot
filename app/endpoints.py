@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Request, HTTPException, Header, Depends, Query, Path, status
 from fastapi.responses import PlainTextResponse, StreamingResponse, JSONResponse
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Tuple
 import uuid
 import httpx
 import os
@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 from app.llm import setup_qa_chain
 from app.llm_factory import get_llm
 from app.vectorstore import retriever, vectorstore, bm25_retriever
+from app.jira_vectorstore import jira_retriever, jira_vectorstore
 from app.mongodb_memory import (
     mongodb_memory,
     add_to_conversation, get_conversation_context, get_user_chat_history, 
@@ -38,6 +39,7 @@ from config import (
     DENSE_WEIGHT, BM25_WEIGHT, RERANKER_WEIGHT
 )
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.documents import Document
 import time
 from query_expander import QueryExpander
 from reranker import CrossEncoderReranker
@@ -937,6 +939,185 @@ def analyze_retrieved_documents(docs_with_scores):
     }
 
 # ============================================================================
+# JIRA VECTORSTORE INTEGRATION FOR ISSUE RESOLUTION
+# ============================================================================
+
+def calculate_jira_weight(query: str) -> float:
+    """
+    Calculate Jira retrieval weight (0.0 to 1.0) based on query signals.
+    
+    Returns:
+        float: Weight between 0.0 (no Jira) and 1.0 (full Jira retrieval)
+        
+    Signal Weights:
+        - Ticket ID present → weight = 1.0 (full retrieval)
+        - Fix/error/failed keywords → +0.4 (unable, cannot, failed, broken, etc.)
+        - Problem/troubleshoot keywords → +0.3 (problem, issue, stuck, etc.)
+        - Action problem keywords → +0.3 (initiate, start, begin, not starting, etc.)
+        - How/why questions → +0.2
+        - Migration-specific issues → +0.2 (delta migration, migration stuck, etc.)
+        - Pure informational intent → weight = 0.0
+    """
+    query_lower = query.lower()
+    weight = 0.0
+    
+    # Signal 1: Ticket ID present → Full weight
+    if any(ticket_pattern in query_lower for ticket_pattern in ['PRI-', 'CFITS-', 'ticket']):
+        weight = 1.0
+        print(f"[JIRA WEIGHT] Ticket ID detected → weight = {weight:.2f}")
+        return weight
+    
+    # Signal 2: Fix/error/failed keywords → +0.4
+    fix_keywords = [
+        'fix', 'error', 'bug', 'failed', 'broken', 'not working', 
+        'resolve', 'solution', 'unable', 'cannot', "can't", "won't", 
+        "doesn't", "don't", 'not able', 'not able to'
+    ]
+    if any(keyword in query_lower for keyword in fix_keywords):
+        weight += 0.4
+        print(f"[JIRA WEIGHT] Fix/error keywords detected → +0.4")
+    
+    # Signal 3: How/why questions → +0.2
+    how_why_keywords = ['how to', 'how do', 'why', 'what is wrong', 'what happened']
+    if any(keyword in query_lower for keyword in how_why_keywords):
+        weight += 0.2
+        print(f"[JIRA WEIGHT] How/why question detected → +0.2")
+    
+    # Signal 4: Problem/troubleshoot keywords → +0.3
+    problem_keywords = [
+        'problem', 'issue', 'troubleshoot', 'debug', 'conflict',
+        'stuck', 'not starting', 'not initiating', 'not responding'
+    ]
+    if any(keyword in query_lower for keyword in problem_keywords):
+        weight += 0.3
+        print(f"[JIRA WEIGHT] Problem keywords detected → +0.3")
+    
+    # Signal 5: Migration-specific issues → +0.2
+    # Check for "delta" or "migration" + problem words
+    migration_issue_keywords = [
+        'migration issue', 'migration problem', 'migration failed', 
+        'migration error', 'delta migration', 'delta sync',
+        'delta', 'migration stuck', 'migration not'
+    ]
+    if any(keyword in query_lower for keyword in migration_issue_keywords):
+        weight += 0.2
+        print(f"[JIRA WEIGHT] Migration issue keywords detected → +0.2")
+    
+    # Signal 6: Action verbs that indicate problems → +0.3
+    action_problem_keywords = [
+        'initiate', 'start', 'begin', 'launch', 'trigger',
+        'not initiate', 'not start', 'not begin', 'not launch'
+    ]
+    if any(keyword in query_lower for keyword in action_problem_keywords):
+        weight += 0.3
+        print(f"[JIRA WEIGHT] Action problem keywords detected → +0.3")
+    
+    # Signal 7: Pure informational intent → Reduce weight
+    info_keywords = ['what is', 'tell me about', 'explain', 'describe', 'show me']
+    if any(keyword in query_lower for keyword in info_keywords):
+        # Only reduce if no issue keywords found
+        if weight < 0.3:
+            weight = 0.0
+            print(f"[JIRA WEIGHT] Pure informational query → weight = 0.0")
+    
+    # Cap at 1.0
+    weight = min(weight, 1.0)
+    print(f"[JIRA WEIGHT] Final weight = {weight:.2f}")
+    return weight
+
+
+def merge_retrieval_results(main_results: List, jira_results: List = None, max_docs: int = 30):
+    """
+    Merge results from main vectorstore and Jira vectorstore.
+    Prioritizes Jira tickets for issue resolution queries.
+    """
+    merged = []
+    seen_content = set()
+    
+    # First, add Jira results (if any) - prioritize them for issue resolution
+    if jira_results:
+        print(f"[MERGE] Adding {len(jira_results)} Jira tickets to results")
+        for doc, score in jira_results:
+            # Create unique key from content preview
+            content_key = doc.page_content[:200] if doc.page_content else ""
+            if content_key and content_key not in seen_content:
+                seen_content.add(content_key)
+                # Boost Jira tickets slightly by adjusting score (lower = better)
+                adjusted_score = score * 0.9  # Make Jira tickets rank higher
+                merged.append((doc, adjusted_score))
+    
+    # Then add main vectorstore results
+    print(f"[MERGE] Adding {len(main_results)} main vectorstore results")
+    for doc, score in main_results:
+        content_key = doc.page_content[:200] if doc.page_content else ""
+        if content_key and content_key not in seen_content:
+            seen_content.add(content_key)
+            merged.append((doc, score))
+    
+    # Sort by score (lower is better for distance-based scores)
+    merged.sort(key=lambda x: x[1])
+    
+    # Return top max_docs
+    return merged[:max_docs]
+
+# ============================================================================
+# SECTION-BASED RERANKING
+# ============================================================================
+
+def apply_section_based_reranking(
+    query: str,
+    candidates: List[Tuple[Document, float]],
+    top_k: int = 8
+) -> List[Tuple[Document, float]]:
+    """
+    Apply cross-encoder reranking with section-based boosting.
+    
+    Priority order:
+    1. root_cause (critical) → highest boost
+    2. ai_suggestions (critical) → high boost
+    3. description (high) → medium boost
+    4. summary (high) → low boost
+    5. comment (medium) → no boost
+    
+    This ensures fixes beat symptoms in final context.
+    """
+    if not candidates:
+        return []
+    
+    # Section priority weights (higher = better)
+    SECTION_BOOSTS = {
+        "root_cause": 0.15,      # Highest priority - actual fixes
+        "ai_suggestions": 0.12,  # High priority - AI solutions
+        "description": 0.05,     # Medium - problem description
+        "summary": 0.02,         # Low - ticket summary
+        "comment": 0.0,          # No boost - developer comments
+    }
+    
+    # Get base reranker scores
+    reranked_base = cross_reranker.rerank(query, candidates, top_k=len(candidates))
+    
+    # Apply section-based boosting
+    boosted_results = []
+    for doc, base_score in reranked_base:
+        section = doc.metadata.get("section", "unknown")
+        section_priority = doc.metadata.get("section_priority", "medium")
+        
+        # Get boost for this section
+        boost = SECTION_BOOSTS.get(section, 0.0)
+        
+        # Apply boost to score
+        boosted_score = base_score + boost
+        
+        boosted_results.append((doc, boosted_score))
+        if section in SECTION_BOOSTS:  # Only log if section has boost
+            print(f"[RERANK] Section '{section}' ({section_priority}): base={base_score:.4f}, boost={boost:.4f}, final={boosted_score:.4f}")
+    
+    # Re-sort by boosted scores
+    boosted_results.sort(key=lambda x: x[1], reverse=True)
+    
+    return boosted_results[:top_k]
+
+# ============================================================================
 # OPTION E: PERPLEXITY-STYLE RETRIEVAL FUNCTION
 # ============================================================================
 
@@ -946,15 +1127,25 @@ def perplexity_style_retrieve(
     k_bm25: int = None,
     k_final: int = None,
     use_expansion: bool = None,
+    jira_weight: float = None,  # Weighted inclusion (0.0-1.0), auto-calculate if None
 ):
     """
-    Perplexity-style retrieval:
+    Perplexity-style retrieval with weighted Jira vectorstore integration:
       1. Optional LLM-based query expansion
-      2. Dense retrieval from Chroma
-      3. Sparse retrieval from BM25
-      4. Merge + normalize scores
-      5. Cross-encoder reranking
+      2. Dense retrieval from MAIN Chroma vectorstore
+      3. Sparse retrieval from BM25 (MAIN vectorstore)
+      4. Weighted retrieval from Jira vectorstore (0-10 tickets based on weight)
+      5. Merge MAIN + Jira results
+      6. Cross-encoder reranking with section-based boosting
     """
+    # Calculate Jira weight if not provided
+    if jira_weight is None:
+        jira_weight = calculate_jira_weight(query)
+    
+    # Calculate dynamic k_jira based on weight (0-10 tickets)
+    k_jira = int(10 * jira_weight)
+    if k_jira > 0:
+        print(f"[RETRIEVAL] Will retrieve {k_jira} tickets from Jira vectorstore (weight={jira_weight:.2f})")
     # Use config defaults if not provided
     if k_dense is None:
         k_dense = DENSE_RETRIEVAL_K
@@ -1082,12 +1273,39 @@ def perplexity_style_retrieve(
 
         candidates.append((doc, base_score))
 
-    # Sort by base score descending
+    # Sort by base score descending (similarity scores - higher is better)
     candidates.sort(key=lambda x: x[1], reverse=True)
+    
+    # Convert to distance format (lower = better) for merging with Jira results
+    # candidates has similarity scores (0-1, higher=better), convert to distance
+    main_results = [(doc, 1.0 - score) for doc, score in candidates]
 
-    # ---- 4. Cross-encoder reranking ----
-    candidates = candidates[: max(k_final * 3, k_final)]  # pre-filter
-    reranked = cross_reranker.rerank(query, candidates, top_k=k_final)
+    # ---- 4. Weighted retrieval from JIRA vectorstore ----
+    jira_results = []
+    if k_jira > 0 and jira_vectorstore:
+        print(f"[RETRIEVAL] Retrieving {k_jira} tickets from Jira vectorstore (weight={jira_weight:.2f})...")
+        try:
+            # Get Jira tickets using similarity search (returns distance scores)
+            jira_docs_with_scores = jira_vectorstore.similarity_search_with_score(query, k=k_jira)
+            for doc, dist in jira_docs_with_scores:
+                jira_results.append((doc, float(dist)))  # dist is already distance (lower=better)
+            print(f"[RETRIEVAL] Retrieved {len(jira_results)} Jira tickets")
+        except Exception as e:
+            print(f"[WARN] Jira retrieval failed: {e}")
+
+    # ---- 5. Merge MAIN + Jira results ----
+    if jira_results:
+        # Merge results with Jira tickets prioritized (both in distance format)
+        merged_results = merge_retrieval_results(main_results, jira_results, max_docs=k_final * 3)
+        print(f"[RETRIEVAL] Merged results: {len(main_results)} main + {len(jira_results)} Jira = {len(merged_results)} total")
+        # Convert back to similarity scores for reranker (reranker expects similarity, higher=better)
+        candidates_for_rerank = [(doc, 1.0 - score) for doc, score in merged_results]
+    else:
+        # No Jira results, use main candidates directly (already in similarity format)
+        candidates_for_rerank = candidates[:max(k_final * 3, k_final)]
+
+    # ---- 6. Cross-encoder reranking with section-based boosting ----
+    reranked = apply_section_based_reranking(query, candidates_for_rerank, top_k=k_final)
 
     return reranked  # list of (doc, final_score)
 
@@ -3751,10 +3969,17 @@ async def get_teams_analytics_summary(
         
         logger.info(f"[LANGFUSE ANALYTICS] Pagination: max_pages={max_pages}, batch_limit={batch_limit}")
         
+        # Collect all unique emails first for batch profile fetching
+        all_emails_set = set()
+        traces_data = []  # Store traces temporarily
+        traces_with_email = 0
+        traces_without_email = 0
+        
         async with httpx.AsyncClient() as client:
             total_traces_fetched = 0
             total_pages_fetched = 0
             
+            # First pass: Collect all traces and unique emails
             while page <= max_pages:
                 try:
                     params = {
@@ -3808,45 +4033,16 @@ async def get_teams_analytics_summary(
                             str(trace.get("input", ""))[:50] + "..." if len(str(trace.get("input", ""))) > 50 else trace.get("input", ""),
                         )
                     
-                    # Process traces and assign to teams
+                    # Store traces and collect emails
                     for trace in traces:
                         metadata = trace.get("metadata", {})
                         user_email = metadata.get("user_email")
-                        question = trace.get("input", "")
-                        
                         if user_email:
                             user_email_str = str(user_email) if isinstance(user_email, list) else user_email
                             normalized_email = user_email_str.lower().strip()
-                            if not normalized_email:
-                                continue
-                            
-                            # ✅ PRIORITY: Check user_activity.team_name first, then fallback to email matching
-                            team_name = None
-                            try:
-                                # Try to get team from user_activity (onboarded users)
-                                user_profile = await get_user_profile(normalized_email)
-                                if user_profile and user_profile.get("team_name"):
-                                    team_name = user_profile.get("team_name")
-                                    logger.debug(f"[ANALYTICS] User {normalized_email} assigned to team via profile: {team_name}")
-                            except Exception as e:
-                                logger.debug(f"[ANALYTICS] Could not get user profile for {normalized_email}: {e}")
-                            
-                            # Fallback to email matching if no profile team found
-                            if not team_name:
-                                team_name = get_team_by_member_email(normalized_email)
-                                if team_name and team_name != "Unassigned":
-                                    logger.debug(f"[ANALYTICS] User {normalized_email} assigned to team via email matching: {team_name}")
-                            
-                            # If still no team, assign to "Unassigned"
-                            if not team_name:
-                                team_name = "Unassigned"
-                                
-                            if team_name in teams_data:
-                                teams_data[team_name]["active_members"].add(normalized_email)
-                                
-                                if question:
-                                    teams_data[team_name]["total_questions"] += 1
-                                    teams_data[team_name]["questions_list"].append(str(question))
+                            if normalized_email:
+                                all_emails_set.add(normalized_email)
+                        traces_data.append(trace)
                     
                     if len(traces) < batch_limit:
                         logger.info(f"[LANGFUSE ANALYTICS] Last page reached (received {len(traces)} < {batch_limit} traces)")
@@ -3860,6 +4056,79 @@ async def get_teams_analytics_summary(
                     import traceback
                     logger.error(f"[LANGFUSE ANALYTICS] Traceback: {traceback.format_exc()}")
                     break
+            
+            # Batch fetch all user profiles at once
+            logger.info(f"[LANGFUSE ANALYTICS] Batch fetching profiles for {len(all_emails_set)} unique users")
+            user_profiles_cache = {}
+            
+            if all_emails_set:
+                try:
+                    await mongodb_memory.connect()
+                    user_activity_collection = mongodb_memory.database["user_activity"]
+                    
+                    # Fetch all profiles in a single query using $in
+                    profiles_cursor = user_activity_collection.find(
+                        {"user_id": {"$in": list(all_emails_set)}},
+                        {
+                            "user_id": 1,
+                            "user_email": 1,
+                            "team_name": 1
+                        }
+                    )
+                    
+                    async for profile_doc in profiles_cursor:
+                        user_id = profile_doc.get("user_id", "").lower()
+                        if user_id:
+                            user_profiles_cache[user_id] = profile_doc.get("team_name")
+                    
+                    logger.info(f"[LANGFUSE ANALYTICS] Loaded {len(user_profiles_cache)} user profiles from cache")
+                except Exception as e:
+                    logger.warning(f"[LANGFUSE ANALYTICS] Error batch fetching profiles: {e}, falling back to individual lookups")
+                    user_profiles_cache = {}
+            
+            # Second pass: Process traces with cached profiles
+            logger.info(f"[LANGFUSE ANALYTICS] Processing {len(traces_data)} traces with cached profiles")
+            
+            for trace in traces_data:
+                metadata = trace.get("metadata", {})
+                user_email = metadata.get("user_email")
+                question = trace.get("input", "")
+                
+                if user_email:
+                    user_email_str = str(user_email) if isinstance(user_email, list) else user_email
+                    normalized_email = user_email_str.lower().strip()
+                    if not normalized_email:
+                        traces_without_email += 1
+                        continue
+                    
+                    traces_with_email += 1
+                    
+                    # Get team from cache first
+                    team_name = user_profiles_cache.get(normalized_email)
+                    
+                    # Fallback to email matching if no profile team found
+                    if not team_name:
+                        team_name = get_team_by_member_email(normalized_email)
+                        if team_name and team_name != "Unassigned":
+                            logger.debug(f"[ANALYTICS] User {normalized_email} assigned to team via email matching: {team_name}")
+                    
+                    # If still no team, assign to "Unassigned"
+                    if not team_name:
+                        team_name = "Unassigned"
+                        
+                    if team_name in teams_data:
+                        teams_data[team_name]["active_members"].add(normalized_email)
+                        
+                        # Count ALL traces with user_email, even if question is empty
+                        teams_data[team_name]["total_questions"] += 1
+                        
+                        # Only add to questions_list if question exists (to avoid empty strings)
+                        if question:
+                            teams_data[team_name]["questions_list"].append(str(question))
+                else:
+                    traces_without_email += 1
+            
+            logger.info(f"[LANGFUSE ANALYTICS] Traces with user_email: {traces_with_email}, Traces without user_email: {traces_without_email}")
         
         # Calculate unique questions and top questions per team
         team_stats = []
@@ -3896,9 +4165,10 @@ async def get_teams_analytics_summary(
         logger.info(f"[LANGFUSE ANALYTICS] ===== Teams Summary Results =====")
         logger.info(f"[LANGFUSE ANALYTICS] Total pages fetched: {total_pages_fetched}")
         logger.info(f"[LANGFUSE ANALYTICS] Total traces fetched: {total_traces_fetched}")
+        logger.info(f"[LANGFUSE ANALYTICS] Total traces with user_email: {traces_with_email}")
         logger.info(f"[LANGFUSE ANALYTICS] Total teams: {len(team_stats)}")
-        logger.info(f"[LANGFUSE ANALYTICS] Active teams (with questions): {total_active_teams}")
-        logger.info(f"[LANGFUSE ANALYTICS] Total questions across all teams: {total_questions}")
+        logger.info(f"[LANGFUSE ANALYTICS] Active teams (with traces): {total_active_teams}")
+        logger.info(f"[LANGFUSE ANALYTICS] Total traces across all teams: {total_questions}")
         logger.info(f"[LANGFUSE ANALYTICS] ===== Teams Summary Request Completed =====")
         
         return {
