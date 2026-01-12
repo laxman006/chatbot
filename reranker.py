@@ -32,10 +32,30 @@ class CrossEncoderReranker:
 
         pairs = [[query, d.page_content] for d, _ in candidates]
         scores = self.model.predict(pairs)  # higher is better
+        
+        # Normalize cross-encoder scores to 0-1 range
+        # This prevents very negative scores (e.g., -7 to -8) from causing filtering issues
+        if len(scores) > 1:
+            ce_min, ce_max = min(scores), max(scores)
+            if ce_max != ce_min:
+                normalized_scores = [(s - ce_min) / (ce_max - ce_min) for s in scores]
+            else:
+                # All scores are the same, assign equal normalized score
+                normalized_scores = [1.0] * len(scores)
+        else:
+            # Single score, keep as is but ensure non-negative
+            normalized_scores = [max(0.0, float(scores[0]))] if scores else [0.0]
+        
+        # Debug logging for score normalization
+        if len(scores) > 0:
+            raw_min, raw_max = min(scores), max(scores)
+            norm_min, norm_max = min(normalized_scores), max(normalized_scores)
+            print(f"[RERANKER] Cross-encoder raw scores: min={raw_min:.4f}, max={raw_max:.4f}")
+            print(f"[RERANKER] Normalized scores: min={norm_min:.4f}, max={norm_max:.4f}")
 
         reranked = []
-        for (doc, base_score), ce_score in zip(candidates, scores):
-            # Combine: 80% cross-encoder, 20% base score
+        for (doc, base_score), ce_score in zip(candidates, normalized_scores):
+            # Combine: 80% cross-encoder (now normalized 0-1), 20% base score
             final_score = 0.8 * float(ce_score) + 0.2 * float(base_score)
             reranked.append((doc, final_score))
 

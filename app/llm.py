@@ -32,8 +32,48 @@ def format_docs(docs):
         # Include tag information in context (for chatbot to know data source)
         tag_info = f"[SOURCE: {tag}]"
         
+        # ========== SPECIAL FORMATTING FOR JIRA TICKETS ==========
+        if metadata.get("source_type") == "jira" or "jira" in tag.lower():
+            ticket_key = metadata.get('ticket_key', '')
+            ticket_url = metadata.get('url', '')
+            section = metadata.get('section', '')
+            root_cause = metadata.get('root_cause', '')
+            fix_description = metadata.get('fix_description', '')
+            combination = metadata.get('combination', '')
+            status = metadata.get('status', '')
+            
+            # Build Jira ticket header with solution emphasis
+            jira_header = f"{tag_info}\n"
+            jira_header += f"JIRA TICKET: {ticket_key}\n"
+            if ticket_url:
+                jira_header += f"Ticket URL: {ticket_url}\n"
+            if status:
+                jira_header += f"Status: {status}\n"
+            if combination:
+                jira_header += f"Migration Type: {combination}\n"
+            
+            # Emphasize solution sections with clear labels
+            if section == "root_cause" and root_cause:
+                jira_header += "\n⚠️ ROOT CAUSE (Why this issue occurred):\n"
+            elif section == "fix_description" and fix_description:
+                jira_header += "\n✅ SOLUTION/FIX (How to resolve this issue):\n"
+            elif section == "summary":
+                jira_header += "\n📋 ISSUE SUMMARY:\n"
+            elif section == "description":
+                jira_header += "\n📝 ISSUE DESCRIPTION:\n"
+            elif section and "comment" in section.lower():
+                jira_header += "\n💬 DEVELOPER SOLUTION/COMMENT:\n"
+            elif section and "ai" in section.lower():
+                jira_header += "\n🤖 AI-GENERATED SOLUTION:\n"
+            
+            content = jira_header + content
+            
+            # Add solution reference at the end if this is a solution section
+            if section in ["root_cause", "fix_description"] and ticket_key:
+                content += f"\n\n[Reference: Jira Ticket {ticket_key} - {ticket_url if ticket_url else 'See ticket details above'}]"
+        
         # For SharePoint documents, add additional context for better understanding
-        if metadata.get("source_type") == "sharepoint":
+        elif metadata.get("source_type") == "sharepoint":
             file_name = metadata.get('file_name', '')
             folder_path = metadata.get('folder_path', '')
             if file_name:
