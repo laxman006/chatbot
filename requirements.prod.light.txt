@@ -45,6 +45,9 @@ markdown==3.5.1
 motor==3.3.2
 pymongo==4.5.0
 
+# Jira Integration
+jira>=3.5.0
+
 # Machine Learning (for token counting and deduplication)
 tiktoken>=0.7.0,<1.0.0
 scikit-learn>=1.4.0  # Required for deduplication (cosine_similarity)
