@@ -268,13 +268,18 @@ class EnhancedVectorstoreBuilder:
         # Convert metadata to ChromaDB-compatible format
         for chunk in all_chunks:
             # Ensure all metadata values are compatible
+            # ChromaDB only accepts str, int, float, bool, or None
             clean_metadata = {}
             for key, value in chunk.metadata.items():
-                if isinstance(value, (str, int, float, bool)):
-                    clean_metadata[key] = value
-                elif value is None:
+                if value is None:
                     continue
+                elif isinstance(value, (str, int, float, bool)):
+                    clean_metadata[key] = value
+                elif isinstance(value, list):
+                    # Convert lists to comma-separated strings
+                    clean_metadata[key] = ", ".join(str(v) for v in value)
                 else:
+                    # Convert other types to string
                     clean_metadata[key] = str(value)
             chunk.metadata = clean_metadata
         
@@ -387,6 +392,7 @@ def build_enhanced_vectorstore(
     sharepoint_docs: List[Document] = None,
     outlook_docs: List[Document] = None,
     blog_docs: List[Document] = None,
+    transcript_docs: List[Document] = None,
     persist_directory: str = CHROMA_DB_PATH
 ) -> tuple[Chroma, str]:
     """
@@ -396,6 +402,7 @@ def build_enhanced_vectorstore(
         sharepoint_docs: SharePoint documents
         outlook_docs: Outlook email documents
         blog_docs: Blog post documents
+        transcript_docs: Transcript documents (raw and Q/A pairs)
         persist_directory: Directory to persist vectorstore
     
     Returns:
@@ -419,6 +426,11 @@ def build_enhanced_vectorstore(
     # Process blog documents
     if blog_docs:
         chunks = builder.process_documents(blog_docs, "blog")
+        all_chunks.extend(chunks)
+    
+    # Process transcript documents
+    if transcript_docs:
+        chunks = builder.process_documents(transcript_docs, "transcript")
         all_chunks.extend(chunks)
     
     # Build vectorstore

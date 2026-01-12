@@ -1432,6 +1432,45 @@ header img {
   background: #ececf1;
 }
 
+.sidebar-toggle-btn-new:active {
+  transform: scale(0.95);
+}
+
+/* Mobile Sidebar Toggle Button - Hidden on desktop, shown on mobile */
+.mobile-sidebar-toggle {
+  position: fixed;
+  left: 16px;
+  top: 16px;
+  z-index: 1001;
+  width: 44px;
+  height: 44px;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  display: none; /* Hidden on desktop */
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: opacity 0.2s ease;
+  color: #374151;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: rgba(0, 0, 0, 0.1);
+  padding: 0;
+}
+
+.mobile-sidebar-toggle:hover {
+  opacity: 0.7;
+}
+
+.mobile-sidebar-toggle:active {
+  opacity: 0.5;
+}
+
+.mobile-sidebar-toggle svg {
+  width: 20px;
+  height: 20px;
+}
+
 .sidebar-toggle-btn-new svg {
   width: 20px;
   height: 20px;
@@ -2960,12 +2999,80 @@ header img {
   .chatgpt-sidebar {
     position: fixed;
     z-index: 1000;
-    width: 260px;
+    width: 85vw;
+    max-width: 320px;
+    height: 100vh;
+    left: 0;
+    top: 0;
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+    box-shadow: 2px 0 8px rgba(0, 0, 0, 0.1);
+  }
+  
+  .chatgpt-sidebar.open {
+    transform: translateX(0);
   }
   
   .chatgpt-sidebar.closed {
     transform: translateX(-100%);
-    width: 0;
+  }
+  
+  /* Main content: Full width on mobile when sidebar is closed */
+  .chatgpt-main {
+    width: 100%;
+    margin-left: 0;
+  }
+  
+  /* Show mobile toggle button on mobile (hidden on desktop) */
+  .mobile-sidebar-toggle {
+    display: flex !important;
+  }
+  
+  /* Hide desktop toggle button inside sidebar on mobile */
+  .chatgpt-sidebar .sidebar-top-row .sidebar-toggle-btn-new {
+    display: none !important;
+  }
+  
+  /* Ensure all buttons are clickable on mobile */
+  .sidebar-toggle-btn-new,
+  .new-chat-btn-sidebar,
+  .history-item,
+  .sidebar-user,
+  .chatgpt-send-btn,
+  .suggested-question-btn,
+  .feedback-btn,
+  .copy-button,
+  .mobile-sidebar-toggle {
+    pointer-events: auto !important;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: rgba(0, 0, 0, 0.1);
+    z-index: 10;
+    position: relative;
+  }
+  
+  /* Mobile toggle button specific z-index */
+  .mobile-sidebar-toggle {
+    z-index: 1001 !important;
+  }
+  
+  /* Sidebar overlay - appears when sidebar is open */
+  .sidebar-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 999;
+    display: none;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: auto;
+  }
+  
+  .sidebar-overlay.show {
+    display: block;
+    opacity: 1;
   }
   
   .quick-cards {
@@ -3019,11 +3126,97 @@ header img {
     font-size: 24px;
   }
   
+  /* Scroll-to-bottom button: Ensure it's clickable on mobile */
   .scroll-to-bottom {
-    bottom: 100px;
-    right: 16px;
-    width: 36px;
-    height: 36px;
+    bottom: 90px;
+    right: 12px;
+    width: 40px;
+    height: 40px;
+    z-index: 100;
+    pointer-events: auto !important;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: rgba(0, 0, 0, 0.1);
+  }
+  
+  .scroll-to-bottom svg {
+    width: 18px;
+    height: 18px;
+  }
+  
+  /* Ensure send button is always clickable */
+  .chatgpt-send-btn {
+    pointer-events: auto !important;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: rgba(0, 0, 0, 0.1);
+    z-index: 10 !important;
+  }
+  
+  /* Ensure new chat button is clickable */
+  .new-chat-btn-sidebar {
+    pointer-events: auto !important;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: rgba(0, 0, 0, 0.1);
+    z-index: 10;
+  }
+  
+  /* Ensure sidebar toggle button is clickable when sidebar is open */
+  .chatgpt-sidebar.open .sidebar-toggle-btn-new {
+    pointer-events: auto !important;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: rgba(0, 0, 0, 0.1);
+    z-index: 1001;
+  }
+  
+  /* Chats page mobile padding */
+  .chatgpt-main[style*="padding: 40px"] {
+    padding: 20px 16px !important;
+  }
+  
+  /* Ensure feedback and action buttons work on mobile */
+  .feedback-btn,
+  .copy-button,
+  .copy-button-user,
+  .edit-btn,
+  .edit-save-btn,
+  .edit-cancel-btn {
+    pointer-events: auto !important;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: rgba(0, 0, 0, 0.1);
+    z-index: 10;
+    position: relative;
+    min-height: 44px;
+    min-width: 44px;
+  }
+  
+  /* Ensure history items are clickable */
+  .history-item {
+    pointer-events: auto !important;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: rgba(0, 0, 0, 0.05);
+    min-height: 44px;
+  }
+  
+  /* Ensure suggested question buttons are clickable */
+  .suggested-question-btn,
+  .recommended-question-btn {
+    pointer-events: auto !important;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: rgba(0, 0, 0, 0.1);
+    min-height: 44px;
+  }
+  
+  /* Ensure sidebar user menu is clickable */
+  .sidebar-user {
+    pointer-events: auto !important;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: rgba(0, 0, 0, 0.05);
+    min-height: 44px;
+  }
+  
+  /* Ensure input textarea is accessible */
+  .chatgpt-textarea {
+    pointer-events: auto !important;
+    touch-action: manipulation;
   }
   
   .suggested-questions-container {
@@ -3378,7 +3571,26 @@ header img {
 
 @media (max-width: 480px) {
   .chatgpt-sidebar {
-    width: 240px;
+    width: 90vw;
+    max-width: 90vw;
+  }
+  
+  /* Smaller scroll button on small phones but still clickable */
+  .scroll-to-bottom {
+    bottom: 85px;
+    right: 10px;
+    width: 36px;
+    height: 36px;
+  }
+  
+  .scroll-to-bottom svg {
+    width: 16px;
+    height: 16px;
+  }
+  
+  /* Chats page mobile padding for small phones */
+  .chatgpt-main[style*="padding: 40px"] {
+    padding: 16px 12px !important;
   }
   
   .input-wrapper-chatgpt {

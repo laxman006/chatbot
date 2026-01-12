@@ -40,14 +40,32 @@ IMPORTANT - PRODUCT INFORMATION:
 - CloudFuze offers multiple products:
   1. **CloudFuze Migrate** – the primary migration solution (formerly known as X-Change)
   2. **CloudFuze Manage** – used for managing, governing, and organizing cloud data and environments
-  3. **CloudFuze Connect** – focused on integrations and collaboration scenarios
+ 
 
 - If users mention "X-Change", always refer to it as **CloudFuze Migrate**
 - If users ask generally about "CloudFuze products" or "CloudFuze platform",
-  you should mention **CloudFuze Migrate, CloudFuze Manage and CloudFuze Connect**
+  you should mention **CloudFuze Migrate, CloudFuze Manage **
   based ONLY on what is available in the retrieved context.
 
 - This assistant is for internal use by CloudFuze team members only
+
+IMPORTANT - MIXED CONTEXT HANDLING:
+- You may receive both official documentation (primary KB) and customer demo discussion context (secondary KB/transcripts)
+- PREFER official documentation for definitive guidance, product specifications, and contractual information
+- USE demo or transcript context to:
+  * Explain real-world behavior and how features work in practice
+  * Describe issues discussed or solutions mentioned during customer conversations
+  * Provide context about customer inquiries, objections, or concerns
+  * Supplement official documentation with practical examples
+- When citing transcript information, use contextual language:
+  * "Based on a customer demo discussion..."
+  * "In a recent customer conversation..."
+  * "One customer mentioned..."
+- DO NOT present transcript information as:
+  * Official guarantees or commitments
+  * Contractual obligations
+  * Definitive product specifications
+- If transcript information conflicts with official documentation, ALWAYS prefer official knowledge base content
 
 CRITICAL RULES - ACCURACY OVER CONFIDENCE:
 
@@ -66,7 +84,7 @@ CRITICAL RULES - ACCURACY OVER CONFIDENCE:
 3. WHEN TO ANSWER vs ACKNOWLEDGE LIMITATIONS:
    - ANSWER CONFIDENTLY: When context directly addresses the question
    - ANSWER WITH CAVEATS: When context partially addresses the question (e.g., "Based on the information available, CloudFuze supports...")
-   - ACKNOWLEDGE GAPS: When context doesn't contain the specific information requested (e.g., "I don't have information about [specific topic]")
+   # - ACKNOWLEDGE GAPS: When context doesn't contain the specific information requested (e.g., "I don't have information about [specific topic]")
    - NEVER FABRICATE: Do not invent company names, case studies, statistics, or specific details not in the context
    - ASK FOR CLARIFICATION: When the question is too generic (e.g., "tell me a story"), ask what specific information they need
 
@@ -289,6 +307,11 @@ SHAREPOINT_SALES_FOLDER_PATH = os.getenv("SHAREPOINT_SALES_FOLDER_PATH", "Pre-Sa
 SHAREPOINT_SALES_MAX_DEPTH = int(os.getenv("SHAREPOINT_SALES_MAX_DEPTH", "999"))
 SHAREPOINT_SALES_PRIORITY = os.getenv("SHAREPOINT_SALES_PRIORITY", "false").lower() == "true"
 
+# SharePoint Transcripts Configuration
+ENABLE_TRANSCRIPT_PROCESSING = os.getenv("ENABLE_TRANSCRIPT_PROCESSING", "false").lower() == "true"
+SHAREPOINT_TRANSCRIPTS_SITE_URL = os.getenv("SHAREPOINT_TRANSCRIPTS_SITE_URL", "https://cloudfuzecom.sharepoint.com/sites/Repository25")
+SHAREPOINT_TRANSCRIPTS_FOLDER_PATH = os.getenv("SHAREPOINT_TRANSCRIPTS_FOLDER_PATH", "Neutara Labs/Transcripts")
+
 # PPTX Extraction Pipeline
 # Extract PPTX files and add to vectorstore (production-ready)
 ENABLE_PPTX_PIPELINE = os.getenv("ENABLE_PPTX_PIPELINE", "false").lower() == "true"
@@ -434,5 +457,31 @@ BM25_WEIGHT = float(os.getenv("BM25_WEIGHT", "0.3"))  # Weight for BM25 retrieva
 RERANKER_WEIGHT = float(os.getenv("RERANKER_WEIGHT", "0.8"))  # Weight for cross-encoder reranking (0-1)
 
 # Score-based relevance filtering (prevent low-quality responses when all scores are poor)
-MIN_SCORE_THRESHOLD = float(os.getenv("MIN_SCORE_THRESHOLD", "-0.5"))  # Minimum reranker score to accept documents
+# After cross-encoder normalization, scores are in 0-1 range, so thresholds should be positive
+MIN_SCORE_THRESHOLD = float(os.getenv("MIN_SCORE_THRESHOLD", "0.3"))  # Minimum reranker score to accept documents (0-1 range)
 SCORE_MARGIN_THRESHOLD = float(os.getenv("SCORE_MARGIN_THRESHOLD", "0.3"))  # Minimum gap between max and avg score
+
+# ============================================================================
+# TRANSCRIPT PROCESSING CONFIGURATION (Secondary KB)
+# ============================================================================
+
+# Transcript Normalization
+ENABLE_TRANSCRIPT_NORMALIZATION = os.getenv("ENABLE_TRANSCRIPT_NORMALIZATION", "true").lower() == "true"
+
+# Artifact Extraction
+ENABLE_ARTIFACT_EXTRACTION = os.getenv("ENABLE_ARTIFACT_EXTRACTION", "true").lower() == "true"
+
+# KB Tier Configuration
+TRANSCRIPT_KB_TIER = "secondary"  # All transcripts are secondary KB
+PRIMARY_KB_TIER = "primary"  # Default for existing content
+
+# Retrieval Priority Boosts
+PRIMARY_KB_PRIORITY_BOOST = float(os.getenv("PRIMARY_KB_PRIORITY_BOOST", "0.15"))  # Boost for primary KB documents
+SECONDARY_KB_PRIORITY_BOOST = float(os.getenv("SECONDARY_KB_PRIORITY_BOOST", "0.05"))  # Boost for secondary KB (transcripts)
+TRANSCRIPT_ARTIFACT_BOOST = float(os.getenv("TRANSCRIPT_ARTIFACT_BOOST", "0.10"))  # Extra boost for transcript artifacts (Q&A, objections)
+
+# Transcript Chunking Configuration
+TRANSCRIPT_QA_CHUNK_TOKENS = int(os.getenv("TRANSCRIPT_QA_CHUNK_TOKENS", "500"))  # Target tokens for Q&A chunks
+TRANSCRIPT_FEATURE_CHUNK_TOKENS = int(os.getenv("TRANSCRIPT_FEATURE_CHUNK_TOKENS", "600"))  # Target tokens for feature chunks
+TRANSCRIPT_OBJECTION_CHUNK_TOKENS = int(os.getenv("TRANSCRIPT_OBJECTION_CHUNK_TOKENS", "400"))  # Target tokens for objection chunks
+TRANSCRIPT_RAW_CHUNK_TOKENS = int(os.getenv("TRANSCRIPT_RAW_CHUNK_TOKENS", "800"))  # Target tokens for raw transcript chunks

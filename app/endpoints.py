@@ -36,7 +36,9 @@ from config import (
     SYSTEM_PROMPT, MICROSOFT_CLIENT_ID, MICROSOFT_CLIENT_SECRET, MICROSOFT_TENANT,
     ENABLE_INTENT_CLASSIFICATION, ENABLE_QUERY_EXPANSION, ENABLE_CONTEXT_COMPRESSION,
     DENSE_RETRIEVAL_K, BM25_RETRIEVAL_K, FINAL_RETRIEVAL_K,
-    DENSE_WEIGHT, BM25_WEIGHT, RERANKER_WEIGHT
+    DENSE_WEIGHT, BM25_WEIGHT, RERANKER_WEIGHT,
+    PRIMARY_KB_PRIORITY_BOOST, SECONDARY_KB_PRIORITY_BOOST, TRANSCRIPT_ARTIFACT_BOOST,
+    PRIMARY_KB_TIER, TRANSCRIPT_KB_TIER
 )
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.documents import Document
@@ -1121,6 +1123,138 @@ def apply_section_based_reranking(
 # OPTION E: PERPLEXITY-STYLE RETRIEVAL FUNCTION
 # ============================================================================
 
+def is_transcript_specific_query(query: str) -> bool:
+    """
+    Detect if query is about transcripts/demos/customer conversations.
+    
+    Uses hybrid approach:
+    1. Pattern matching for common transcript query patterns
+    2. Dynamic keywords from transcript metadata (cached)
+    3. LLM for semantic understanding (when enabled)
+    
+    Args:
+        query: User query
+        
+    Returns:
+        True if query is about transcripts/demos/customer conversations
+    """
+    query_lower = query.lower()
+    
+    # Pattern 1: Common transcript query patterns (fast, no LLM needed)
+    transcript_patterns = [
+        'customer demo', 'demo call', 'demo discussion', 'customer conversation',
+        'customer inquiry', 'customer question', 'customer concern', 'customer objection',
+        'customer doubt', 'what did', 'what questions did', 'what concerns did',
+        'what objections', 'what doubts', 'how did customer', 'what did customer ask',
+        'in the demo', 'during the demo', 'in the call', 'during the call',
+        'what did [name]', 'what did [name] mention', 'what did [name] say',
+        'what did [name] ask', 'what did [name] discuss'
+    ]
+    
+    if any(pattern in query_lower for pattern in transcript_patterns):
+        return True
+    
+    # Pattern 2: Dynamic keywords from transcript metadata (cached)
+    global _transcript_keywords_cache
+    if _transcript_keywords_cache is None:
+        _transcript_keywords_cache = _get_transcript_keywords()
+        if _transcript_keywords_cache:
+            print(f"[TRANSCRIPT DETECTION] Loaded {len(_transcript_keywords_cache)} keywords from transcripts")
+    
+    if _transcript_keywords_cache and any(keyword in query_lower for keyword in _transcript_keywords_cache):
+        return True
+    
+    # Pattern 3: LLM semantic detection (for complex queries, when enabled)
+    try:
+        from config import ENABLE_ARTIFACT_EXTRACTION
+        if ENABLE_ARTIFACT_EXTRACTION:
+            from app.llm_factory import get_llm
+            
+            prompt = f"""Does this query ask about information from customer demo calls, conversations, or customer interactions?
+
+Examples that ARE transcript queries:
+- "What questions did customers ask about X?"
+- "What concerns did customers raise?"
+- "What pricing was discussed in demos?"
+- "How did customers respond to feature Y?"
+- "What objections did customers have?"
+- "What did [person] mention in the demo?"
+- "What did [person] say about [topic]?"
+
+Examples that are NOT transcript queries:
+- "What is CloudFuze Manage?"
+- "How does license management work?"
+- General product questions
+
+Query: "{query}"
+
+Return ONLY "yes" or "no"."""
+
+            llm = get_llm(temperature=0.1)
+            response = llm.invoke(prompt)
+            content = response.content if hasattr(response, 'content') else str(response)
+            
+            if content.strip().lower().startswith('yes'):
+                return True
+    except Exception as e:
+        print(f"[WARNING] LLM transcript detection failed: {e}")
+    
+    return False
+
+
+# Cache for transcript keywords (loaded from vectorstore metadata)
+_transcript_keywords_cache = None
+
+
+def _get_transcript_keywords() -> set:
+    """
+    Dynamically extract keywords from transcript metadata in vectorstore.
+    No hardcoding - adapts to new transcripts automatically.
+    """
+    try:
+        if not vectorstore:
+            return set()
+        
+        # Get all transcript documents
+        transcript_docs = vectorstore.get(
+            where={"kb_tier": "secondary"},
+            include=["metadatas"]
+        )
+        
+        keywords = set()
+        for meta in transcript_docs.get("metadatas", []):
+            # Extract participant names
+            participants = meta.get("participants", "")
+            if participants:
+                for name in participants.split(","):
+                    name = name.strip()
+                    if name:
+                        keywords.add(name.lower())
+                        for word in name.split():
+                            if len(word) > 2:
+                                keywords.add(word.lower())
+            
+            # Extract customer names
+            customer = meta.get("customer", "")
+            if customer:
+                keywords.add(customer.lower())
+                for word in customer.split():
+                    if len(word) > 2:
+                        keywords.add(word.lower())
+            
+            # Extract meeting titles (key phrases)
+            meeting_title = meta.get("meeting_title", "")
+            if meeting_title:
+                for word in meeting_title.split():
+                    if len(word) > 3:
+                        keywords.add(word.lower())
+        
+        return keywords
+    except Exception as e:
+        print(f"[WARNING] Failed to extract transcript keywords: {e}")
+        return set()
+
+
 def perplexity_style_retrieve(
     query: str,
     k_dense: int = None,
@@ -1265,22 +1399,140 @@ def perplexity_style_retrieve(
         filename = (meta.get("filename") or "").lower()
         content_lower = doc.page_content.lower()
 
-        # ---- Metadata-based boosting: SharePoint prioritization ----
-        # Small general boost for SharePoint docs (internal documentation)
-        # This helps prioritize internal docs over blog content
+        # ---- Metadata-based boosting: KB Tier and Priority System ----
+        # Safely extract metadata values (handle both string and bool types)
+        kb_tier_val = meta.get("kb_tier", "")
+        kb_tier = str(kb_tier_val).lower() if kb_tier_val else ""
+        
+        artifact_type_val = meta.get("artifact_type", "")
+        artifact_type = str(artifact_type_val).lower() if artifact_type_val else ""
+        
+        document_type_val = meta.get("document_type", "")
+        document_type = str(document_type_val).lower() if document_type_val else ""
+        
+        priority_val = meta.get("priority", "")
+        priority = str(priority_val).lower() if priority_val and not isinstance(priority_val, bool) else ""
+        
+        # Primary KB boost (highest priority)
+        if not kb_tier or kb_tier == "primary":
+            base_score += PRIMARY_KB_PRIORITY_BOOST
+        # Secondary KB (transcripts) - only boost if primary KB didn't have enough results
+        elif kb_tier == "secondary":
+            # Boost transcript artifacts more than raw transcripts
+            artifact_lower = artifact_type.lower() if artifact_type else ""
+            if artifact_lower in ["q&a", "objection", "feature", "decision driver"]:
+                base_score += TRANSCRIPT_ARTIFACT_BOOST
+            else:
+                base_score += SECONDARY_KB_PRIORITY_BOOST
+        
+        # Additional boost for SharePoint docs (internal documentation)
         if "sharepoint" in source_type or tag.startswith("sharepoint/"):
             base_score += 0.05
+        
+        # Priority-based boost within same tier
+        if priority == "high":
+            base_score += 0.05
+        elif priority == "medium":
+            base_score += 0.02
 
         candidates.append((doc, base_score))
 
     # Sort by base score descending (similarity scores - higher is better)
     candidates.sort(key=lambda x: x[1], reverse=True)
     
-    # Convert to distance format (lower = better) for merging with Jira results
-    # candidates has similarity scores (0-1, higher=better), convert to distance
-    main_results = [(doc, 1.0 - score) for doc, score in candidates]
-
-    # ---- 4. Weighted retrieval from JIRA vectorstore ----
+    # ---- 4. QUOTA-BASED HYBRID RETRIEVAL: Always Retrieve Both Tiers ----
+    # Step 1: Separate primary and secondary KB candidates
+    primary_candidates = []
+    secondary_candidates = []
+    
+    for doc, score in candidates:
+        meta = doc.metadata or {}
+        kb_tier = meta.get("kb_tier", "").lower()
+        
+        # Separate primary and secondary KB
+        if not kb_tier or kb_tier == "primary":
+            primary_candidates.append((doc, score))
+        elif kb_tier == "secondary":
+            secondary_candidates.append((doc, score))
+        else:
+            # Default to primary if not specified
+            primary_candidates.append((doc, score))
+    
+    # Step 2: Apply Tier-Aware Score Filtering
+    # Primary KB: Higher threshold (structured content scores better)
+    PRIMARY_SCORE_THRESHOLD = 0.3
+    # Secondary KB: Lower threshold (conversational content scores lower but still valuable)
+    SECONDARY_SCORE_THRESHOLD = 0.15
+    
+    filtered_primary = [(d, s) for d, s in primary_candidates if s >= PRIMARY_SCORE_THRESHOLD]
+    filtered_secondary = [(d, s) for d, s in secondary_candidates if s >= SECONDARY_SCORE_THRESHOLD]
+    
+    print(f"[HYBRID RETRIEVAL] Primary: {len(primary_candidates)} candidates → {len(filtered_primary)} after filtering (threshold: {PRIMARY_SCORE_THRESHOLD})")
+    print(f"[HYBRID RETRIEVAL] Secondary: {len(secondary_candidates)} candidates → {len(filtered_secondary)} after filtering (threshold: {SECONDARY_SCORE_THRESHOLD})")
+    
+    # Step 3: Calculate Primary KB Confidence for Adaptive Quota
+    if filtered_primary:
+        primary_scores = [score for _, score in filtered_primary]
+        max_primary_score = max(primary_scores)
+        avg_primary_score = sum(primary_scores) / len(primary_scores)
+        primary_confidence = (max_primary_score + avg_primary_score) / 2  # Combined confidence metric
+    else:
+        max_primary_score = 0.0
+        avg_primary_score = 0.0
+        primary_confidence = 0.0
+    
+    # Step 4: Adaptive Quota Assembly (8:2 default, adaptive based on confidence)
+    # Strong primary KB → more primary (9:1)
+    # Medium primary KB → balanced (7:3)
+    # Weak primary KB → more transcripts (5:5)
+    if primary_confidence >= 0.75:
+        primary_quota, secondary_quota = 9, 1
+        ratio_reason = "high confidence"
+    elif primary_confidence >= 0.5:
+        primary_quota, secondary_quota = 7, 3
+        ratio_reason = "medium confidence"
+    else:
+        primary_quota, secondary_quota = 5, 5
+        ratio_reason = "low confidence"
+    
+    # Ensure quotas don't exceed k_final
+    total_quota = primary_quota + secondary_quota
+    if total_quota > k_final:
+        # Scale down proportionally
+        scale = k_final / total_quota
+        primary_quota = max(1, int(primary_quota * scale))
+        secondary_quota = k_final - primary_quota
+    
+    # Assemble final candidates with quota
+    final_candidates = []
+    
+    # Add primary KB documents (up to quota)
+    final_candidates.extend(filtered_primary[:primary_quota])
+    print(f"[HYBRID RETRIEVAL] Added {min(primary_quota, len(filtered_primary))} primary KB documents")
+    
+    # Prioritize artifacts in secondary KB (Q&A, objections, features, decision drivers)
+    artifact_types = ["q&a", "objection", "feature", "decision driver"]
+    artifact_candidates = [(d, s) for d, s in filtered_secondary 
+                          if d.metadata.get("artifact_type", "").lower() in artifact_types]
+    raw_candidates = [(d, s) for d, s in filtered_secondary 
+                     if d.metadata.get("artifact_type", "").lower() not in artifact_types]
+    
+    # Add secondary KB documents (artifacts first, then raw transcripts)
+    remaining_quota = secondary_quota
+    if artifact_candidates and remaining_quota > 0:
+        added_artifacts = min(remaining_quota, len(artifact_candidates))
+        final_candidates.extend(artifact_candidates[:added_artifacts])
+        remaining_quota -= added_artifacts
+        print(f"[HYBRID RETRIEVAL] Added {added_artifacts} transcript artifacts")
+    
+    if raw_candidates and remaining_quota > 0:
+        added_raw = min(remaining_quota, len(raw_candidates))
+        final_candidates.extend(raw_candidates[:added_raw])
+        print(f"[HYBRID RETRIEVAL] Added {added_raw} raw transcript chunks")
+    
+    print(f"[HYBRID RETRIEVAL] Final assembly: {len(final_candidates)} docs (ratio: {primary_quota}:{secondary_quota}, reason: {ratio_reason}, primary confidence: {primary_confidence:.3f})")
+    
+    # ---- 5. Weighted retrieval from JIRA vectorstore ----
     jira_results = []
     if k_jira > 0 and jira_vectorstore:
         print(f"[RETRIEVAL] Retrieving {k_jira} tickets from Jira vectorstore (weight={jira_weight:.2f})...")
@@ -1293,18 +1545,23 @@ def perplexity_style_retrieve(
         except Exception as e:
             print(f"[WARN] Jira retrieval failed: {e}")
 
-    # ---- 5. Merge MAIN + Jira results ----
+    # ---- 6. Merge HYBRID + Jira results ----
     if jira_results:
+        # Convert final_candidates to distance format (lower = better) for merging with Jira results
+        # final_candidates has similarity scores (0-1, higher=better), convert to distance
+        hybrid_results = [(doc, 1.0 - score) for doc, score in final_candidates]
+        
         # Merge results with Jira tickets prioritized (both in distance format)
-        merged_results = merge_retrieval_results(main_results, jira_results, max_docs=k_final * 3)
-        print(f"[RETRIEVAL] Merged results: {len(main_results)} main + {len(jira_results)} Jira = {len(merged_results)} total")
+        merged_results = merge_retrieval_results(hybrid_results, jira_results, max_docs=k_final * 3)
+        print(f"[RETRIEVAL] Merged results: {len(hybrid_results)} hybrid + {len(jira_results)} Jira = {len(merged_results)} total")
+        
         # Convert back to similarity scores for reranker (reranker expects similarity, higher=better)
         candidates_for_rerank = [(doc, 1.0 - score) for doc, score in merged_results]
     else:
-        # No Jira results, use main candidates directly (already in similarity format)
-        candidates_for_rerank = candidates[:max(k_final * 3, k_final)]
+        # No Jira results, use hybrid candidates directly (already in similarity format)
+        candidates_for_rerank = final_candidates[:max(k_final * 3, k_final)]
 
-    # ---- 6. Cross-encoder reranking with section-based boosting ----
+    # ---- 7. Cross-encoder reranking with section-based boosting ----
     reranked = apply_section_based_reranking(query, candidates_for_rerank, top_k=k_final)
 
     return reranked  # list of (doc, final_score)
@@ -1493,6 +1750,29 @@ async def chat(request: Request, auth_user: dict = Depends(require_auth)):
                 from langchain_core.prompts import ChatPromptTemplate
                 from config import SYSTEM_PROMPT
                 
+                # Detect transcript sources and add guardrail instructions
+                has_transcript_sources = any(
+                    doc.metadata.get("kb_tier", "").lower() == "secondary" or
+                    doc.metadata.get("source_type", "").lower() == "transcript"
+                    for doc in final_docs
+                )
+                
+                # Build enhanced system prompt with guardrails if transcripts are present
+                enhanced_system_prompt = SYSTEM_PROMPT
+                if has_transcript_sources:
+                    guardrail_instruction = """
+
+IMPORTANT - TRANSCRIPT SOURCES DETECTED:
+- Some context comes from customer demo transcripts (secondary knowledge base)
+- When citing transcript information, use contextual language:
+  * "Based on a customer demo discussion..."
+  * "In a recent customer conversation..."
+  * "One customer mentioned..."
+- DO NOT use definitive language like "CloudFuze guarantees..." or "CloudFuze officially supports..."
+- If transcript information conflicts with official documentation, ALWAYS prefer official knowledge base content
+- Transcripts are contextual and may contain discussions, not official commitments"""
+                    enhanced_system_prompt = SYSTEM_PROMPT + guardrail_instruction
+                
                 # Standard prompt
                 human_template = "Context: {context}\n\nQuestion: {question}"
                 prompt_vars = {
@@ -1501,7 +1781,7 @@ async def chat(request: Request, auth_user: dict = Depends(require_auth)):
                 }
                 
                 prompt_template = ChatPromptTemplate.from_messages([
-                    ("system", SYSTEM_PROMPT),
+                    ("system", enhanced_system_prompt),
                     ("human", human_template)
                 ])
                 
@@ -1796,6 +2076,10 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
                 "has_followup": False,  # Conversation context disabled
             }
             
+            # Initialize diversity_metrics early to avoid UnboundLocalError
+            diversity_metrics = {}
+            doc_results = []
+            
             try:
                 # Send status: Query expansion
                 if ENABLE_QUERY_EXPANSION:
@@ -1810,8 +2094,8 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
                 # Retrieve docs with dense + BM25 + reranker
                 doc_results = perplexity_style_retrieve(
                     query=enhanced_query,
-                    k_dense=40,
-                    k_bm25=40,
+                    k_dense=60,  # Increased to ensure transcripts are in candidate pool
+                    k_bm25=60,   # Increased to ensure transcripts are in candidate pool
                     k_final=8,
                     use_expansion=True,
                 )
@@ -1825,9 +2109,10 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
                 await asyncio.sleep(0.05)
                 
                 # You can still compute diversity metrics if you like
-                diversity_metrics = calculate_document_diversity(
-                    [(doc, 1.0) for doc in final_docs]
-                )
+                if final_docs:
+                    diversity_metrics = calculate_document_diversity(
+                        [(doc, 1.0) for doc in final_docs]
+                    )
                 
                 # For compatibility with existing code, create fallback variables
                 intent = "option_e"
@@ -1929,6 +2214,10 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
                 import traceback
                 traceback.print_exc()
                 final_docs = []
+                doc_results = []
+                # Ensure diversity_metrics is initialized (already set above, but ensure it's empty dict)
+                if 'diversity_metrics' not in locals():
+                    diversity_metrics = {}
                 # Initialize intent variables if not already set
                 if 'intent' not in locals():
                     intent = "other"
@@ -1936,6 +2225,8 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
                     intent_method = "error_fallback"
                 if 'fallback_strategy' not in locals():
                     fallback_strategy = "no_retrieval"
+                if 'expanded_query' not in locals():
+                    expanded_query = enhanced_query
             
             # Filter out documents with None page_content
             final_docs = [doc for doc in final_docs if doc.page_content is not None and doc.page_content.strip()]
@@ -1990,25 +2281,51 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
                 
                 print(f"[SCORE FILTERING] Max: {max_score:.3f}, Avg: {avg_score:.3f}, Margin: {score_margin:.3f}")
                 
+                # Check if we have transcript documents (they may score lower due to conversational format)
+                has_transcripts = any(
+                    doc.metadata.get('kb_tier', '').lower() == 'secondary' or
+                    doc.metadata.get('source_type', '').lower() == 'transcript' or 
+                    'transcript' in doc.metadata.get('source', '').lower() or
+                    'transcript' in doc.metadata.get('tag', '').lower()
+                    for doc, _ in final_docs_with_scores
+                )
+                
                 # Apply quality gates
                 # Gate 1: Maximum score must be above threshold
                 # Gate 2: There must be sufficient separation (avoid all-mediocre results)
                 from config import MIN_SCORE_THRESHOLD, SCORE_MARGIN_THRESHOLD
                 
-                if max_score < MIN_SCORE_THRESHOLD:
-                    print(f"[SCORE FILTERING] ❌ Max score {max_score:.3f} below threshold {MIN_SCORE_THRESHOLD}")
+                # Use more lenient threshold for transcripts (conversational format scores lower)
+                # After normalization, scores are in 0-1 range, so thresholds should be positive
+                effective_threshold = MIN_SCORE_THRESHOLD
+                if has_transcripts:
+                    # More lenient threshold for transcripts: 0.2 (instead of default 0.3)
+                    # Transcripts are conversational and may have lower similarity scores
+                    effective_threshold = 0.2
+                    print(f"[SCORE FILTERING] Transcripts detected - using lenient threshold {effective_threshold:.3f} (default: {MIN_SCORE_THRESHOLD:.3f})")
+                
+                if max_score < effective_threshold:
+                    print(f"[SCORE FILTERING] ❌ Max score {max_score:.3f} below threshold {effective_threshold:.3f}")
                     print(f"[SCORE FILTERING] All documents deemed irrelevant - returning no context")
                     final_docs_with_scores = []
                     final_docs = []
-                elif score_margin < SCORE_MARGIN_THRESHOLD and avg_score < 0:
-                    print(f"[SCORE FILTERING] ⚠️ Low score margin {score_margin:.3f} with negative avg {avg_score:.3f}")
+                elif score_margin < SCORE_MARGIN_THRESHOLD and avg_score < 0.3:
+                    # Updated: check for low avg_score (<0.3) instead of negative
+                    print(f"[SCORE FILTERING] ⚠️ Low score margin {score_margin:.3f} with low avg {avg_score:.3f}")
                     print(f"[SCORE FILTERING] All documents mediocre - returning no context")
                     final_docs_with_scores = []
                     final_docs = []
                 else:
                     # Keep only documents above a reasonable threshold
-                    # Use dynamic threshold: avg_score - 1.0 (or MIN_SCORE_THRESHOLD, whichever is higher)
-                    dynamic_threshold = max(MIN_SCORE_THRESHOLD, avg_score - 1.0)
+                    # For transcripts, use effective_threshold directly (don't subtract from avg)
+                    # For primary KB, use dynamic threshold based on avg
+                    if has_transcripts:
+                        # For transcripts, use the lenient threshold directly
+                        dynamic_threshold = effective_threshold
+                    else:
+                        # For primary KB, use dynamic threshold: avg_score - 0.3 (changed from -1.0)
+                        dynamic_threshold = max(effective_threshold, avg_score - 0.3)
+                    
                     filtered = [(doc, score) for doc, score in final_docs_with_scores if score > dynamic_threshold]
                     
                     if filtered:
@@ -2146,18 +2463,41 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
             from langchain_core.prompts import ChatPromptTemplate
             from config import SYSTEM_PROMPT
             
+            # Detect transcript sources and add guardrail instructions
+            has_transcript_sources = any(
+                doc.metadata.get("kb_tier", "").lower() == "secondary" or
+                doc.metadata.get("source_type", "").lower() == "transcript"
+                for doc in final_docs
+            )
+            
+            # Build enhanced system prompt with guardrails if transcripts are present
+            enhanced_system_prompt = SYSTEM_PROMPT
+            if has_transcript_sources:
+                guardrail_instruction = """
+
+IMPORTANT - TRANSCRIPT SOURCES DETECTED:
+- Some context comes from customer demo transcripts (secondary knowledge base)
+- When citing transcript information, use contextual language:
+  * "Based on a customer demo discussion..."
+  * "In a recent customer conversation..."
+  * "One customer mentioned..."
+- DO NOT use definitive language like "CloudFuze guarantees..." or "CloudFuze officially supports..."
+- If transcript information conflicts with official documentation, ALWAYS prefer official knowledge base content
+- Transcripts are contextual and may contain discussions, not official commitments"""
+                enhanced_system_prompt = SYSTEM_PROMPT + guardrail_instruction
+            
             # Adapt prompt based on whether we have relevant context
             if forced_no_context:
                 # No relevant documents - explicitly tell LLM
                 prompt_template = ChatPromptTemplate.from_messages([
-                    ("system", SYSTEM_PROMPT + "\n\nIMPORTANT: No relevant documents were found in the knowledge base for this query."),
+                    ("system", enhanced_system_prompt + "\n\nIMPORTANT: No relevant documents were found in the knowledge base for this query."),
                     ("human", "Question: {question}")
                 ])
                 messages = prompt_template.format_messages(question=enhanced_query)
             else:
                 # Normal flow with context
                 prompt_template = ChatPromptTemplate.from_messages([
-                    ("system", SYSTEM_PROMPT),
+                    ("system", enhanced_system_prompt),
                     ("human", "Context: {context}\n\nQuestion: {question}")
                 ])
                 messages = prompt_template.format_messages(context=context_text, question=enhanced_query)

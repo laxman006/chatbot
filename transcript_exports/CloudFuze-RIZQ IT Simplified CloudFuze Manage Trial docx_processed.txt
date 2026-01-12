@@ -1,0 +1,1260 @@
+================================================================================
+PROCESSED TRANSCRIPT: CloudFuze-RIZQ IT Simplified CloudFuze Manage Trial .docx
+================================================================================
+
+METADATA:
+  Customer: N/A
+  Industry: N/A
+  Meeting Date: N/A
+  Meeting Title: N/A
+  Participants: Jalsha Chakma, Lawrence Lewis, Pranavi
+  Topics: N/A
+  KB Tier: primary
+  Contains Pricing: False
+
+
+================================================================================
+Q&A PAIRS
+================================================================================
+
+--- Q&A Pair 1 ---
+Q1: So talking about the intra intra ID integration. So you're talking about that if I connect my intra ID, everything that I have connected to intra ID through SSO, it's gonna show up here.
+A1: all the applications, yes.
+Topic: Integrations
+
+Q2: And I can manually add the cost of license and that will be calculated.
+A2: if the application is integrated it will pull up the price. So this is for discovery, just this is for the discovery purpose of what is being used automatically. If we connect to the application then we'd be able to see the usual details how you connect through APIs.
+Topic: Pricing
+
+Q3: but if the price is not, but if the price is not included in that pool of the API, I can manually add it to to get calculate and report it.
+A3: Yes, you can. You can. you can. you you could add it manually or you could just upload the invoice for the application too. It's it's a much easier process. You could just upload the invoice and we pass the invoice and pull out data from that.
+Topic: Pricing
+
+Q4: so I can use this part of the reporting as an utilization and adoption report. So if I if I have an application that the technicians or the personnel should be using and they are not using, I I can see that here.
+A4: Yes, yes, you can see that. So we segregate users as idle users too. If someone has access to an application and if they're not logged into the application, let's say for the last 30 days, so they come under idle users that that number can be customizable.
+Topic: Features
+
+
+================================================================================
+OBJECTIONS & RESPONSES
+================================================================================
+
+--- Objection 1 ---
+Objection 1: If I connect my intra ID, will everything that I have connected to intra ID through SSO show up here?
+Response: Yes, all the applications will show up here.
+Stage: Discovery
+Status: Resolved
+
+Objection 2: Can I manually add the cost of the license if it's not included in the API?
+Response: Yes, you can manually add it or upload the invoice for the application, and we will parse it to get the price details.
+Stage: Evaluation
+Status: Resolved
+
+Objection 3: Can I use this part of the reporting as a utilization and adoption report?
+Response: Yes, you can see idle users and those who have not logged into the application for a customizable number of days.
+Stage: Evaluation
+Status: Resolved
+
+
+================================================================================
+RAW NORMALIZED TRANSCRIPT
+================================================================================
+
+--- Transcript Chunk 1 ---
+Adriel I. Hernandez   2:33
+Yes.
+
+Lawrence Lewis   2:34
+Alright, great. So Pranavi, hey, let's get started with the demonstration at any point while we're in the demonstration. Alboro, please stop us and let us know. We'd be more than happy to go ahead and take those questions. OK, Pranavi, back to you.
+
+Pranavi   2:49
+Yeah. Thanks, Larry. So let me just share my screen. We can dive into the demo. Yeah, like Larry said, please feel free to stop me anytime. If you have questions, I'll be happy to answer them.
+Right. Please confirm when you're able to see.
+
+Lawrence Lewis   3:09
+Yes.
+
+Pranavi   3:10
+Great, right. So the fundamental step for for us to manage your users or manage your licenses will be first to add the applications, right? So the most foundational feature is the application discovery.
+So see, Cloudfish is managed directly integrates with all the major SaaS applications through APIs, right? We also do have integration with single sign on too. So Adil, if I remember correctly, you you you said that you do use Intra, right?
+
+Adriel I. Hernandez   3:46
+Correct, yes.
+
+Pranavi   3:47
+Yes. So connecting to the application is pretty simple. You go ahead, enter your super admin or global admin credentials depending on the app you're connecting to, right? Having that admin privileges is really important for us to get the information.
+Right, so once we connect to the application, if you're connecting to a single sign on, what it does is makes things really easier for you. You need not go ahead and connect to every application, authenticate every application individually. So once you connect your identity provider or your single sign on, you just get.
+Get an option to discover applications, right? So when you click on discover applications, it'll detect all the applications that are already integrated with your single sign on, right? So if you just want an application, let's say if I want to add Atlassian, then I can just go ahead and connect directly, right? It won't ask me to authenticate Atlassian again.
+Since it's already connected to your SSO, right? So once we do all these steps, so we have our whole SaaS inventory ready for us, right? We have every application that we are using. There are, I'd say there are very small number of applications that do not provide the API input.
+Points, right? So in that case, we can just add the application manually too, so that we'll have the whole inventory of all the SaaS apps that you're using at one place. But I'd say it's very minimal number of applications that do not provide the end points. So we can just go ahead and add the application. Sure, sure, go ahead.
+
+Adriel I. Hernandez   5:22
+I have a question.
+Yeah, so talking about the intra intra ID integration. So you're talking about that if I connect my intra ID, everything that I have connected to intra ID through SSO, it's gonna show up here.
+
+Pranavi   5:30
+Mm-hmm.
+Yeah, all the applications, yes.
+
+Adriel I. Hernandez   5:41
+OK. And I can manually add the cost of license and that will be calculated.
+
+Pranavi   5:46
+Uh.
+Yeah, if the application is integrated it it will pull up the price. So this is for discovery, just this is for the discovery purpose of what is being used automatically. If we connect to the application then we'd be able to see.
+The usual details like how you connect through APIs.
+
+Adriel I. Hernandez   6:08
+OK, but if the price is not, but if the price is not included in that pool of the API, I can manually add it to to get calculate and report it. OK, perfect.
+
+--- Transcript Chunk 2 ---
+Adriel I. Hernandez   5:22
+I have a question.
+Yeah, so talking about the intra intra ID integration. So you're talking about that if I connect my intra ID, everything that I have connected to intra ID through SSO, it's gonna show up here.
+
+Pranavi   5:30
+Mm-hmm.
+Yeah, all the applications, yes.
+
+Adriel I. Hernandez   5:41
+OK. And I can manually add the cost of license and that will be calculated.
+
+Pranavi   5:46
+Uh.
+Yeah, if the application is integrated it it will pull up the price. So this is for discovery, just this is for the discovery purpose of what is being used automatically. If we connect to the application then we'd be able to see.
+The usual details like how you connect through APIs.
+
+Adriel I. Hernandez   6:08
+OK, but if the price is not, but if the price is not included in that pool of the API, I can manually add it to to get calculate and report it. OK, perfect.
+
+Pranavi   6:08
+I'll just go ahead and see.
+Yes, you can. You can. Yeah, you can. Yeah, you you could add it manually or you could just upload the invoice for the application too. It's it's a much easier process. You could just upload the invoice and we pass the invoice and.
+Pull out data from that. We do not store anything, we just parse it and we we get the price details from that.
+Right, so once we have all our applications connected, this is our dashboard, so it gives you a high level overview. It's more like your control center. So you know how many apps are there, how many users are using those applications, right? And how much you're spending on your annual SaaS subscription costs.
+And the most important feature is the cost optimization. So we do calculate how much you can consolidate on your licenses and how much you can save on those licenses based on the utilization of those licenses, right? I'll show you how we do that.
+So in our total spent, we have a spent analytics for each of the application that you have added. So it gives me. So this is to calculate the license utilization. So what we do is so now I have added Dropbox. So Dropbox tells me that there are 22 users using the application.
+But if I go into detail and actually check the utilization, there are only 7 users actively logging into the application every day and using it. So there are a lot of inactive users. So this is an information I would like to know when I'm auditing or when my license is coming up for renewal so that.
+I can cut down on that and actually purchase 7 or just just for a failover, just 10 seats, right? I won't need 22 seats going forward, right? So that is the information we provide and based on the actual billable users you have. So we give you a suggestion.
+Cost optimization suggestions saying this is how much you can save on these licenses. Yes, it will go ahead.
+
+Adriel I. Hernandez   8:18
+Yeah, so so basically I can use this part of the reporting as an utilization and adoption report. So if I if I have an application that the technicians or the personnel should be using and they are not using, I I can see that here.
+
+Pranavi   8:34
+Yeah.
+Yes, yes, you can see that. So we segregate users as idle users too. If someone has access to an application and if they're not logged into the application, let's say for the last 30 days, so they come under idle users that that number can be customizable.
+
+Adriel I. Hernandez   8:38
+OK, yeah.
+
+Pranavi   8:52
+So we say that, OK, you've not logged into the application for 30 days, you're not using the application optimally. So the admin will have an opportunity to go ahead and maybe change the license or reassign a license based on the user's usage, right?
+
+Adriel I. Hernandez   9:12
+Yes.
+
+--- Transcript Chunk 3 ---
+Adriel I. Hernandez   8:18
+Yeah, so so basically I can use this part of the reporting as an utilization and adoption report. So if I if I have an application that the technicians or the personnel should be using and they are not using, I I can see that here.
+
+Pranavi   8:34
+Yeah.
+Yes, yes, you can see that. So we segregate users as idle users too. If someone has access to an application and if they're not logged into the application, let's say for the last 30 days, so they come under idle users that that number can be customizable.
+
+Adriel I. Hernandez   8:38
+OK, yeah.
+
+Pranavi   8:52
+So we say that, OK, you've not logged into the application for 30 days, you're not using the application optimally. So the admin will have an opportunity to go ahead and maybe change the license or reassign a license based on the user's usage, right?
+
+Adriel I. Hernandez   9:12
+Yes.
+
+Pranavi   9:12
+So this is the cost consolidation that we do. There's also another kind of cost consolidation that we do that is overlapping applications, right? So what we do is we segregate application based on their functionality, right? We put them into categories.
+So it's telling me that I have 5 project management tools in my system, right? Which is not always required. So if I'm looking to cut costs somewhere, this is also an area I could look into, consolidate all my users into one or two applications, right? Because.
+And it's telling me that you have one, sorry, five different applications for the same purpose, right? So this is also a cost consolidation suggestion that we provide.
+So based on these consolidations for each application, we show you how much you're paying right now and what your optimized cost would be based on our user activity calculation.
+Right. So let me just pause here really quickly. If you have any questions, I'll be happy to answer them.
+
+Adriel I. Hernandez   10:21
+I'm good. Roberto, do you have something?
+
+Pranavi   10:22
+Yep.
+I'm not able to see the chat. Is it good? Are we good to go?
+
+Adriel I. Hernandez   10:33
+He said he has a he has a a question, yeah.
+
+Pranavi   10:36
+Sure, sure. Go ahead, please.
+
+Adriel I. Hernandez   10:59
+Yes, I actually answered the question. So. So the question is if if an application is not joined to enter ID, we can add them manually per customer for the cost analysis and usage metrics.
+
+Pranavi   11:02
+Yeah.
+Yes, yes, that's right. Yeah, you can add the applications individually too. I've shown single sign on since it's easier to just pull out all the applications you're using at one go and then need not reauthenticate it again. But we can add into it applications individually too. You can just click on the.
+Alication, enter your admin credentials and we'll be able to pull out the same details that I've shown you before.
+
+Adriel I. Hernandez   11:44
+No, it's not multi tenant. That's what Lawrence was saying at the beginning. But Lawrence are you have, do you guys have that on the road map to have a multi tenant dashboard, OK.
+
+Pranavi   11:54
+Yes, we do have that.
+
+Lawrence Lewis   11:56
+Yes.
+
+Pranavi   12:00
+Yeah, that that should be up pretty quickly. So we are we are working on that. So you should be able to see multi-tenant view too. But right now you'd have to manage instances for each customer.
+Right, so.
+
+Adriel I. Hernandez   12:20
+Another question, does the road map?
+
+Lawrence Lewis   12:22
+No PSAR.
+
+Pranavi   12:22
+So I.
+
+Adriel I. Hernandez   12:25
+Oh, go ahead, Lawrence.
+
+Lawrence Lewis   12:26
+So PSA, RMM integrations, yes, we have it in the road map, but if you say like you know you're using data, we can consider that.
+So, Pranavi, we I'll give you the list.
+
+Adriel I. Hernandez   12:36
+So we can, so we can ask, we can, we can request integrations.
+
+Lawrence Lewis   12:40
+Yes, absolutely.
+
+Adriel I. Hernandez   12:42
+Awesome.
+
+Lawrence Lewis   12:43
+Yeah.
+You can definitely request for this integration. So if the integration is already in the road map, I'm just gonna wait for Alberto to ask the question.
+
+Adriel I. Hernandez   12:58
+Mhm.
+
+Lawrence Lewis   13:05
+She was integrated into RM for inventory and management.
+Sorry, Alberto, I didn't get that question. Do you do you mind expanding that, Adriel?
+
+Adriel I. Hernandez   13:22
+Let let me see the question. Um.
+Yeah, I don't get the question either. Can you rephrase that, Alberto? Because I don't get the question either.
+
+--- Transcript Chunk 4 ---
+Adriel I. Hernandez   12:20
+Another question, does the road map?
+
+Lawrence Lewis   12:22
+No PSAR.
+
+Pranavi   12:22
+So I.
+
+Adriel I. Hernandez   12:25
+Oh, go ahead, Lawrence.
+
+Lawrence Lewis   12:26
+So PSA, RMM integrations, yes, we have it in the road map, but if you say like you know you're using data, we can consider that.
+So, Pranavi, we I'll give you the list.
+
+Adriel I. Hernandez   12:36
+So we can, so we can ask, we can, we can request integrations.
+
+Lawrence Lewis   12:40
+Yes, absolutely.
+
+Adriel I. Hernandez   12:42
+Awesome.
+
+Lawrence Lewis   12:43
+Yeah.
+You can definitely request for this integration. So if the integration is already in the road map, I'm just gonna wait for Alberto to ask the question.
+
+Adriel I. Hernandez   12:58
+Mhm.
+
+Lawrence Lewis   13:05
+She was integrated into RM for inventory and management.
+Sorry, Alberto, I didn't get that question. Do you do you mind expanding that, Adriel?
+
+Adriel I. Hernandez   13:22
+Let let me see the question. Um.
+Yeah, I don't get the question either. Can you rephrase that, Alberto? Because I don't get the question either.
+
+Lawrence Lewis   13:34
+Hello.
+So if I understand it correctly, so once we have the RMM, let's say you know auto task, right?
+How long is?
+OK, great. So if the RMM indicates, I'm just taking a, you know, consideration of data RMM, if that is already in our road map, you know we can push it forward maybe to Q1. If that is not there, we will have to accommodate.
+How soon we can do and we'll have a timeline on that.
+Which whatever. But we can work in a pace where and if that is really important for you, we can start working on it maybe in Q1, but any app required, I think we can get it out in four.
+
+Adriel I. Hernandez   14:23
+OK.
+
+Lawrence Lewis   14:38
+4 cycles, which is 1 cycle for us is you know, a fortnight which is 2 weeks. So maybe 4 cycles. Pranavi we can look at integrating them.
+Yes, we do have.
+
+Pranavi   14:55
+Yeah.
+
+Lawrence Lewis   14:57
+Yeah.
+Great. So you said that to RMM. What? What else do you guys use?
+In the in the in the Casia stack.
+
+Adriel I. Hernandez   15:12
+So we use from Autotask that RMM IT glue.
+The security, the security ones, like e-mail filtering, graphus, yeah, SAS alerts.
+
+Lawrence Lewis   15:20
+I see that. OK, OK.
+Breakfast OK.
+Oh, you.
+
+Adriel I. Hernandez   15:31
+Those are the main, I think. Probably there is more, but.
+
+Lawrence Lewis   15:36
+I see.
+OK. So I think we can look at Datto or a task IT glue again more of an, you know, IT documentation platform that might help, yeah.
+So that's interesting. Barracuda. So Pranavi, we can look at Barracuda, right? Yeah. And we will look at.
+
+Adriel I. Hernandez   15:57
+Yeah, what I do.
+Yeah.
+I'd say I I'd say I as well. That's one of the the main ones that we use.
+
+Lawrence Lewis   16:10
+Absolutely. I I get where you're coming from, Alberto. So since you're on MSP, if you can, if we can integrate the IT glue for the document management, which will automatically pull the users there. Yeah, I think that's that's a good one, yeah.
+And better could as well. Alrighty, we'll, we'll Pranavi, we'll yeah, so Pranavi, we'll.
+
+Pranavi   16:31
+Yeah, I I've made note of these applications. I'll just go back to my team once, check if it's already on the road map, or if not, I could give you a timeline accordingly.
+
+Lawrence Lewis   16:37
+Yeah.
+Absolutely. So the beauty about IT glue is Alberto. Once you have the plug in, you can automatically, you know, look at the IT documentation part of it and that's gonna be beautiful.
+OK.
+Alrighty, great. So as of now, like I was saying, we've got integration up to 60 plus. So we'll be introducing about a 40 mode in the next two cycles by by the end of December, which we are aiming to have about 100. So we'll research on these two and see how.
+If it is already in the road map, if not, we'll try to push them in in Q1.
+Back to you, Pranavi.
+
+Pranavi   17:21
+Yep, Yep. Thanks, Larry. Right. So moving forward.
+So we we have the most very interesting feature, the shadow IT like like Larry has given a brief introduction before we started. So you'd want to know if someone's so as a compliance issue, you want to know if your employee is using a third party application that is not.
+
+Adriel I. Hernandez   17:28
+It was.
+
+--- Transcript Chunk 5 ---
+Pranavi   19:11
+So we won't need much details from you. So if if you if you give us a list of applications saying this, these are the applications that we want on the platform. So if if the application has like you said, if it has good documented APIs then we should be able to integrate those applications pretty quickly.
+So we won't need any further information from you.
+Right, so so this is the shadow IT aspect of it. Now since we've already connected the application, we can go in detail and view for each application, right? So when I click on view details, it will give me a pretty similar view to the admin console, the usual details, the users, groups, licenses.
+So we're pulling the same information for 10 different applications, right? So you need not go into 10 different admin portals for the same purpose of checking the users or checking the licenses. You can do everything from one single platform, right? So you know all your users. Then when you click on the users, you'll know what all applications he's using.
+Even the third party applications, right? So I've shown you from the application perspective, you can see from the user perspective as well what applications he's using.
+Right. You know what type of a user it is, or admin user or a guest user or a standard user in Microsoft, and also the status of the user if he's actively using the application or if he's an idle user, right? So we also have group management here when you see all your Microsoft groups at one place.
+If it's a public private group, when you click on the group, you see who are the members in the group. You can add members to the group from here itself, and you can also remove members from the group. You get an option to remove members. You can go ahead and remove members from the group here itself.
+So that is an operation you can do from the platform itself, not only Microsoft. So this is for Microsoft I'm showing, but any application with groups you could do the same operations on them and main features the license management. So when we connect to your application we'll pull out and give you a list.
+Of all the licenses you're using for that application, even if you have 1020 different licenses, we'll pull out all the licenses that you have. We show you the licenses, how many seats you have purchased the license for, right, and how many seats you have already assigned. If you have available seats, it'll show you that there are available seats and you can add more people to it.
+Right. And we also display a publicly available price when we pull out the license against it. We display this is how much the Internet is telling me that Business Essentials cost, but that would not always be the price that you purchase it for, right? So you could just go ahead, edit it, tell me that I've purchased 22 licenses. This is the.
+I've purchased the licenses for right? So you can store, you can modify the information, you can store that information. This is more like a one time thing. You need to do all this manual editing and saving only while you're onward. From then we'll take over. We can manage the license according to whatever.
+Data you've stored right? When you click on the license, you'll know who are the users using the license and you can see the status of the user here also.
+Right. So do you have any questions here? Oh, I forgot to add another important thing. So like I said, there's an AI invoice parser as well. Instead of editing the data manually, you can just go ahead, add invoices too. So I'll show you how that works. So I have a sample invoice here.
+Right, the application name, the services I've purchased, like how a normal invoice would look. I'll go ahead and quickly add the invoice.
+So we use AI to do this. We use Google LLMs to do this. It'll analyze it, it'll pass it and ask you to validate it. The application name, the prices, the services they purchased, and it's a monthly billing cycle. So from the start date of the invoice, it'll just take the expiry date as one month and it.
+Telling me that it's a monthly recurring cycle, right? I go ahead and save it. If it's a new application that I'm adding, it'll add as a new application to the platform, right? If it's an existing one, it'll just go ahead and add as a new row to the license management section, right? In that case, you won't need to edit out the price, right?
+Right, so uh.
+
+--- Transcript Chunk 6 ---
+Adriel I. Hernandez   23:56
+I'm good.
+
+Pranavi   24:10
+So you would have organization requirements, right? If someone's onboarding a specific department or a specific role, you'd want them to have a set of licenses. Everybody onboarding the same department, you'd need to do the same process again and again. So just to cut down the redundancy, you can go ahead, create templates.
+Right. You can store the templates too. So I have a template for sales, so I just drag and drop. See, I I want my sales employee to have a Panda doc. So I just go ahead, I click on drag and drop Panda doc. It gives me all the licenses that are in Panda doc.
+I select the specific license I want a sales employee to have, and I can go ahead and save the template. The only thing that we need to keep in mind is we need to have available seats before running any workflows.
+So you can go ahead. This is the onboarding workflow. So you can create a user from your if it's a new employee onboarding, the usual details, first name, last name, e-mail and password, right? And then you can go ahead and add them to your applications. You can add them to entry, you can add them to any other application as well.
+This is a new user has not been assigned to any applications yet. They could go ahead, run workflows on him. I can go ahead and choose the templates that I've saved previously so I can select on whatever template I require and start the workflow. The user will be assigned to all the applications in that template.
+And if I'm just looking to assign them to one or two licenses, then this might be a better option by just selecting the applications, choose the applications. I want them to have a Microsoft license. I just go ahead, select the applications the same way. If it's just one or two licenses, it's better to go this way. And if you're doing it in bulk, templates might be.
+Better option for you. Let me just go ahead, select all the applications I need and start the onboard process.
+We assign them to the licenses and the user will be able to access the application. The exact opposite of it is the offboarding workflow. So in the offboarding workflow you have a list of all the users in your organization. You can search them by e-mail.
+Right, I'll show you users with multiple applications, right? So if you have users with multiple access to multiple applications, it will give you a list of all the applications the user has access to, right? You go ahead, click on off board, you get a list of all the applications. You select whichever application you want to.
+Get them to work from and then you start the output process. So we very securely take care of any removal of accesses from any groups, any files, anything like that depending on the application, right? So we securely remove their access from everything in that application.
+Right. And we we can deactivate them permanently too if they're leaving the organization. So you'll still be able to access the data he's holding on to, like how you deactivate from the admin portal. We can do that from the platform itself.
+Right. So this is our off boarding workflow and we do have another cool feature that's the renewal calendar. So, so the renewal calendar we have will show you the projections for the next six months. It'll project your budgets of your SaaS based on your renewals that are coming up, it'll project your budgets for your.
+Your SAS subscriptions, right? Even if there are users, even if there are applications that go pay per user model. So we calculate how many users are added or removed in that particular month. We project accordingly, right? So it's telling me that I have 5 annuals, 4 annuals coming up in December. This is how much I have to budget for that month.
+Right. We also send you e-mail alerts and notifications. Whenever an app is coming up for renewal, we tell you that this is how much we have identified that you could save on this application. So you could go ahead, negotiate a better contract or purchase lesser seats to cut costs. So that is the cost optimization that we provide.
+Right. Uh, I think I've covered all the major features. If you have any questions, I'll be happy to answer them.
+
+Adriel I. Hernandez   28:29
+I'm good. Alberto is typing in the chat.
+
+Pranavi   28:30
+Mhm, Yeah.
+No questions. Great. Then Larry, over to you.
+
+--- Transcript Chunk 7 ---
+Adriel I. Hernandez   28:29
+I'm good. Alberto is typing in the chat.
+
+Pranavi   28:30
+Mhm, Yeah.
+No questions. Great. Then Larry, over to you.
+
+Lawrence Lewis   28:46
+Great. Thanks so much, Alvaro and Adriel. So you tell me, how do you want to take advantage of this?
+What? What's your? Any any comment, suggestions, feedback?
+
+Adriel I. Hernandez   29:18
+I'm good, as I said in the last.
+Meeting.
+
+Lawrence Lewis   29:22
+3.
+
+Adriel I. Hernandez   29:26
+Oh, OK, so it has to analyze our clients and see where is the best fit.
+
+Lawrence Lewis   29:54
+So much where we have lab and control.
+Clients to see where it'd be best fit to help them save money under that. Absolutely, absolutely. Alberto. See what my suggestion is since you have about 10 users for 10 users for the entire year, which is 14 months.
+Strategy already.
+Absolutely. Yes, Alberto. See the with the with the other MSPs, right, how they're strategizing this is with me, we I have two options. Either you can go customer by customer or do a bulk purchase, right? A bulk purchase we have tier based pricing. So let's say you want to start off with.
+With, you know, 10 users, your annual cost is gonna be nothing more than $1682.10. OK, so you can, you know, maybe.
+Have this running for your environment and show your customers how much you're saving. Or option #2 like you know you have some of the customers already with full admin control. Maybe you can if if you're charging, I don't know how much you're charging per customer with the Tattoo RMM thing. I mean with the full blown service.
+Is that as an MSP, if you're charging about $100, maybe you can add additional $10.00 for this as a service that you're providing and control and do a better onboarding, offboarding. Now the customers, they took advantage of two things as an MSP.
+They made onboarding of boarding easy and gave them the list of the rogue users. I'm sorry for using the word, not rogue users, but you know, having a list of shadow IT, making it compliant because very few MSPs right now are giving this option and positioning telling their customers how they can take control.
+All over shadow IT because this is being a compliance requirement right now, right? So they are not knowing even though a user is is if if they're using a business e-mail and not being compliant with the apps. I mean most most of the places that I'm seeing.
+ChatGPT is not allowed. ChatGPT and you know the other Chinese app, you know people go ahead and download that Chinese GPT, right? deepseek. Yeah, there you go. That's that's the one. So like I said, you can go ahead and track down the user, whoever's using it, and you know, maybe you can go ahead and directly.
+
+Adriel I. Hernandez   32:15
+De De Deepsick.
+
+Lawrence Lewis   32:26
+Uh, you know, offload that app, right? So this is where you as an MSP will add value to your customers.
+Right. So maybe you know you charge them 1015 bucks, but you know you purchase it for me. So this price at for 10 users, you know I'm gonna be charging you about 8.3 dollars, but let's say you go with 250 use 250 plus users, it's a dollar.
+Per user per month, that's how low it is. So even if you're charging about, you know about $10 per user on the on your other customers that you have, you're you're making about 90% profit there as an MSP.
+
+Adriel I. Hernandez   32:59
+Yeah.
+
+Lawrence Lewis   33:10
+No, not exactly. So how? OK, Pranavi, this question is for us. How do you, how do we know that they're using ChatGPT? So the same screen that we showed shadow IT, right? So Pranavi, can we go back to the shadow IT bit?
+There's no agent involved here, right Alberto? So we just go to shadow IT bit. We pull out all the users who are using the additional apps like example.
+What we see here? Can we can we pull out any example of chat JPT or anything Pranavi?
+You're on mute, Pranavi.
+
+Pranavi   33:55
+I'm sorry, my control was missing. So this is also a third party tool called Superhuman. So what we do is they use the product. We filter out them. We filter them out by the productivity suite. So you use Microsoft.
+
+Lawrence Lewis   33:55
+OK.
+
+--- Transcript Chunk 8 ---
+Adriel I. Hernandez   32:59
+Yeah.
+
+Lawrence Lewis   33:10
+No, not exactly. So how? OK, Pranavi, this question is for us. How do you, how do we know that they're using ChatGPT? So the same screen that we showed shadow IT, right? So Pranavi, can we go back to the shadow IT bit?
+There's no agent involved here, right Alberto? So we just go to shadow IT bit. We pull out all the users who are using the additional apps like example.
+What we see here? Can we can we pull out any example of chat JPT or anything Pranavi?
+You're on mute, Pranavi.
+
+Pranavi   33:55
+I'm sorry, my control was missing. So this is also a third party tool called Superhuman. So what we do is they use the product. We filter out them. We filter them out by the productivity suite. So you use Microsoft.
+
+Lawrence Lewis   33:55
+OK.
+
+Pranavi   34:10
+So we check Microsoft logs, see if a third party application is being used with that business e-mail ID. So that's how we pull out the application and show you whatever application they sign up to using logging in with Microsoft. We'd be able to pull that application and show you that.
+That this is the application they're using. This is the user that's using the application.
+
+Lawrence Lewis   34:35
+Yes, Alberto, you're right with the authorized app with the authorized login, which means the business e-mail.
+
+Pranavi   34:41
+Yeah.
+
+Lawrence Lewis   34:43
+OK, and if they're using ChatGPT without login to Microsoft, OK, so this is the second part that we are coming up with. So we are building up a browser, browser based plugin wherein let's say let's take the same example of Larry. Larry uses his personal e-mail.
+On his official laptop and then he downloads ChatGPT that can also be tracked.
+Yep, Yep, correct. We've got that running.
+Right. Yes. So Alberto and Adrian, so we could do this, you know, I could hook you up with for these 10 users. So this is gonna come in with one month of onboarding wherein we'll help you, train you on a weekly basis, right. And then we'll help you. You know, I'll be there. I can go ahead and help you position this for your customers.
+Maybe you can, you know, pull me on the for every meeting that you go with your customers. I will be able to go ahead and tell them how they can take, how like I can be a part of you guys. I can be a part of rescue, right? So I will be going. I can go ahead and position.
+And help you, you know, place Cloudfuse Manage for your clients. I'm I'm willing to do that.
+Right. So like I said, for about 10 users, for about 14 months of usage, which is one month of onboarding, one month of trial, testing suggestions, blah blah blah, you know, all the help you need training you guys plus 12 months of usage, totally 14 months of coverage, your total.
+Annual bill is actually 1869 and you know we are running a holiday special with a 10% discount. It's coming up to 162, sorry 1682 and $0.10.
+Correct. That would cover yourself. You're right.
+NFR scans the customers as prospecting NFR.
+Pranavi, what do you think? Is that available?
+Maybe, maybe. Yeah. Not for resale scans. Yeah, so.
+What I can help you with is, yeah, free scantron customers and show them, yes. So once you become a customer, what I can give you is maybe a two or a three day a trial account. OK, I can give that to you and then you'll be able to use that for your customers, yes.
+All you have to do is you have to give me a day's notice and I can get that done. That is doable.
+I'll create the demo environment and then you can go ahead and show the customer.
+
+Pranavi   37:58
+Yeah, we can do that, yeah.
+
+Lawrence Lewis   38:04
+Because we need to create that environment, so yes.
+
+Pranavi   38:26
+Oh, you're mute, Larry.
+
+Lawrence Lewis   38:29
+My bad. Sorry. So absolutely, Alberto, there's gonna be a great initiative in 2026. But yeah, I mean, no need to take a decision right now, but if you can make any decision before the 31st, that would.
+Help. She also she's the account manager, so it would help her personally. But as a personal, you know, personal favor. If you can work on something, let me know. Can I go ahead and send the pricing out to you so you can decide?
+Uh, at length.
+And what about will be discussed today?
+
+Adriel I. Hernandez   39:06
+Yeah, that would be good.
+
+Lawrence Lewis   39:10
+OK.
+What do you say, Adriel? Any questions, comments, thoughts?
+
+--- Transcript Chunk 9 ---
+Pranavi   37:58
+Yeah, we can do that, yeah.
+
+Lawrence Lewis   38:04
+Because we need to create that environment, so yes.
+
+Pranavi   38:26
+Oh, you're mute, Larry.
+
+Lawrence Lewis   38:29
+My bad. Sorry. So absolutely, Alberto, there's gonna be a great initiative in 2026. But yeah, I mean, no need to take a decision right now, but if you can make any decision before the 31st, that would.
+Help. She also she's the account manager, so it would help her personally. But as a personal, you know, personal favor. If you can work on something, let me know. Can I go ahead and send the pricing out to you so you can decide?
+Uh, at length.
+And what about will be discussed today?
+
+Adriel I. Hernandez   39:06
+Yeah, that would be good.
+
+Lawrence Lewis   39:10
+OK.
+What do you say, Adriel? Any questions, comments, thoughts?
+
+Adriel I. Hernandez   39:19
+No questions. I'm good. Yeah.
+
+Lawrence Lewis   39:22
+OK.
+Absolutely. Yeah, I have that. I'll, I'll go ahead and send that out to you.
+Maybe you know I have everything which no problem Alberto. I have every document which talks about Cloudfuse manage. But if there is I let me I need to talk to my marketing and if you want me to I can go ahead and white label that it'll it'll say Cloudfuse.
+Managed but I can go ahead and add you know white label it under res rescue it and then you know if if you can go ahead and yeah if you can go ahead and send me the logos maybe I can integrate that and I can help you with it.
+Would that help?
+On one pages.
+
+Adriel I. Hernandez   40:12
+OK.
+
+Lawrence Lewis   40:15
+OK.
+I could work on that.
+Yeah.
+I I'm here to help you. Uh, sorry. Go ahead, Angel.
+
+Adriel I. Hernandez   40:21
+Um.
+No, go ahead. I was saying that or I was gonna ask you if you want the logos here on the chat or on a separate e-mail. Yeah, e-mail, right. OK, what? What's? Can you put your e-mail address here in the?
+
+Lawrence Lewis   40:30
+E-mail them to me. e-mail them to me. Yeah, because I don't want to.
+Absolutely.
+
+Adriel I. Hernandez   40:38
+In the chat.
+Is that.
+
+Lawrence Lewis   40:56
+Oh Jesus, I'm talking about.
+
+Jalsha Chakma   41:04
+I provided Larry for you.
+
+Adriel I. Hernandez   41:06
+OK.
+
+Lawrence Lewis   41:07
+It's the same one, so it's always Lawrence dot Lewis at either Kaseya or Cloudview. So. So yeah, like I was saying, you know, please ask me if you need any help, right?
+Kaseya is to give you collateral on what? What was the program called? It was called when they could help MSPs. They used days to generate marketing materials and all that. Are you are you on that?
+
+Adriel I. Hernandez   41:36
+You think it's true, Peter?
+
+Lawrence Lewis   41:39
+Troopia. Yeah, Troopia is one. No, there it's more of.
+
+Adriel I. Hernandez   41:43
+Or fuel the fuel, fuel something.
+
+Lawrence Lewis   41:46
+Yeah, the fuel something. Yeah, that that that was it. That was it. OK. OK.
+
+Adriel I. Hernandez   41:47
+Mhm.
+
+Lawrence Lewis   41:53
+They have that. OK. So yeah, like I was saying, you know, I'm here to help you guys, Alberto and Adriel. I'll send you the pricing information and you know, if you can help me get this signed up before the 31st, it would be of real help and we can we can work on large.
+Rojects.
+Correct. Yeah. One page is right. Yeah, you're right. You're right, Albert. That's the one I'm talking about.
+OK, alrighty. I think I've taken 2 minutes more what was than what was kind of scheduled. My apologies.
+
+Adriel I. Hernandez   42:35
+We came in, uh, late, so no worries.
+
+Lawrence Lewis   42:35
+No problem. No problem. Yeah. So yeah, the guys, I'm gonna go ahead and send some collateral information. First, I'm gonna send the one which is available already. I need to go back to marketing and I'm gonna talk to them if we can white label that for you guys with rescue. And then I'm gonna go ahead and send you some pricing information and.
+As a follow up, can we connect maybe next Tuesday or Wednesday? Is that OK?
+
+Adriel I. Hernandez   43:03
+That's, uh, your call, Alberto.
+
+Pranavi   43:06
+Yeah, I can have the timelines ready by then too. I'll go back to my team. I'll check about the apps you've sent and give you the timeline.
+
+Lawrence Lewis   43:15
+OK, alrighty. So next Tuesday, Wednesday, I'll e-mail you Alberto and Adriel, and we can take it up from there, OK?
+
+Adriel I. Hernandez   43:24
+OK, sounds good.
+
+--- Transcript Chunk 10 ---
+Adriel I. Hernandez   42:35
+We came in, uh, late, so no worries.
+
+Lawrence Lewis   42:35
+No problem. No problem. Yeah. So yeah, the guys, I'm gonna go ahead and send some collateral information. First, I'm gonna send the one which is available already. I need to go back to marketing and I'm gonna talk to them if we can white label that for you guys with rescue. And then I'm gonna go ahead and send you some pricing information and.
+As a follow up, can we connect maybe next Tuesday or Wednesday? Is that OK?
+
+Adriel I. Hernandez   43:03
+That's, uh, your call, Alberto.
+
+Pranavi   43:06
+Yeah, I can have the timelines ready by then too. I'll go back to my team. I'll check about the apps you've sent and give you the timeline.
+
+Lawrence Lewis   43:15
+OK, alrighty. So next Tuesday, Wednesday, I'll e-mail you Alberto and Adriel, and we can take it up from there, OK?
+
+Adriel I. Hernandez   43:24
+OK, sounds good.
+
+Lawrence Lewis   43:25
+Alright, great gentlemen. Great connecting with you. Had a great, you know, time talking to you guys. Thank you so much. We're looking forward to working with you soon. Have a great one. Thanks again. Bye.
+
+Adriel I. Hernandez   43:34
+Thank you. Thank you. Bye-bye.
+
+Pranavi   43:36
+Thanks everyone. Good day.
+
+Jalsha Chakma stopped transcription
+
+--- Transcript Chunk 11 ---
+Q29: Telling me that it's a monthly recurring cycle, right? I go ahead and save it. If it's a new application that I'm adding, it'll add as a new application to the platform, right? If it's an existing one, it'll just go ahead and add as a new row to the license management section, right? In that case, you won't need to edit out the price, right?
+A29: Right, so uh.
+
+Q30: Do you have any questions here? I'll just pause really quickly.
+A30: Good. Great then. Yeah. So the next main feature is the automated provisioning and deprovisioning users from licenses. So before we start that, we could go ahead predefined templates and save them. Adriel I. Hernandez   23:56 I'm good.
+
+Q31: So you would have organization requirements, right? If someone's onboarding a specific department or a specific role, you'd want them to have a set of licenses. Everybody onboarding the same department, you'd need to do the same process again and again. So just to cut down the redundancy, you can go ahead, create templates.
+A31: Right. You can store the templates too. So I have a template for sales, so I just drag and drop. See, I I want my sales employee to have a Panda doc. So I just go ahead, I click on drag and drop Panda doc. It gives me all the licenses that are in Panda doc. I select the specific license I want a sales employee to have, and I can go ahead and save the template. The only thing that we need to keep in mind is we need to have available seats before running any workflows.
+
+Q32: This is a new user has not been assigned to any applications yet. They could go ahead, run workflows on him. I can go ahead and choose the templates that I've saved previously so I can select on whatever template I require and start the workflow. The user will be assigned to all the applications in that template.
+A32: And if I'm just looking to assign them to one or two licenses, then this might be a better option by just selecting the applications, choose the applications. I want them to have a Microsoft license. I just go ahead, select the applications the same way. If it's just one or two licenses, it's better to go this way. And if you're doing it in bulk, templates might be. Better option for you. Let me just go ahead, select all the applications I need and start the onboard process. We assign them to the licenses and the user will be able to access the application. The exact opposite of it is the offboarding workflow. So in the offboarding workflow you have a list of all the users in your organization. You can search them by e-mail.
+
+Q33: Right. We also send you e-mail alerts and notifications. Whenever an app is coming up for renewal, we tell you that this is how much we have identified that you could save on this application. So you could go ahead, negotiate a better contract or purchase lesser seats to cut costs. So that is the cost optimization that we provide.
+A33: Right. Uh, I think I've covered all the major features. If you have any questions, I'll be happy to answer them. Adriel I. Hernandez   28:29 I'm good. Alberto is typing in the chat. Mhm, Yeah. No questions. Great. Then Larry, over to you.
+
+Q34: What? What's your? Any any comment, suggestions, feedback?
+A34: Adriel I. Hernandez   29:18 I'm good, as I said in the last. Meeting. 3. Adriel I. Hernandez   29:26
+
+Q35: Clients to see where it'd be best fit to help them save money under that. Absolutely, absolutely. Alberto. See what my suggestion is since you have about 10 users for 10 users for the entire year, which is 14 months.
+A35: Strategy already.
+
+Q36: Absolutely. Yes, Alberto. See the with the with the other MSPs, right, how they're strategizing this is with me, we I have two options. Either you can go customer by customer or do a bulk purchase, right? A bulk purchase we have tier based pricing. So let's say you want to start off with.
+A36: With, you know, 10 users, your annual cost is gonna be nothing more than $1682.10. OK, so you can, you know, maybe.
+
+--- Transcript Chunk 12 ---
+Q34: What? What's your? Any any comment, suggestions, feedback?
+A34: Adriel I. Hernandez   29:18 I'm good, as I said in the last. Meeting. 3. Adriel I. Hernandez   29:26
+
+Q35: Clients to see where it'd be best fit to help them save money under that. Absolutely, absolutely. Alberto. See what my suggestion is since you have about 10 users for 10 users for the entire year, which is 14 months.
+A35: Strategy already.
+
+Q36: Absolutely. Yes, Alberto. See the with the with the other MSPs, right, how they're strategizing this is with me, we I have two options. Either you can go customer by customer or do a bulk purchase, right? A bulk purchase we have tier based pricing. So let's say you want to start off with.
+A36: With, you know, 10 users, your annual cost is gonna be nothing more than $1682.10. OK, so you can, you know, maybe.
+
+Q37: Have this running for your environment and show your customers how much you're saving. Or option #2 like you know you have some of the customers already with full admin control. Maybe you can if if you're charging, I don't know how much you're charging per customer with the Tattoo RMM thing. I mean with the full blown service.
+A37: Is that as an MSP, if you're charging about $100, maybe you can add additional $10.00 for this as a service that you're providing and control and do a better onboarding, offboarding. Now the customers, they took advantage of two things as an MSP.
+
+Q38: ChatGPT is not allowed. ChatGPT and you know the other Chinese app, you know people go ahead and download that Chinese GPT, right? deepseek. Yeah, there you go. That's that's the one. So like I said, you can go ahead and track down the user, whoever's using it, and you know, maybe you can go ahead and directly.
+A38: Adriel I. Hernandez   32:15 De De Deepsick.
+
+Q39: Uh, you know, offload that app, right? So this is where you as an MSP will add value to your customers.
+A39: Right. So maybe you know you charge them 1015 bucks, but you know you purchase it for me. So this price at for 10 users, you know I'm gonna be charging you about 8.3 dollars, but let's say you go with 250 use 250 plus users, it's a dollar.
+
+Q40: Per user per month, that's how low it is. So even if you're charging about, you know about $10 per user on the on your other customers that you have, you're you're making about 90% profit there as an MSP.
+A40: Adriel I. Hernandez   32:59 Yeah.
+
+Q41: What we see here? Can we can we pull out any example of chat JPT or anything Pranavi?
+A41: You're on mute, Pranavi.
+
+Q42: I'm sorry, my control was missing. So this is also a third party tool called Superhuman. So what we do is they use the product. We filter out them. We filter them out by the productivity suite. So you use Microsoft.
+A42: OK.
+
+Q43: So we check Microsoft logs, see if a third party application is being used with that business e-mail ID. So that's how we pull out the application and show you whatever application they sign up to using logging in with Microsoft. We'd be able to pull that application and show you that.
+A43: That this is the application they're using. This is the user that's using the application.
+
+Q44: Yes, Alberto, you're right with the authorized app with the authorized login, which means the business e-mail.
+A44: Yeah.
+
+Q45: OK, and if they're using ChatGPT without login to Microsoft, OK, so this is the second part that we are coming up with. So we are building up a browser, browser based plugin wherein let's say let's take the same example of Larry. Larry uses his personal e-mail.
+A45: On his official laptop and then he downloads ChatGPT that can also be tracked. Yep, Yep, correct. We've got that running.
+
+Q46: Maybe you can, you know, pull me on the for every meeting that you go with your customers. I will be able to go ahead and tell them how they can take, how like I can be a part of you guys. I can be a part of rescue, right? So I will be going. I can go ahead and position.
+A46: And help you, you know, place Cloudfuse Manage for your clients. I'm I'm willing to do that.
+
+--- Transcript Chunk 13 ---
+Adriel I. Hernandez
+Yes.
+
+Lawrence Lewis
+Alright, great. So Pranavi, hey, let's get started with the demonstration at any point while we're in the demonstration. Alboro, please stop us and let us know. We'd be more than happy to go ahead and take those questions. Pranavi, back to you.
+
+Pranavi
+Thanks, Larry. So let me just share my screen. We can dive into the demo. Larry said, please feel free to stop me anytime. If you have questions, I'll be happy to answer them.
+Please confirm when you're able to see.
+
+Lawrence Lewis
+Yes.
+
+Pranavi
+Great, So the fundamental step for for us to manage your users or manage your licenses will be first to add the applications, So the most foundational feature is the application discovery.
+So see, Cloudfish is managed directly integrates with all the major SaaS applications through APIs, We also do have integration with single sign on too. So Adil, if I remember correctly, you you said that you do use Intra,
+
+Adriel I. Hernandez
+Correct, yes.
+
+Pranavi
+Yes. So connecting to the application is pretty simple. You go ahead, enter your super admin or global admin credentials depending on the app you're connecting to, Having that admin privileges is really important for us to get the information.
+so once we connect to the application, if you're connecting to a single sign on, what it does is makes things really easier for you. You need not go ahead and connect to every application, authenticate every application individually. So once you connect your identity provider or your single sign on, you just get.
+Get an option to discover applications, So when you click on discover applications, it'll detect all the applications that are already integrated with your single sign on, So if you just want an application, let's say if I want to add Atlassian, then I can just go ahead and connect directly, It won't ask me to authenticate Atlassian again.
+Since it's already connected to your SSO, So once we do all these steps, so we have our whole SaaS inventory ready for us, We have every application that we are using. There are, I'd say there are very small number of applications that do not provide the API input.
+Points, So in that case, we can just add the application manually too, so that we'll have the whole inventory of all the SaaS apps that you're using at one place. But I'd say it's very minimal number of applications that do not provide the end points. So we can just go ahead and add the application. go ahead.
+
+Adriel I. Hernandez
+I have a question.
+so talking about the intra intra ID integration. So you're talking about that if I connect my intra ID, everything that I have connected to intra ID through SSO, it's gonna show up here.
+
+Pranavi
+
+all the applications, yes.
+
+Adriel I. Hernandez
+And I can manually add the cost of license and that will be calculated.
+
+Pranavi
+
+if the application is integrated it it will pull up the price. So this is for discovery, just this is for the discovery purpose of what is being used automatically. If we connect to the application then we'd be able to see.
+The usual details how you connect through APIs.
+
+Adriel I. Hernandez
+but if the price is not, but if the price is not included in that pool of the API, I can manually add it to to get calculate and report it. perfect.
+
+--- Transcript Chunk 14 ---
+Adriel I. Hernandez
+Yes.
+
+Pranavi
+So this is the cost consolidation that we do. There's also another kind of cost consolidation that we do that is overlapping applications, So what we do is we segregate application based on their functionality, We put them into categories.
+So it's telling me that I have 5 project management tools in my system, Which is not always required. So if I'm looking to cut costs somewhere, this is also an area I could look into, consolidate all my users into one or two applications, Because.
+And it's telling me that you have one, sorry, five different applications for the same purpose, So this is also a cost consolidation suggestion that we provide.
+So based on these consolidations for each application, we show you how much you're paying now and what your optimized cost would be based on our user activity calculation.
+So let me just pause here really quickly. If you have any questions, I'll be happy to answer them.
+
+Adriel I. Hernandez
+I'm good. Roberto, do you have something?
+
+Pranavi
+
+I'm not able to see the chat. Is it good? Are we good to go?
+
+Adriel I. Hernandez
+He said he has a he has a a question,
+
+Pranavi
+Go ahead, please.
+
+Adriel I. Hernandez
+Yes, I answered the question. So. So the question is if if an application is not joined to enter ID, we can add them manually per customer for the cost analysis and usage metrics.
+
+Pranavi
+
+Yes, yes, that's you can add the applications individually too. I've shown single sign on since it's easier to just pull out all the applications you're using at one go and then need not reauthenticate it again. But we can add into it applications individually too. You can just click on the.
+Alication, enter your admin credentials and we'll be able to pull out the same details that I've shown you before.
+
+Adriel I. Hernandez
+No, it's not multi tenant. That's what Lawrence was saying at the beginning. But Lawrence are you have, do you guys have that on the road map to have a multi tenant dashboard,
+
+Pranavi
+Yes, we do have that.
+
+Lawrence Lewis
+Yes.
+
+Pranavi
+that that should be up pretty quickly. So we are we are working on that. So you should be able to see multi-tenant view too. But now you'd have to manage instances for each customer.
+so.
+
+Adriel I. Hernandez
+Another question, does the road map?
+
+Lawrence Lewis
+No PSAR.
+
+Pranavi
+So I.
+
+Adriel I. Hernandez
+Oh, go ahead, Lawrence.
+
+Lawrence Lewis
+So PSA, RMM integrations, yes, we have it in the road map, but if you say you know you're using data, we can consider that.
+Pranavi So, we I'll give you the list.
+
+Adriel I. Hernandez
+So we can, so we can ask, we can, we can request integrations.
+
+Lawrence Lewis
+Yes, absolutely.
+
+Adriel I. Hernandez
+Awesome.
+
+Lawrence Lewis
+
+You can definitely request for this integration. So if the integration is already in the road map, I'm just gonna wait for Alberto to ask the question.
+
+Adriel I. Hernandez
+
+Lawrence Lewis
+She was integrated into RM for inventory and management.
+Alberto Sorry, I didn't get that question. Do you do you mind expanding that, Adriel?
+
+Adriel I. Hernandez
+Let let me see the question.
+I don't get the question either. Can you rephrase that, Alberto? Because I don't get the question either.
+
+Lawrence Lewis
+Hello.
+So if I understand it correctly, so once we have the RMM, let's say you know auto task,
+How long is?
+great. So if the RMM indicates, I'm just taking a, you know, consideration of data RMM, if that is already in our road map, you know we can push it forward maybe to Q1. If that is not there, we will have to accommodate.
+How soon we can do and we'll have a timeline on that.
+Which whatever. But we can work in a pace where and if that is really important for you, we can start working on it maybe in Q1, but any app required, I think we can get it out in four.
+
+Adriel I. Hernandez
+
+Lawrence Lewis
+4 cycles, which is 1 cycle for us is you know, a fortnight which is 2 weeks. So maybe 4 cycles. Pranavi we can look at integrating them.
+Yes, we do have.
+
+Pranavi
+
+Lawrence Lewis
+
+Great. So you said that to RMM. What? What else do you guys use?
+In the in the in the Casia stack.
+
+Adriel I. Hernandez
+So we use from Autotask that RMM IT glue.
+The security, the security ones, e-mail filtering, graphus, SAS alerts.
+
+Lawrence Lewis
+I see that.
+Breakfast
+Oh, you.
+
+Adriel I. Hernandez
+Those are the main, I think. Probably there is more, but.
+
+--- Transcript Chunk 15 ---
+Adriel I. Hernandez
+
+Lawrence Lewis
+4 cycles, which is 1 cycle for us is you know, a fortnight which is 2 weeks. So maybe 4 cycles. Pranavi we can look at integrating them.
+Yes, we do have.
+
+Pranavi
+
+Lawrence Lewis
+
+Great. So you said that to RMM. What? What else do you guys use?
+In the in the in the Casia stack.
+
+Adriel I. Hernandez
+So we use from Autotask that RMM IT glue.
+The security, the security ones, e-mail filtering, graphus, SAS alerts.
+
+Lawrence Lewis
+I see that.
+Breakfast
+Oh, you.
+
+Adriel I. Hernandez
+Those are the main, I think. Probably there is more, but.
+
+Lawrence Lewis
+I see.
+So I think we can look at Datto or a task IT glue again more of an, you know, IT documentation platform that might help,
+So that's interesting. Barracuda. So Pranavi, we can look at Barracuda, And we will look at.
+
+Adriel I. Hernandez
+what I do.
+
+I'd say I I'd say I as well. That's one of the the main ones that we use.
+
+Lawrence Lewis
+Absolutely. I I get where you're coming from, Alberto. So since you're on MSP, if you can, if we can integrate the IT glue for the document management, which will automatically pull the users there. I think that's that's a good one,
+And better could as well. Alrighty, we'll, we'll Pranavi, we'll so Pranavi, we'll.
+
+Pranavi
+I I've made note of these applications. I'll just go back to my team once, check if it's already on the road map, or if not, I could give you a timeline accordingly.
+
+Lawrence Lewis
+
+Absolutely. So the beauty about IT glue is Alberto. Once you have the plug in, you can automatically, you know, look at the IT documentation part of it and that's gonna be beautiful.
+
+Alrighty, great. So as of now, I was saying, we've got integration up to 60 plus. So we'll be introducing about a 40 mode in the next two cycles by by the end of December, which we are aiming to have about 100. So we'll research on these two and see how.
+If it is already in the road map, if not, we'll try to push them in in Q1.
+Back to you, Pranavi.
+
+Pranavi
+Thanks, Larry. So moving forward.
+So we we have the most very interesting feature, the shadow IT Larry has given a brief introduction before we started. So you'd want to know if someone's so as a compliance issue, you want to know if your employee is using a third party application that is not.
+
+Adriel I. Hernandez
+It was.
+
+Pranavi
+Approved by the IT, So what we do is since you're a Microsoft shop, so once you add your Microsoft application, we'd be able to pull out all the third party applications that your users are using when they're logging in with Microsoft, So we go through the logs.
+We scan through the logs and we tell you that this is a third party application, so someone in your organization is using Mural, So when you click on that, you'll know who exactly that user is who's using that third party application, So we'll also be able to. So we're making a minor enhancement on this.
+So you'd also be able to go ahead and remove that user access for that third party application, So that you you could do that as well as a security and compliance issue. You'd want you'd not want your users to be using non approved IT apps,
+So this this is how we detect and we show you a discovery on the SaaS applications this way, the shadow IT applications. I think Alberto had a question. just quickly.
+
+Lawrence Lewis
+Another question, what do you need from us for a custom integration if we know a SaaS app has a good API documented that exposes license usage?
+
+--- Transcript Chunk 16 ---
+Pranavi
+So we won't need much details from you. So if if you if you give us a list of applications saying this, these are the applications that we want on the platform. So if if the application has you said, if it has good documented APIs then we should be able to integrate those applications pretty quickly.
+So we won't need any further information from you.
+so this is the shadow IT aspect of it. Now since we've already connected the application, we can go in detail and view for each application, So when I click on view details, it will give me a pretty similar view to the admin console, the usual details, the users, groups, licenses.
+So we're pulling the same information for 10 different applications, So you need not go into 10 different admin portals for the same purpose of checking the users or checking the licenses. You can do everything from one single platform, So you know all your users. Then when you click on the users, you'll know what all applications he's using.
+Even the third party applications, So I've shown you from the application perspective, you can see from the user perspective as well what applications he's using.
+You know what type of a user it is, or admin user or a guest user or a standard user in Microsoft, and also the status of the user if he's actively using the application or if he's an idle user, So we also have group management here when you see all your Microsoft groups at one place.
+If it's a public private group, when you click on the group, you see who are the members in the group. You can add members to the group from here itself, and you can also remove members from the group. You get an option to remove members. You can go ahead and remove members from the group here itself.
+So that is an operation you can do from the platform itself, not only Microsoft. So this is for Microsoft I'm showing, but any application with groups you could do the same operations on them and main features the license management. So when we connect to your application we'll pull out and give you a list.
+Of all the licenses you're using for that application, even if you have 1020 different licenses, we'll pull out all the licenses that you have. We show you the licenses, how many seats you have purchased the license for, and how many seats you have already assigned. If you have available seats, it'll show you that there are available seats and you can add more people to it.
+And we also display a publicly available price when we pull out the license against it. We display this is how much the Internet is telling me that Business Essentials cost, but that would not always be the price that you purchase it for, So you could just go ahead, edit it, tell me that I've purchased 22 licenses. This is the.
+I've purchased the licenses for So you can store, you can modify the information, you can store that information. This is more a one time thing. You need to do all this manual editing and saving only while you're onward. From then we'll take over. We can manage the license according to whatever.
+Data you've stored When you click on the license, you'll know who are the users using the license and you can see the status of the user here also.
+So do you have any questions here? Oh, I forgot to add another important thing. So I said, there's an AI invoice parser as well. Instead of editing the data manually, you can just go ahead, add invoices too. So I'll show you how that works. So I have a sample invoice here.
+the application name, the services I've purchased, how a normal invoice would look. I'll go ahead and quickly add the invoice.
+So we use AI to do this. We use Google LLMs to do this. It'll analyze it, it'll pass it and ask you to validate it. The application name, the prices, the services they purchased, and it's a monthly billing cycle. So from the start date of the invoice, it'll just take the expiry date as one month and it.
+Telling me that it's a monthly recurring cycle, I go ahead and save it. If it's a new application that I'm adding, it'll add as a new application to the platform, If it's an existing one, it'll just go ahead and add as a new row to the license management section, In that case, you won't need to edit out the price,
+so
+Do you have any questions here? I'll just pause really quickly.
+
+--- Transcript Chunk 17 ---
+Adriel I. Hernandez
+I'm good.
+
+Pranavi
+So you would have organization requirements, If someone's onboarding a specific department or a specific role, you'd want them to have a set of licenses. Everybody onboarding the same department, you'd need to do the same process again and again. So just to cut down the redundancy, you can go ahead, create templates.
+You can store the templates too. So I have a template for sales, so I just drag and drop. See, I I want my sales employee to have a Panda doc. So I just go ahead, I click on drag and drop Panda doc. It gives me all the licenses that are in Panda doc.
+I select the specific license I want a sales employee to have, and I can go ahead and save the template. The only thing that we need to keep in mind is we need to have available seats before running any workflows.
+So you can go ahead. This is the onboarding workflow. So you can create a user from your if it's a new employee onboarding, the usual details, first name, last name, e-mail and password, And then you can go ahead and add them to your applications. You can add them to entry, you can add them to any other application as well.
+This is a new user has not been assigned to any applications yet. They could go ahead, run workflows on him. I can go ahead and choose the templates that I've saved previously so I can select on whatever template I require and start the workflow. The user will be assigned to all the applications in that template.
+And if I'm just looking to assign them to one or two licenses, then this might be a better option by just selecting the applications, choose the applications. I want them to have a Microsoft license. I just go ahead, select the applications the same way. If it's just one or two licenses, it's better to go this way. And if you're doing it in bulk, templates might be.
+Better option for you. Let me just go ahead, select all the applications I need and start the onboard process.
+We assign them to the licenses and the user will be able to access the application. The exact opposite of it is the offboarding workflow. So in the offboarding workflow you have a list of all the users in your organization. You can search them by e-mail.
+I'll show you users with multiple applications, So if you have users with multiple access to multiple applications, it will give you a list of all the applications the user has access to, You go ahead, click on off board, you get a list of all the applications. You select whichever application you want to.
+Get them to work from and then you start the output process. So we very securely take care of any removal of accesses from any groups, any files, anything that depending on the application, So we securely remove their access from everything in that application.
+And we we can deactivate them permanently too if they're leaving the organization. So you'll still be able to access the data he's holding on to, how you deactivate from the admin portal. We can do that from the platform itself.
+So this is our off boarding workflow and we do have another cool feature that's the renewal calendar. So, so the renewal calendar we have will show you the projections for the next six months. It'll project your budgets of your SaaS based on your renewals that are coming up, it'll project your budgets for your.
+Your SAS subscriptions, Even if there are users, even if there are applications that go pay per user model. So we calculate how many users are added or removed in that particular month. We project accordingly, So it's telling me that I have 5 annuals, 4 annuals coming up in December. This is how much I have to budget for that month.
+We also send you e-mail alerts and notifications. Whenever an app is coming up for renewal, we tell you that this is how much we have identified that you could save on this application. So you could go ahead, negotiate a better contract or purchase lesser seats to cut costs. So that is the cost optimization that we provide.
+I think I've covered all the major features. If you have any questions, I'll be happy to answer them.
+
+Adriel I. Hernandez
+I'm good. Alberto is typing in the chat.
+
+Pranavi
+
+No questions. Great. Then Larry, over to you.
+
+Lawrence Lewis
+Great. Thanks so much, Alvaro and Adriel. So you tell me, how do you want to take advantage of this?
+What? What's your? Any any comment, suggestions, feedback?
+
+--- Transcript Chunk 18 ---
+Adriel I. Hernandez
+I'm good. Alberto is typing in the chat.
+
+Pranavi
+
+No questions. Great. Then Larry, over to you.
+
+Lawrence Lewis
+Great. Thanks so much, Alvaro and Adriel. So you tell me, how do you want to take advantage of this?
+What? What's your? Any any comment, suggestions, feedback?
+
+Adriel I. Hernandez
+I'm good, as I said in the last.
+Meeting.
+
+Lawrence Lewis
+3.
+
+Adriel I. Hernandez
+Oh, so it has to analyze our clients and see where is the best fit.
+
+Lawrence Lewis
+So much where we have lab and control.
+Clients to see where it'd be best fit to help them save money under that. Absolutely, absolutely. Alberto. See what my suggestion is since you have about 10 users for 10 users for the entire year, which is 14 months.
+Strategy already.
+Absolutely. Yes, Alberto. See the with the with the other MSPs, how they're strategizing this is with me, we I have two options. Either you can go customer by customer or do a bulk purchase, A bulk purchase we have tier based pricing. So let's say you want to start off with.
+With, you know, 10 users, your annual cost is gonna be nothing more than $1682.10. so you can, you know, maybe.
+Have this running for your environment and show your customers how much you're saving. Or option #2 you know you have some of the customers already with full admin control. Maybe you can if if you're charging, I don't know how much you're charging per customer with the Tattoo RMM thing. I mean with the full blown service.
+Is that as an MSP, if you're charging about $100, maybe you can add additional $10.00 for this as a service that you're providing and control and do a better onboarding, offboarding. Now the customers, they took advantage of two things as an MSP.
+They made onboarding of boarding easy and gave them the list of the rogue users. I'm sorry for using the word, not rogue users, but you know, having a list of shadow IT, making it compliant because very few MSPs now are giving this option and positioning telling their customers how they can take control.
+All over shadow IT because this is being a compliance requirement now, So they are not knowing even though a user is is if if they're using a business e-mail and not being compliant with the apps. I mean most most of the places that I'm seeing.
+ChatGPT is not allowed. ChatGPT and you know the other Chinese app, you know people go ahead and download that Chinese GPT, deepseek. there you go. That's that's the one. So I said, you can go ahead and track down the user, whoever's using it, and you know, maybe you can go ahead and directly.
+
+Adriel I. Hernandez
+De De Deepsick.
+
+Lawrence Lewis
+you know, offload that app, So this is where you as an MSP will add value to your customers.
+So maybe you know you charge them 1015 bucks, but you know you purchase it for me. So this price at for 10 users, you know I'm gonna be charging you about 8.3 dollars, but let's say you go with 250 use 250 plus users, it's a dollar.
+Per user per month, that's how low it is. So even if you're charging about, you know about $10 per user on the on your other customers that you have, you're you're making about 90% profit there as an MSP.
+
+Adriel I. Hernandez
+
+Lawrence Lewis
+No, not exactly. So how? Pranavi, this question is for us. How do you, how do we know that they're using ChatGPT? So the same screen that we showed shadow IT, So Pranavi, can we go back to the shadow IT bit?
+There's no agent involved here, Alberto? So we just go to shadow IT bit. We pull out all the users who are using the additional apps example.
+What we see here? Can we can we pull out any example of chat JPT or anything Pranavi?
+You're on mute, Pranavi.
+
+Pranavi
+I'm sorry, my control was missing. So this is also a third party tool called Superhuman. So what we do is they use the product. We filter out them. We filter them out by the productivity suite. So you use Microsoft.
+
+Lawrence Lewis
+
+Pranavi
+So we check Microsoft logs, see if a third party application is being used with that business e-mail ID. So that's how we pull out the application and show you whatever application they sign up to using logging in with Microsoft. We'd be able to pull that application and show you that.
+That this is the application they're using. This is the user that's using the application.
+
+Lawrence Lewis
+Alberto Yes, you're with the authorized app with the authorized login, which means the business e-mail.
+
+Pranavi
+
+--- Transcript Chunk 19 ---
+Pranavi
+I'm sorry, my control was missing. So this is also a third party tool called Superhuman. So what we do is they use the product. We filter out them. We filter them out by the productivity suite. So you use Microsoft.
+
+Lawrence Lewis
+
+Pranavi
+So we check Microsoft logs, see if a third party application is being used with that business e-mail ID. So that's how we pull out the application and show you whatever application they sign up to using logging in with Microsoft. We'd be able to pull that application and show you that.
+That this is the application they're using. This is the user that's using the application.
+
+Lawrence Lewis
+Alberto Yes, you're with the authorized app with the authorized login, which means the business e-mail.
+
+Pranavi
+
+Lawrence Lewis
+and if they're using ChatGPT without login to Microsoft, so this is the second part that we are coming up with. So we are building up a browser, browser based plugin wherein let's say let's take the same example of Larry. Larry uses his personal e-mail.
+On his official laptop and then he downloads ChatGPT that can also be tracked.
+correct. We've got that running.
+Yes. So Alberto and Adrian, so we could do this, you know, I could hook you up with for these 10 users. So this is gonna come in with one month of onboarding wherein we'll help you, train you on a weekly basis, And then we'll help you. You know, I'll be there. I can go ahead and help you position this for your customers.
+Maybe you can, you know, pull me on the for every meeting that you go with your customers. I will be able to go ahead and tell them how they can take, how I can be a part of you guys. I can be a part of rescue, So I will be going. I can go ahead and position.
+And help you, you know, place Cloudfuse Manage for your clients. I'm I'm willing to do that.
+So I said, for about 10 users, for about 14 months of usage, which is one month of onboarding, one month of trial, testing suggestions, blah blah blah, you know, all the help you need training you guys plus 12 months of usage, totally 14 months of coverage, your total.
+Annual bill is 1869 and you know we are running a holiday special with a 10% discount. It's coming up to 162, sorry 1682 and $0.10.
+Correct. That would cover yourself. You're
+NFR scans the customers as prospecting NFR.
+Pranavi, what do you think? Is that available?
+Maybe, maybe. Not for resale scans. so.
+What I can help you with is, free scantron customers and show them, yes. So once you become a customer, what I can give you is maybe a two or a three day a trial account. I can give that to you and then you'll be able to use that for your customers, yes.
+All you have to do is you have to give me a day's notice and I can get that done. That is doable.
+I'll create the demo environment and then you can go ahead and show the customer.
+
+Pranavi
+we can do that,
+
+Lawrence Lewis
+Because we need to create that environment, so yes.
+
+Pranavi
+Oh, you're mute, Larry.
+
+Lawrence Lewis
+My bad. Sorry. So absolutely, Alberto, there's gonna be a great initiative in 2026. But I mean, no need to take a decision now, but if you can make any decision before the 31st, that would.
+Help. She also she's the account manager, so it would help her personally. But as a personal, you know, personal favor. If you can work on something, let me know. Can I go ahead and send the pricing out to you so you can decide?
+at length.
+And what about will be discussed today?
+
+Adriel I. Hernandez
+that would be good.
+
+Lawrence Lewis
+
+What do you say, Adriel? Any questions, comments, thoughts?
+
+Adriel I. Hernandez
+No questions. I'm good.
+
+Lawrence Lewis
+
+Absolutely. I have that. I'll, I'll go ahead and send that out to you.
+Maybe you know I have everything which no problem Alberto. I have every document which talks about Cloudfuse manage. But if there is I let me I need to talk to my marketing and if you want me to I can go ahead and white label that it'll it'll say Cloudfuse.
+Managed but I can go ahead and add you know white label it under res rescue it and then you know if if you can go ahead and if you can go ahead and send me the logos maybe I can integrate that and I can help you with it.
+Would that help?
+On one pages.
+
+Adriel I. Hernandez
+
+Lawrence Lewis
+
+I could work on that.
+
+I I'm here to help you. sorry. Go ahead, Angel.
+
+Adriel I. Hernandez
+
+--- Transcript Chunk 20 ---
+Adriel I. Hernandez
+that would be good.
+
+Lawrence Lewis
+
+What do you say, Adriel? Any questions, comments, thoughts?
+
+Adriel I. Hernandez
+No questions. I'm good.
+
+Lawrence Lewis
+
+Absolutely. I have that. I'll, I'll go ahead and send that out to you.
+Maybe you know I have everything which no problem Alberto. I have every document which talks about Cloudfuse manage. But if there is I let me I need to talk to my marketing and if you want me to I can go ahead and white label that it'll it'll say Cloudfuse.
+Managed but I can go ahead and add you know white label it under res rescue it and then you know if if you can go ahead and if you can go ahead and send me the logos maybe I can integrate that and I can help you with it.
+Would that help?
+On one pages.
+
+Adriel I. Hernandez
+
+Lawrence Lewis
+
+I could work on that.
+
+I I'm here to help you. sorry. Go ahead, Angel.
+
+Adriel I. Hernandez
+
+No, go ahead. I was saying that or I was gonna ask you if you want the logos here on the chat or on a separate e-mail. e-mail, what? What's? Can you put your e-mail address here in the?
+
+Lawrence Lewis
+E-mail them to me. e-mail them to me. because I don't want to.
+Absolutely.
+
+Adriel I. Hernandez
+In the chat.
+Is that.
+
+Lawrence Lewis
+Oh Jesus, I'm talking about.
+
+Jalsha Chakma
+I provided Larry for you.
+
+Adriel I. Hernandez
+
+Lawrence Lewis
+It's the same one, so it's always Lawrence dot Lewis at either Kaseya or Cloudview. So. So I was saying, you know, please ask me if you need any help,
+Kaseya is to give you collateral on what? What was the program called? It was called when they could help MSPs. They used days to generate marketing materials and all that. Are you are you on that?
+
+Adriel I. Hernandez
+You think it's true, Peter?
+
+Lawrence Lewis
+Troopia. Troopia is one. No, there it's more of.
+
+Adriel I. Hernandez
+Or fuel the fuel, fuel something.
+
+Lawrence Lewis
+the fuel something. that that was it. That was it.
+
+Adriel I. Hernandez
+
+Lawrence Lewis
+They have that. So I was saying, you know, I'm here to help you guys, Alberto and Adriel. I'll send you the pricing information and you know, if you can help me get this signed up before the 31st, it would be of real help and we can we can work on large.
+Rojects.
+Correct. One page is you're You're Albert. That's the one I'm talking about.
+alrighty. I think I've taken 2 minutes more what was than what was kind of scheduled. My apologies.
+
+Adriel I. Hernandez
+We came in, late, so no worries.
+
+Lawrence Lewis
+No problem. No problem. So the guys, I'm gonna go ahead and send some collateral information. First, I'm gonna send the one which is available already. I need to go back to marketing and I'm gonna talk to them if we can white label that for you guys with rescue. And then I'm gonna go ahead and send you some pricing information and.
+As a follow up, can we connect maybe next Tuesday or Wednesday? Is that
+
+Adriel I. Hernandez
+That's, your call, Alberto.
+
+Pranavi
+I can have the timelines ready by then too. I'll go back to my team. I'll check about the apps you've sent and give you the timeline.
+
+Lawrence Lewis
+alrighty. So next Tuesday, Wednesday, I'll e-mail you Alberto and Adriel, and we can take it up from there,
+
+Adriel I. Hernandez
+sounds good.
+
+Lawrence Lewis
+Alright, great gentlemen. Great connecting with you. Had a great, you know, time talking to you guys. Thank you so much. We're looking forward to working with you soon. Have a great one. Thanks again. Bye.
+
+Adriel I. Hernandez
+Thank you. Thank you. Bye-bye.
+
+Pranavi
+Thanks everyone. Good day.
+
+Jalsha Chakma stopped transcription
+

@@ -119,6 +119,31 @@ export default function OthersSessionChatPage() {
 
   return (
     <div className="chatgpt-container">
+      {/* Mobile Sidebar Toggle Button - Shows when sidebar is closed */}
+      {!isSidebarOpen && (
+        <button
+          className="mobile-sidebar-toggle"
+          onClick={() => setIsSidebarOpen(true)}
+          title="Open sidebar"
+          aria-label="Open sidebar"
+        >
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <line x1="3" y1="12" x2="21" y2="12"></line>
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="3" y1="18" x2="21" y2="18"></line>
+          </svg>
+        </button>
+      )}
+      
+      {/* Mobile Overlay - Closes sidebar when clicked */}
+      {isSidebarOpen && (
+        <div 
+          className="sidebar-overlay show"
+          onClick={() => setIsSidebarOpen(false)}
+          aria-label="Close sidebar"
+        />
+      )}
+      
       <ChatSidebar 
         isOpen={isSidebarOpen}
         onToggle={() => setIsSidebarOpen(!isSidebarOpen)}

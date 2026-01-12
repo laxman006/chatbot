@@ -1,0 +1,2197 @@
+================================================================================
+PROCESSED TRANSCRIPT: CloudFuze _ CloudFuze Manage Demo - Phillips Exeter Academy.docx
+================================================================================
+
+METADATA:
+  Customer: N/A
+  Industry: N/A
+  Meeting Date: N/A
+  Meeting Title: N/A
+  Participants: Heffner, Scott, Jalsha Chakma, Lawrence Lewis, Pranavi
+  Topics: N/A
+  KB Tier: primary
+  Contains Pricing: False
+
+
+================================================================================
+Q&A PAIRS
+================================================================================
+
+--- Q&A Pair 1 ---
+Q1: How many users are we talking about with the Philips Exeter?
+A1: A little over 1000 employees and about 1100 students.
+Topic: User Count
+
+Q2: Do you also use a single sign on across with all your applications?
+A2: We do. We use Azure to or Intra ID I guess now.
+Topic: Integrations
+
+Q3: How much can we save with the licenses?
+A3: On average, we've been able to help them save between 22 to 2030 percentish, just with the licenses.
+Topic: Pricing
+
+Q4: Is there a way to monitor shadow IT?
+A4: That's where we come to the picture. So we'll show you that.
+Topic: Shadow IT
+
+Q5: What happens if an application does not provide us endpoints?
+A5: In case we do not have that, you could just manually add the application to just to have a view along with all the other applications.
+Topic: Features
+
+Q6: How do we calculate license utilization?
+A6: When I calculate a license utilization, there are only 7 users who are actively logging into the application every day and using them.
+Topic: Features
+
+Q7: What is the cost consolidation solution you provide?
+A7: We segregate applications based on their functionality and tell you how many overlapping applications you have.
+Topic: Pricing
+
+
+================================================================================
+OBJECTIONS & RESPONSES
+================================================================================
+
+--- Objection 1 ---
+Objection 1: The challenge of shadow IT is detecting in the first place.
+Response: That's where we come to the picture. So we'll show you that.
+Stage: Discovery
+Status: Resolved
+
+Objection 2: Our centralized monitoring of the availability of the apps is not sufficient.
+Response: It doesn't even do synthetic transactions. So it's not what I would want, but it's enough to stay up, down, down.
+Stage: Evaluation
+Status: Partially Resolved
+
+Objection 3: There are a lot of inactive users that take up space and data.
+Response: We consider them to be an ID user. Of course, you could set that time according to your requirements.
+Stage: Evaluation
+Status: Resolved
+
+Objection 4: We might not always require 5 apps for the same purpose.
+Response: You can start cutting costs here. You can consolidate it into one or two depending on the requirements.
+Stage: Evaluation
+Status: Resolved
+
+
+================================================================================
+FEATURE CAPABILITIES
+================================================================================
+
+--- Feature 1 ---
+Feature 1: Cost Optimization
+Capability: Helps organizations identify potential savings on SaaS subscriptions by analyzing license utilization and overlapping applications.
+Value: Average savings of 22% to 30% on licenses by identifying inactive users and consolidating overlapping applications.
+Limitations: Requires accurate tracking of user activity; may not account for applications without API endpoints.
+Status: Available
+
+Feature 2: License Management
+Capability: Monitors the number of active users versus total licenses to optimize license usage.
+Value: Provides insights into how many users are actively using applications, allowing for better license allocation.
+Limitations: Inactive users may still occupy licenses unless manually disabled; the threshold for inactivity is set to 30 days but can be adjusted.
+Status: Available
+
+Feature 3: Shadow IT Detection
+Capability: Identifies applications being used that are not officially sanctioned by the organization.
+Value: Helps organizations understand and manage unauthorized application usage, enhancing compliance and security.
+Limitations: Detection can be challenging; effectiveness depends on the ability to monitor all applications accurately.
+Status: Available
+
+Feature 4: Application Integration
+Capability: Integrates with major SaaS applications through APIs for easy management and monitoring.
+Value: Simplifies the process of adding and managing applications, especially with single sign-on (SSO) integration.
+Limitations: Not all applications provide API endpoints; manual addition may be necessary for some applications.
+Status: Available
+
+Feature 5: Spend Analytics
+Capability: Displays detailed analytics on spending for each application, including user counts and license utilization.
+Value: Enables organizations to make informed decisions about their SaaS spending and identify areas for cost reduction.
+Limitations: Requires accurate data input and may not reflect real-time usage if not monitored continuously.
+Status: Available
+
+
+================================================================================
+DECISION DRIVERS
+================================================================================
+
+--- Decision Driver 1 ---
+Priority 1: Cost Optimization
+Timeline: Year end with the budgets spending
+
+Priority 2: License Management
+
+Priority 3: Shadow IT Detection
+Blocking Factors: Detecting shadow IT in the first place
+
+
+================================================================================
+RAW NORMALIZED TRANSCRIPT
+================================================================================
+
+--- Transcript Chunk 1 ---
+Word document: tmptme9zkr1.docx
+Contains structured text and formatting information
+CloudFuze  CloudFuze Manage Demo - Phillips Exeter Academy-20251202_110233-Meeting Recording
+December 2, 2025, 4:04PM
+45m 56s
+
+Jalsha Chakma started transcription
+
+Lawrence Lewis   0:04
+We usually manage about on an average about 100 ish apps. Like you said, core apps vary from 5 to 15, right? So where we bring in it, this is kind of a hot gig going on right now, especially with the year end with the budgets spending and all that, so.
+We cater to three important criteria, Scott. The first one is cost optimization, the second one being license management, and the third one being shadow IT.
+
+Heffner, Scott   0:27
+Yeah.
+
+Lawrence Lewis   0:38
+Some of my customers say wow on shadow IT. Some of my customers are, you know, surprised to see how much they can save. On average, we've been able to help them save between 22 to 2030 percentish, right? Just with the licenses, we tell them these are the number of apps you use. This is how.
+
+Heffner, Scott   0:52
+OK.
+
+Lawrence Lewis   0:57
+How much you pay and this is how much you can save. A simple view right in that we have a renewal calendar as well. So we'll show you in in the demonstration that Pranavi's gonna extend. So she's showing us that. So you said you said you have something to monitor. Is that the?
+
+Heffner, Scott   1:02
+It.
+2.
+
+Lawrence Lewis   1:16
+Admin console you're talking about in the specific apps or?
+
+Heffner, Scott   1:19
+No, no, no. We have, we've just centralized monitoring of the availability of the apps. It's really not nothing special. It doesn't even do synthetic transactions. So it's it's not what I would want, but it's enough to stay up, down, down.
+
+Lawrence Lewis   1:29
+I see.
+OK.
+I see. OK. And how many users are we talking about with the Philips Exeter?
+
+Heffner, Scott   1:39
+A little over 1000 employees and about 1100 students.
+
+Lawrence Lewis   1:43
+Mm.
+I see. OK, alrighty.
+
+Heffner, Scott   1:46
+Yeah, we have a lot of employees considering the number of students.
+
+Lawrence Lewis   1:50
+Correct. Yeah, this includes the staff as well, I'm guessing.
+
+Heffner, Scott   1:53
+1000 employees, 1100 students.
+
+Lawrence Lewis   1:56
+OK, got it. Got it, buddy. So let's get.
+
+Heffner, Scott   1:57
+We also have a case for parents, but they mostly don't have access.
+
+Lawrence Lewis   2:01
+Correct. Yeah. So for you especially, I think the shadow ID bit might be a lot useful. You might be able to see who's using what app which is not compliant.
+So.
+
+Heffner, Scott   2:16
+Yeah, I guess the challenge of shadow IT is detecting in the first place.
+
+Lawrence Lewis   2:18
+Mm-hmm. That's where we come to the picture. So we'll show you that. So Tanvi, let's get started with the demonstration again. Scott, if you have any questions, don't hesitate to stop us and let us know. Or if you feel that this is an there, you know, not something that you would really wanna have.
+
+Heffner, Scott   2:22
+OK.
+It.
+
+Lawrence Lewis   2:34
+You know, I'll be happy to take the feedback. Alrighty. Alright, Ravi, let's get started.
+
+Pranavi   2:41
+Sure, Larry. Thank you. Thanks for the introduction. Hi, Scott, how are you doing today?
+
+Heffner, Scott   2:47
+Good, Pranavi, how are you?
+
+Pranavi   2:47
+I'm good. I'm good. Thanks for asking. So, right. So Larry has given a beautiful introduction on what Cloudfuse Manage does. So I'll just share my screen and I will dive into the demo without wasting any time. So please confirm when you're able to see.
+
+Heffner, Scott   3:03
+Excellent.
+Yeah, I can see it.
+
+Pranavi   3:09
+Right, so right. So before we start managing the applications, the first step would be to add the applications into the platform or the apps that you that you're using, right? So Cloudfuse manage integrates with all the major SaaS applications through APIs. So connecting to the application is pretty simple since.
+You have used a migration product before, so it's pretty similar to that. Just click on it, enter your global admin or super admin credentials. The scopes would be slightly different between our migration and our managed product. So we use scopes to pull out users and licenses, that kind of information.
+We don't make any changes as such, right? So it's connecting to the application. It's pretty simple. So Scott, do you also use a single sign on across with all your applications?
+
+--- Transcript Chunk 2 ---
+Heffner, Scott   3:03
+Excellent.
+Yeah, I can see it.
+
+Pranavi   3:09
+Right, so right. So before we start managing the applications, the first step would be to add the applications into the platform or the apps that you that you're using, right? So Cloudfuse manage integrates with all the major SaaS applications through APIs. So connecting to the application is pretty simple since.
+You have used a migration product before, so it's pretty similar to that. Just click on it, enter your global admin or super admin credentials. The scopes would be slightly different between our migration and our managed product. So we use scopes to pull out users and licenses, that kind of information.
+We don't make any changes as such, right? So it's connecting to the application. It's pretty simple. So Scott, do you also use a single sign on across with all your applications?
+
+Heffner, Scott   4:02
+Yeah, we do. We we use Azure to or Intra ID I guess now.
+
+Pranavi   4:05
+OK.
+Yeah, yeah yeah so connect. So with SSO integration it's even more easier to pull out the applications. Instead of manually adding every application, you can just connect to your intra the same way I just showed and once you connect to your intra it gives you an option to discover application because.
+
+Heffner, Scott   4:21
+OK.
+
+Pranavi   4:27
+All the applications are already integrated with your single sign on, right? So you could just connect to it. It'll give you a list of all the applications. It'll even pull up the smallest of the smallest applications that are there. But if you have a specific application as an as an application, you can just go ahead and connect to it, right? You don't. You don't need to authenticate it.
+
+Heffner, Scott   4:32
+Yeah.
+
+--- Transcript Chunk 3 ---
+Heffner, Scott   4:02
+Yeah, we do. We we use Azure to or Intra ID I guess now.
+
+Pranavi   4:05
+OK.
+Yeah, yeah yeah so connect. So with SSO integration it's even more easier to pull out the applications. Instead of manually adding every application, you can just connect to your intra the same way I just showed and once you connect to your intra it gives you an option to discover application because.
+
+Heffner, Scott   4:21
+OK.
+
+Pranavi   4:27
+All the applications are already integrated with your single sign on, right? So you could just connect to it. It'll give you a list of all the applications. It'll even pull up the smallest of the smallest applications that are there. But if you have a specific application as an as an application, you can just go ahead and connect to it, right? You don't. You don't need to authenticate it.
+
+Heffner, Scott   4:32
+Yeah.
+
+Pranavi   4:46
+OK.
+Right. So once this process is done, we'll have an inventory of your whole SAS landscape. So you'll know every app that is being used, every app that you're using is on the platform, right? So there are a lot of cases where the applications do not provide us endpoints, but that's.
+Very minimal. 90% of the SAS applications do provide the API endpoints, but in case we do not have that, you could just manually add the application to just to have a view along with all the other applications, right? You could just add the application name.
+So we're adding a new feature wherein you can just export your CSV's from your admin portals and just add it here so that you'll have a view similar to other applications as well.
+Right, so once we have this, we can go back to our dashboard. So this is more like your Control Center. You know every app that is being used, who's using application, how many users you have across all applications.
+How much you're spending on your SaaS subscription costs, right? And the major feature that Larry talked about, the cost optimization. I'll show you how we come down to that number, right? So with our total spend, we show you a spend analytics table for each application. What we show is how many users you have.
+Currently using the application, right? So Dropbox tells me that there are 22 users using the application total, but when I calculate a license utilization, there are only 7 users who are actively logging into the application every day and using them.
+Right, so there are a lot of inactive and ID users usually with licenses. So when I say ID user, it's someone has not logged into the application for last 30 days. We consider them to be an ID user. Of course you could set that time according to your requirements. We set it to be 30 and then from there we calculate.
+If if the license is being utilized optimally or not, there are a lot of inactive users, right? Usually you disable a user from you disable a user or you revoke their access. It comes under inactive users in the admin console.
+Right, so that takes up a lot of space and data too. So so it's telling me that there are only 7 billable users in actuality. So this is how much you can save based on the calculation of the license utilizations.
+Right. So this is the cost consolidation that we provide. There's also another cost consolidation that we provide, which is overlapping applications, right? In the total apps you see a section called overlapping applications. Then what we do is we segregate applications based on their functionality. So we have a category for every.
+The application and it's telling me that I have 5 project management tools in my platform right, which is not always required. So you could if you're looking to cut costs, this is also an area you could look into. You can start cutting costs here. You can consolidate it into one or two depending on the requirements, but you might you might.
+Not always require 5 apps for the same purpose, right? So that is also a cost consolidation solution that we provide.
+Right. So based on these calculations, which are potential savings number for each application. So it's telling me that I'm paying 2325 for this application, but the optimized cost is only 17151 based on my user activity and license utilization.
+Right. So, uh, Scott, let me just pause here. If you have any questions, I'll answer them and then we'll move forward.
+
+--- Transcript Chunk 4 ---
+Heffner, Scott   8:32
+No, I mean I think from from my perspective it's gonna be useful because we we typically sign multi-year contracts. So I wouldn't be looking at this every day, but if I need to go in and see who hasn't been using it for the last six months that could be beneficial.
+
+Pranavi   8:35
+Mhm.
+In.
+Yeah.
+Yeah, yeah. Usually a lot of our customers utilize them for quarterly audits or monthly audits. According to what their organization requirements are, you'd need this kind of data for those kind of audits.
+
+Heffner, Scott   8:53
+OK.
+No, that's it's useful. I I'm I'm in a fortunate position where cost savings isn't my top priority, but I think this is still useful for sure.
+
+Pranavi   9:08
+Yeah.
+Right, so with this information, what I want to show next is how we can go in detail for each application and then check, right? So we have in detail view for each application, the every application that you have added. So let me just show you how it looks. It's pretty much similar to all the other applications as well. I'm showing you to you. I'm showing you.
+
+Heffner, Scott   9:18
+Right.
+
+Pranavi   9:29
+For Microsoft, right, you see that the data that we're showing is kind of similar to what is already existing in your admin console. So our idea behind it is we're trying to eliminate the need for you to use 10 different admin portals or 10 different applications, right? So if you want to check who's using.
+Which application? You can do all that in one single platform, right? Without using 10 different admin portals just to check if the users they're not right. So you have all the user information here using the application. Yeah, right. You know the type of user if it's a guest user or if it's a standard user that is a Microsoft or if it's an admin.
+
+Heffner, Scott   9:55
+Hmm.
+
+Pranavi   10:08
+Right. And you'll also know the status of the user. If he's active, inactive or an ID user here, you could fill out that and check, right? Similar to that, we have information on groups as well. You could see all your Microsoft groups listed here, public, private group. When you click on the group, you see who are the owners.
+And members in the group. You could add and remove members from the group here. It's like right? When you add members, it'll give you a list of all the existing Microsoft members that you could just go ahead and add them to the group. If you want, you could remove members from the group too.
+
+Lawrence Lewis   10:46
+Quick question Scott, are you a Google shop or a Microsoft shop?
+
+Pranavi   10:47
+Right. Sure.
+
+Heffner, Scott   10:50
+We're we're Microsoft primarily, but we have Google for the G Suite for education. So Google Drive, Forms, Doc Sheets, etcetera.
+
+Lawrence Lewis   10:51
+Both OK.
+OK. Oh, I remember. I think we we spoke about a few weeks ago. You didn't mention this, right?
+
+Heffner, Scott   11:01
+In in general.
+Yeah, we just recently used you guys actually to migrate from Dropbox to the Google Drive, yeah.
+
+Lawrence Lewis   11:08
+Connect. Yep, Yep.
+
+Pranavi   11:14
+Right. So the next major interesting feature is the license management. So when we connect with the application through API, so we can we pull out a list of all the licenses you're using for that application, right?
+And if there's a cost associated with it, we use AI to parse all that data and it'll pull up a basic cost that is available publicly, right? And then we can go ahead and change the cost as to actually how much you have purchased those licenses for.
+Right. So there are a lot of free licenses that come with Microsoft, so they just show it as $0.00, no cost associated, right? You know how many seats you have purchased and how many you have already assigned, right? When you click on that, you'll know who are the users using the.
+
+Lawrence Lewis   11:57
+Sure.
+
+--- Transcript Chunk 5 ---
+Heffner, Scott   11:01
+In in general.
+Yeah, we just recently used you guys actually to migrate from Dropbox to the Google Drive, yeah.
+
+Lawrence Lewis   11:08
+Connect. Yep, Yep.
+
+Pranavi   11:14
+Right. So the next major interesting feature is the license management. So when we connect with the application through API, so we can we pull out a list of all the licenses you're using for that application, right?
+And if there's a cost associated with it, we use AI to parse all that data and it'll pull up a basic cost that is available publicly, right? And then we can go ahead and change the cost as to actually how much you have purchased those licenses for.
+Right. So there are a lot of free licenses that come with Microsoft, so they just show it as $0.00, no cost associated, right? You know how many seats you have purchased and how many you have already assigned, right? When you click on that, you'll know who are the users using the.
+
+Lawrence Lewis   11:57
+Sure.
+
+Pranavi   12:05
+Using that particular license and also their status. If there's an idle user, you'll know from here itself you could just signal that user and take action on that further, right? So like I said, the price would not be always the price that you purchase it for. You get it with.
+A lot of discounts associated and such, so you could just go ahead and edit it. This is you can tell that this is how many licenses I had. This is how much I have purchased it for. Or we do have an invoice pass to sorry, so we do have an invoice pass to. This is also completely AI powered.
+
+Heffner, Scott   12:38
+Yeah.
+
+Pranavi   12:44
+We do not store any invoices as such. We just pass the information and store them, right? So this is a sample invoice that I have. I'll show you how that works, right? The application name, the services, the usual details in an invoice, right? This is a trial version, so there's no fee and it'll also tell me the billing cycle.
+Let me upload the invoice. So what it does, it passes it, analyzes it and asks you to validate the information before going ahead and saving it, right? So all my data from the invoice is put here. So there's a monthly billing cycle, so it's telling me that it's gonna expire in a month.
+Right from the start date in the invoice and we can go ahead and save it. If it's a new application you're saving, it'll add as a new application to the platform. I did not have lease web on this before, so it'll add as a new application, but if you are buying licenses to a specific application at a later point.
+Time. You could just go ahead and add that. It'll just add as a different row in my license management section.
+Right. It'll pull up as a different row here. If I'm gonna add a Microsoft license and in that case you need not edit out the prices because it'll be the actual price that is in the invoice. So it'll reflect the same price here and it'll also take care if it's a monthly recurring or or it'll also take care of the expiry date.
+Right. So that is also a slightly easier workaround for editing out the price, right?
+So this is the in detail view we have for each application, right? So we show all the user management, license management details for all other applications as well. And we do also provide an automated workflow for provisioning and deprovisioning users from licenses.
+
+Heffner, Scott   14:23
+Yeah.
+
+Pranavi   14:41
+Right, so we have a workflow user onboarding and offboarding workflow. So before we go ahead and run workflows, what we can do is we can create templates and store them. So like you said, your students would be having access to different applications, different licenses, your staff would be having.
+Access to different applications, different licenses, right? So you could create templates and store them. So this is so I'll just show you a sample one. I just named it P1. So you want every student to have a Microsoft Copilot license or a Business 365 license and then you could select what license you'd.
+You want them to have and you can store it right? So every time a new student is onboarded or a new employee is onboarded, you could go ahead and assign them to templates based on their role or the department or things like that. So it it will make things easier for you. You could do it in bulk too.
+Right.
+
+--- Transcript Chunk 6 ---
+Heffner, Scott   17:08
+Yeah, I mean, all we would need is API endpoints. We it doesn't even have to be simple. The HR integration wouldn't be helpful to us because we have too many students, yeah.
+
+Pranavi   17:10
+Yeah, yeah, yeah.
+Yeah, I understand. Yeah, yeah, I understand. Yeah, I'll just check with my team regarding that. If if there are API endpoints, I think we should be able to make use of those figures as well. It'll make things easier if you understand, yeah.
+
+Heffner, Scott   17:27
+Yes.
+
+Pranavi   17:31
+Right so so moving on if you you if a new employer or a new student is being onboarded, you can create them from your and then add them to your intra too if right. So you usually details first name, last name, e-mail and password.
+Right. Right now you would not be able to assign roles as such, but you can just create the user and add them, right? And then you can go ahead and run the workforce for the new users. Like I said, we could choose the template and go ahead assign the template, but you need to have available seats in those licenses.
+
+Heffner, Scott   18:05
+Sure.
+
+Pranavi   18:06
+Right before you go ahead and start the workflow. Or if you're just adding access to just a single application or such, you just go ahead and just click on that one license and start on board too, right? So when it's preferable to use templates when you're doing it in bulk and if it's just one or two applications.
+it's preferable to go this way.
+Right, so when once we have a users onboarded, we can also offboard them. We can deprovision deprovision them from licenses, right? So it'll give you a list of all the users you have and all the applications they have access to.
+Right, you can just go ahead and start the offport process. You click on the application and start the offport process. We very securely remove them from any groups, file shares, any permissions, all all those things are taken care of.
+Right. If if they're leaving the organization, you can deactivate the user too. You'd still have access to the data he was holding on to. Once you take action on that, then you can go ahead and delete the user permanently.
+Right. So this is the provisioning and deprovisioning workflow that we offer. And the other cool feature that we have is the renewal calendar. So the renewal calendar shows for the next six months. It projects SAS budgets for your next six months, how much you're gonna spend on your renewals that are coming up.
+Right. So even if it's a per user or like pay per user model, it'll calculate how many users have been added and removed from the applications in a month, right? We track all that and then we show you this is how much you're gonna spend in the month of December for all your SaaS application.
+Right. And we do also send you e-mail alerts and notifications when an application is coming up for renewal or a user is added to a specific application, right? Things like that. We notify you. We also tell you that this is how much you've identified that we can save on this application. It's coming up for renewal, so based.
+
+Heffner, Scott   19:57
+But.
+
+Pranavi   20:15
+On this information, you can negotiate a better contract. You can buy, you can buy lesser seats. You can save money on that.
+
+Heffner, Scott   20:23
+OK. Do you have a budget? Can you produce a budget report or does it just show that stuff coming due soon?
+
+Pranavi   20:23
+Right, Bob.
+
+Heffner, Scott   20:31
+And can you show the annual cost?
+
+Pranavi   20:34
+Right. So we so we do show annual cost this way. We calculate it in in the spend, we show you that there's how much you're spending and we have a total cost column for all the applications, right. And if it's a because not everything is annual cost, right. So it's a lot of.
+
+Heffner, Scott   20:40
+OK.
+So.
+
+Pranavi   20:54
+The applications are month to month as well. So we calculate a month to month renewal if it's coming up or if it's an annual renewal to a lot of the annual renewals come up in December or the months that you've purchased it from. So we.
+
+Heffner, Scott   21:09
+Yeah, ours, ours come due in, ours usually come due at the end of June because we're our fiscal year is July 1.
+
+Pranavi   21:09
+Take care of that control, yeah.
+Yeah.
+Yes.
+
+--- Transcript Chunk 7 ---
+Heffner, Scott   20:23
+OK. Do you have a budget? Can you produce a budget report or does it just show that stuff coming due soon?
+
+Pranavi   20:23
+Right, Bob.
+
+Heffner, Scott   20:31
+And can you show the annual cost?
+
+Pranavi   20:34
+Right. So we so we do show annual cost this way. We calculate it in in the spend, we show you that there's how much you're spending and we have a total cost column for all the applications, right. And if it's a because not everything is annual cost, right. So it's a lot of.
+
+Heffner, Scott   20:40
+OK.
+So.
+
+Pranavi   20:54
+The applications are month to month as well. So we calculate a month to month renewal if it's coming up or if it's an annual renewal to a lot of the annual renewals come up in December or the months that you've purchased it from. So we.
+
+Heffner, Scott   21:09
+Yeah, ours, ours come due in, ours usually come due at the end of June because we're our fiscal year is July 1.
+
+Pranavi   21:09
+Take care of that control, yeah.
+Yeah.
+Yes.
+
+Heffner, Scott   21:18
+OK. And I guess you, you still have the shadow IT, which I'm interested in, but on this side where you've got a list of applications, cost is interesting, but does does this face users at all? Like could our users see a catalog of all the software that we offer through this or is this just intended for admins?
+
+Pranavi   21:23
+Yes, yes.
+Mhm.
+Uh, so right now we do uh give only uh admin access. So it's more for people who are managing the applications and uh need to see the data on how much you're spending, how many users are being added.
+
+Heffner, Scott   21:52
+The bigger value anyway, yeah.
+
+Pranavi   21:53
+So yeah, yeah, yeah, it's not employee focus. It's not employee facing application right now.
+
+Heffner, Scott   22:03
+OK.
+
+Pranavi   22:03
+Right, right. So about the IT like.
+
+Lawrence Lewis   22:06
+Any reason? Sorry, sorry Pranavi. So Scott, any reason why you wanna give access to all the users?
+
+Pranavi   22:09
+No, go ahead, live.
+
+Heffner, Scott   22:14
+Well, not to manage licenses, but to see what we already have and request licenses potentially. You know, as opposed to this whole they're going out and finding a solution to a problem we've already solved twice. You know, if you're looking for an e-mail application, you can go in here and see the e-mail or cloud storage or.
+
+Lawrence Lewis   22:16
+Mhm.
+OK.
+
+Heffner, Scott   22:34
+I mean, I've been, it's been on my mind to publish the software catalog for a while now, but it doesn't have to be through this tool. I have a separate inventory tool for software too.
+
+Lawrence Lewis   22:38
+OK.
+Maybe, or what we could do is maybe we could generate a list. Once we've added all the clouds with Philips, etcetera, we can, you know, give you a.
+
+Heffner, Scott   22:54
+It isn't a high priority, it's just a question, right? If it was already there, it might be an interesting feature. I mean, I'm thinking specifically on AI tools is probably probably where my biggest exposure is slash will be soon.
+
+Lawrence Lewis   22:56
+Mm.
+OK. OK. Got it. Yeah.
+Mhm.
+
+Heffner, Scott   23:09
+And wanting people to stick to the tools we provide is it's it's yeah, but that doesn't. Again, I've got another tool that's already doing software inventory that theoretically has a service catalog and I'm just not using it. So I don't know if I would even use it if it was available. I was just kind of.
+
+Lawrence Lewis   23:15
+More important, yeah.
+Hmm.
+Mm.
+
+Heffner, Scott   23:28
+Interested to see if you have.
+
+Lawrence Lewis   23:30
+I see. OK.
+Got to know.
+This is a good feedback actually. So Pranavi, maybe we can, you know, do something around it, a catalog with a list of apps.
+
+Heffner, Scott   23:40
+I mean honestly, if I were gonna suggest something, I would say the API integration inbound that would allow us to try creating and deactivating users would be a better functionality than software catalog just cause you right now if you have to go in and you have to manually add users and then assign templates.
+
+Pranavi   23:40
+Mhm.
+
+--- Transcript Chunk 8 ---
+Lawrence Lewis   22:56
+Mm.
+OK. OK. Got it. Yeah.
+Mhm.
+
+Heffner, Scott   23:09
+And wanting people to stick to the tools we provide is it's it's yeah, but that doesn't. Again, I've got another tool that's already doing software inventory that theoretically has a service catalog and I'm just not using it. So I don't know if I would even use it if it was available. I was just kind of.
+
+Lawrence Lewis   23:15
+More important, yeah.
+Hmm.
+Mm.
+
+Heffner, Scott   23:28
+Interested to see if you have.
+
+Lawrence Lewis   23:30
+I see. OK.
+Got to know.
+This is a good feedback actually. So Pranavi, maybe we can, you know, do something around it, a catalog with a list of apps.
+
+Heffner, Scott   23:40
+I mean honestly, if I were gonna suggest something, I would say the API integration inbound that would allow us to try creating and deactivating users would be a better functionality than software catalog just cause you right now if you have to go in and you have to manually add users and then assign templates.
+
+Pranavi   23:40
+Mhm.
+
+Heffner, Scott   23:59
+I I kind of have a better system in place right now than that. This is more visibility, it's better for cost control, it's just the automation on the user side is is what I have now is better even though it's harder to see into.
+And that that would change I think with the API, I I I'm not sure we could do that anyway. So I don't want to get you kind of spun up on it because we still have on-prem Active Directory. So unless you can integrate with an on-prem Active Directory, which is hard to imagine until we get off of that, which we're trying to do.
+
+Pranavi   24:16
+Right, Alex.
+
+Lawrence Lewis   24:17
+Got it.
+
+Heffner, Scott   24:32
+We we probably couldn't use this to manage that anyway. We'd still have to keep our existing automation for a little while.
+
+Pranavi   24:41
+Yeah, I understand. So we are already working on that Scott triggering of triggering to the workflows. Like I've mentioned before, we're doing it for HR tools first, yeah, so once we have that then it will automatically trigger any options.
+
+Heffner, Scott   24:45
+OK, good.
+Sure.
+That makes sense.
+
+Pranavi   25:00
+Boarding and onboarding based on if they've added it to the tool. Uh, so it will automatically trigger a workflow and assign based on the rule that they've added it to.
+Yes.
+
+Heffner, Scott   25:10
+Yeah, I mean and and then from my perspective trying to get it off of our on-prem Active Directory, I mean the earliest we could do this is next year because we still have a bunch of stuff on premise that relies on it, so.
+
+Pranavi   25:14
+Yeah.
+Yeah, it's a major task, right?
+
+Heffner, Scott   25:24
+It is. We're trying to retire all legacy systems. It just takes a long time.
+
+Pranavi   25:28
+Yeah.
+
+Heffner, Scott   25:32
+OK, I I'm really interested in the shadow IT as the primary interest for me probably.
+
+Pranavi   25:33
+I.
+Yeah.
+Yeah, so so with the shadow ID like Larry mentioned, if someone's using an third party application that's not already on your approved ID list, right? So what we do is we majorly track them.
+Based on their logins, if they're logged in with Google or they're logged in with Microsoft, we track all the third party systems that third party applications that are being used. You can just filter out if you have, like you said, you have both Microsoft and Google, right? You can just add both the accounts and just filter out which one you want to see.
+
+Heffner, Scott   26:10
+Yeah, yeah.
+
+Pranavi   26:14
+Right. This is a third party application again and you'll know who are the users using the application, right? So it's similar. You could see that this is a third party application again and you'll know if.
+They're using any AI tools too, like a ChatGPT or things like that. So someone says use Miro, so you know who's using Miro in the platform, right? Similarly, you'll all sorry.
+
+Heffner, Scott   26:39
+This is.
+Does this assume that they're clicking the login with Microsoft or login with Google button as opposed to creating? OK, OK, that makes sense. I was wondering how you collect it, you know? OK.
+
+--- Transcript Chunk 9 ---
+Heffner, Scott   26:10
+Yeah, yeah.
+
+Pranavi   26:14
+Right. This is a third party application again and you'll know who are the users using the application, right? So it's similar. You could see that this is a third party application again and you'll know if.
+They're using any AI tools too, like a ChatGPT or things like that. So someone says use Miro, so you know who's using Miro in the platform, right? Similarly, you'll all sorry.
+
+Heffner, Scott   26:39
+This is.
+Does this assume that they're clicking the login with Microsoft or login with Google button as opposed to creating? OK, OK, that makes sense. I was wondering how you collect it, you know? OK.
+
+Pranavi   26:46
+Yeah.
+Yeah. So we track from, uh, the logs, yeah.
+So even in the user management section, so Microsoft has a user management section, right? So if you click on the user, you'll also know all the third party applications that he or she is using, right? Apart from the applications that are.
+
+Heffner, Scott   27:05
+Interesting.
+
+Pranavi   27:08
+That that are already approved by approved by your IT, right? So these are all the third party applications. You know you'll you'll see it from the user from the user as well and you can also see from the application who are the users using that particular application.
+See you can see that someone's has been someone has been using open AI and then you see that these are the users using that application.
+
+Heffner, Scott   27:43
+That would be interesting. OK, yeah, they do have continue with Microsoft or Google. Interesting. I did not realize that.
+
+Pranavi   27:45
+Yeah.
+Yeah, a lot of applications do provide that option and usually that's a preferred way. Since it's easier, since they're already logged into the system, we users tend to go ahead with that option mode and if they if they're using their business ID, we'd we'd be able to track that.
+
+Heffner, Scott   28:13
+Yeah, I'm fighting a losing battle with kicking people out of those systems, so at least knowing who's in them would be good. Um.
+
+Pranavi   28:19
+Yeah.
+
+Heffner, Scott   28:22
+OK.
+OK, so you're parsing the logs and then identifying the logs that they're logging in through. Cool.
+
+Pranavi   28:27
+Mhm.
+
+Heffner, Scott   28:32
+I don't know why I never thought of that. That's interesting.
+
+Pranavi   28:35
+Yeah, so. So apart from this, we do have another way that we detect shadow IT that is under development. I'd say it'll still take some time. We need to get some approvals from the browser, so we have a browser extension built.
+
+Heffner, Scott   28:53
+No.
+
+Pranavi   28:55
+So in that case, even if they're not logging in with Google or with Microsoft, even they're just signing up, even if they're just opening a third party website that is not allowed in the organization, you'll be able to detect that.
+
+Heffner, Scott   29:08
+Interesting. OK. Yeah, I mean, that's one of our bigger.
+
+Pranavi   29:11
+Yeah, but we need to get a few approvals from the browser 1st to add the extension, so that will under way. But once that is there, I think you'll be able to detect a lot more applications.
+
+Heffner, Scott   29:18
+Yeah.
+I think you're right. I think that's for sure. I mean it gets into user privacy areas, but I mean on our computer.
+
+Pranavi   29:28
+Yeah.
+Yeah, if the user have to ask the extension for us to track that, yeah, that's also, yeah, yeah, a lot of companies are, but it's it's a compliance issue, right? If you don't know if someone's logging into a third party applications, it's not allowed.
+
+Heffner, Scott   29:37
+Yeah.
+
+Pranavi   29:52
+Yeah, a lot of them are concerned about their privacy, but it's up to them if they want to get it. If they want to know what third party applications the users are logging into, they'd have to add the extension and only then we'll be able to track that.
+
+Heffner, Scott   30:07
+I think our policy's pretty clear. I doubt people are reading it. But I mean, if you're using our computer, we have the right to review anything we're doing. Yeah, if if nothing else, we're covered there. But yeah, I like, I mean, I like that idea. There is, there's a part of me that.
+
+Pranavi   30:09
+Mhm.
+Mhm.
+
+Lawrence Lewis   30:12
+True.
+
+Pranavi   30:14
+Yeah, yeah.
+
+--- Transcript Chunk 10 ---
+Lawrence Lewis   32:25
+With, yeah, I mean we we are working on it. So yeah, this feedback was given to us by a lot of them. So it's already in action. So I think once we have the approvals, you know, that should be out soon.
+
+Heffner, Scott   32:30
+OK.
+And I do, I do foresee us going with CrowdStrike for identity protection, which would then allow us to restrict employee logins to devices that we manage that have CrowdStrike installed. So that, you know, we could reduce our risk there and we'd still have students, but I mean, you know, whatever.
+
+Lawrence Lewis   32:42
+Mm.
+Mm.
+Mhm.
+
+Heffner, Scott   32:56
+They don't pose the same risk.
+
+Lawrence Lewis   33:01
+Eric.
+
+Heffner, Scott   33:02
+So you know, I I think that could be really interesting. And then the shadow IT layering on top of that could be compelling at that point, because then we'd know we'd have that browser extension to say, here's all the stuff you're not supposed to go to that you're doing, and it would follow them off campus, which would be useful.
+OK.
+
+Lawrence Lewis   33:21
+Makes sense.
+Like, so I wanna be back to you.
+
+Heffner, Scott   33:26
+OK.
+
+Pranavi   33:26
+Yeah, I think I've covered all the features. Scott, if you have any other questions, I'll be happy to answer them.
+
+Heffner, Scott   33:34
+I guess my other question would just be, do you have a a list of integrations that are supported? I think some of our apps are going to be unique to schools and may not be in your list like Blackbaud. We have a lot of Blackbaud applications, Education Management, Razor's Edge, Reher.
+That are core to our business, yeah, along with, yeah, stuff like that.
+
+Lawrence Lewis   33:56
+OK.
+Right now we've got close to about 60 ish available by the month end would be getting another 40, so 100 would be available. So right now if you want to see on this demo environment, Pranavi, if you could, if you could just go to the integration section.
+
+Heffner, Scott   34:03
+OK.
+Yes.
+
+Pranavi   34:12
+Yes.
+
+Lawrence Lewis   34:14
+So I think on this demo environment, this is what we have already, Scott, but on the actual production we've got about 60 ish and the 40 would be, you know, coming in by the 31st.
+
+Heffner, Scott   34:15
+Yeah.
+Yeah.
+Yeah. So I mean like Google, Microsoft, Tableau, GitHub, I mean all that stuff we have. So that's that's something we I like to do the one log in Bitbucket tells me and I suspect that all the infrastructure type stuff would be covered and then at teams.
+
+Lawrence Lewis   34:41
+Mhm.
+Mhm.
+
+Heffner, Scott   34:48
+Um.
+But the the the SAS apps like Oracle Fusion Financials or UKG for HR, I don't know if those are in your list yet, but those would be ones that we would want probably. I mean UKG would be a source maybe, OK.
+
+Lawrence Lewis   34:56
+Mm.
+HR we've got bamboo available already so for the other see what how we work with the other customers is.
+Whatever we have right now, yes, they are the most priority right now. Like you said, you have the top priority of 15, right? If you can share the list of those 15 top priority apps, right?
+We can tell you how many is already available and how many because we have you know the list of to do things or you know the roadmap for 2026 already. So if that is already in the list, I can give you a timeline saying that all right Scott, this is gonna be out.
+
+Heffner, Scott   35:26
+OK.
+Yeah.
+
+Lawrence Lewis   35:41
+By Feb or March or April, whichever right according to the road map that we have and if it's not in that list, we can take it as a priority and bring it up in in in Q1.
+We could do that. That shouldn't be a problem.
+
+Heffner, Scott   36:04
+Yeah, I can come up with a pretty good list right out of the gate.
+
+Lawrence Lewis   36:10
+Yeah.
+Sure.
+
+Heffner, Scott   36:40
+Might be shorter than I thought, but yeah.
+
+Lawrence Lewis   36:40
+So mhm.
+
+Heffner, Scott   36:46
+What?
+
+Lawrence Lewis   36:47
+1520 which you know, whichever is is a top priority.
+
+--- Transcript Chunk 11 ---
+Heffner, Scott   35:26
+OK.
+Yeah.
+
+Lawrence Lewis   35:41
+By Feb or March or April, whichever right according to the road map that we have and if it's not in that list, we can take it as a priority and bring it up in in in Q1.
+We could do that. That shouldn't be a problem.
+
+Heffner, Scott   36:04
+Yeah, I can come up with a pretty good list right out of the gate.
+
+Lawrence Lewis   36:10
+Yeah.
+Sure.
+
+Heffner, Scott   36:40
+Might be shorter than I thought, but yeah.
+
+Lawrence Lewis   36:40
+So mhm.
+
+Heffner, Scott   36:46
+What?
+
+Lawrence Lewis   36:47
+1520 which you know, whichever is is a top priority.
+
+Heffner, Scott   36:48
+OK.
+And some of these you've already got for sure. 24 What am I missing? We've got Slate, I've got Razor's Edge, Reher, UKG, Oracle. I mean, that's probably our main list.
+It's it's it's not nearly as high as I said.
+I'm missing anything.
+I mean, I could go department by department and I'm sure I've come up with stuff that is mildly important, but those are the ones that are primarily important to us 246810. You've obviously already got Microsoft and Google, so really there's eight there.
+
+Lawrence Lewis   37:49
+Yeah, ten of them, so OK.
+
+Heffner, Scott   37:52
+Yeah. And like I said, we have automation in place today. So you know we're we're doing OK on this. I'm not, I'm not stressed about where we're at, but you know if the if the shadow IT stuff were compelling enough, we would.
+And we would would be likely to use this along with it.
+
+Lawrence Lewis   38:12
+OK, so be and Pranavi will go back and do a quick check on these on the app availability and all those things. So once we have that, we can just send you a confirmation.
+
+Heffner, Scott   38:18
+Sure.
+OK, I can tell you the Blackbud stuff's a mess because their APIs are kind of a mess. So yeah, and we've been working with them. They've been improving it. They've got a great team now, but it's, you know, we started off with three file uploads and like 24 API calls and now we're down to, I want to say one file upload in like 5, so.
+
+Lawrence Lewis   38:28
+Oh, is it OK?
+Mhm.
+Yeah.
+Oh.
+In that case, with Blackbaud, what we could do is we can just help you with the license management, right?
+
+Heffner, Scott   38:44
+It's it's still messy.
+OK. Yeah. I mean we're and like, like I said, we're in a pretty good place cause most of these are automated, but the exception, some of them don't have user account creation, some of them we have to actually manage manage manually, but that's because that capability doesn't exist, not because we haven't done it.
+
+Lawrence Lewis   38:51
+Well.
+OK.
+
+Heffner, Scott   39:08
+Yeah.
+
+Lawrence Lewis   39:09
+Right. So yeah, we'll do some background check. We'll get you posted. Now an important thing. See, this is the next thing that I'm about to tell you. No pressure, nothing as such, but it is my duty to go ahead and inform you that something like this is available.
+
+Heffner, Scott   39:13
+OK.
+Hey.
+
+Lawrence Lewis   39:27
+It's up to you to go ahead and, you know, take advantage, just that we don't want you to miss out because a lot of customers, they've come back to me, you know, pointing fingers and saying that why didn't you let me know? So that's the reason I make it a point to.
+
+Heffner, Scott   39:37
+No, that's OK. I mean, we're our fiscal year won't be until July. So we've got a little bit of time and I mean we're not, I'm not going to get anything out of budget between now and then because I've got to give my budget money to better identity protection. We're just seeing too many phishing attacks.
+
+Lawrence Lewis   39:45
+Sure.
+I see. Sure, sure, absolutely. Right. I completely understand. This is just from, you know, from my own satisfaction, Scott, right. So just because of the holiday season, there is a 20% discounts that is available, right, if you want to take advantage.
+
+Heffner, Scott   39:55
+Yeah.
+But yeah, I there's I I I mean, I don't know what the price is, but I'm I'm hard pressed too. I I probably wouldn't have any money available anyway. So I I don't know. Do you have a rough estimate?
+
+Lawrence Lewis   40:17
+Mhm.
+Absolutely. It's the pricing is simple. It's based on per user, right? Per user per month, and it's $0.50 per user per month.
+
+Heffner, Scott   40:23
+Mhm.
+That's a reasonable price, yeah. So that would be $0.50 per user per month, 2100 users, like 1000 bucks. So that's that's pretty reasonable.
+
+--- Transcript Chunk 12 ---
+Lawrence Lewis   39:45
+Sure.
+I see. Sure, sure, absolutely. Right. I completely understand. This is just from, you know, from my own satisfaction, Scott, right. So just because of the holiday season, there is a 20% discounts that is available, right, if you want to take advantage.
+
+Heffner, Scott   39:55
+Yeah.
+But yeah, I there's I I I mean, I don't know what the price is, but I'm I'm hard pressed too. I I probably wouldn't have any money available anyway. So I I don't know. Do you have a rough estimate?
+
+Lawrence Lewis   40:17
+Mhm.
+Absolutely. It's the pricing is simple. It's based on per user, right? Per user per month, and it's $0.50 per user per month.
+
+Heffner, Scott   40:23
+Mhm.
+That's a reasonable price, yeah. So that would be $0.50 per user per month, 2100 users, like 1000 bucks. So that's that's pretty reasonable.
+
+Lawrence Lewis   40:27
+The.
+Yep.
+
+Heffner, Scott   40:41
+I don't have the money for it right now, but that isn't that.
+
+Lawrence Lewis   40:43
+Now the other thing is I'm not gonna charge you for the students. I'm gonna be charging only for the staff. So students I don't wanna use. Yeah, we we don't because on the Google side also it is not charged, right? So.
+
+Heffner, Scott   40:51
+Uh, OK.
+Well, that's true. I mean on the Microsoft side, it kind of is depending on the license. Yeah, I get where you're going. OK, certainly I can't commit to anything right now. Like I said, I don't have budget for it and then but but it's interesting and I I think it gets more interesting with that browser plug in because for me the big.
+
+Lawrence Lewis   41:04
+Yeah.
+No problem. Hmm.
+
+Heffner, Scott   41:19
+Selling point would be shadow IT detection and while you'll see some shadow IT, I think I could see that in Crowdstrike right now if I put together the right report. What I'd love to see is the browser stuff. If you if you're able to do that, it would be very interesting and I would not expect that to be $0.50 per user. I think you'd have to raise that.
+
+Lawrence Lewis   41:20
+Mhm.
+Mhm.
+Mhm, mhm.
+OK.
+No, the pricing wouldn't change. That's the pricing. That's the pricing across. See, I'll be honest, less than 200 users. It is a dollar, right? And between 2:50 to 7:50.
+
+Heffner, Scott   41:38
+The.
+The value is there.
+
+Lawrence Lewis   41:53
+It's about 75 and then more than 750 users. It's at $0.50.
+
+Heffner, Scott   41:57
+OK.
+Yeah, I mean, it's compelling. I mean, it's pretty compelling. I think once we get our identity protection in place, we had someone log in from Lagos, Nigeria a week ago. That was obviously not legitimate. So our identity protection is letting us down. It's Microsoft, but it's letting us down. So that's my focus right now.
+
+Lawrence Lewis   42:04
+Mhm.
+Mhm, mhm.
+Mhm.
+OK.
+
+Heffner, Scott   42:15
+But I think once we tee into Crowdstrike's identity protection, a tool like the browser-based theme where we can say you're on our device, which means you're in our browser, which means we can force the plug-in, would be compelling, at least for employees. And then for students, I probably couldn't deploy. I mean, we don't manage student devices, so I couldn't even deploy.
+
+Lawrence Lewis   42:20
+Mhm.
+Mm.
+Got it.
+
+Heffner, Scott   42:35
+To students anyway. So I mean in that sense, not charging for students would be helpful.
+Yeah, it doesn't care 'cause I think those devices today.
+
+Lawrence Lewis   42:43
+Got it. So let me do this. Yep.
+Correct. So once you implement the identity one from CrowdStrike or you know if sooner if we have the browser based plugin already available, I'll immediately let you know and we can take things forward from there, right?
+
+Heffner, Scott   42:57
+OK.
+Yeah, yeah, that would be interesting.
+Yeah, I I think that is my it's not my number one problem. It's probably like 3 or 4 behind phishing and identity protection and maybe but shadow IT is is top three for sure.
+
+Lawrence Lewis   43:10
+Mhm.
+I see. OK, so for phishing and thing, have you tried or have you known this? I've come across this one tool called Graphis. Have you tried that?
+
+Heffner, Scott   43:24
+So we're putting out for an RFP right now. I have not. We're looking at abnormal slash next proof point and I want to say checkpoint as a new system as well. So we're looking for something in the base that provides user feedback that reports the phishing to the source like.
+
+--- Transcript Chunk 13 ---
+Lawrence Lewis   42:43
+Got it. So let me do this. Yep.
+Correct. So once you implement the identity one from CrowdStrike or you know if sooner if we have the browser based plugin already available, I'll immediately let you know and we can take things forward from there, right?
+
+Heffner, Scott   42:57
+OK.
+Yeah, yeah, that would be interesting.
+Yeah, I I think that is my it's not my number one problem. It's probably like 3 or 4 behind phishing and identity protection and maybe but shadow IT is is top three for sure.
+
+Lawrence Lewis   43:10
+Mhm.
+I see. OK, so for phishing and thing, have you tried or have you known this? I've come across this one tool called Graphis. Have you tried that?
+
+Heffner, Scott   43:24
+So we're putting out for an RFP right now. I have not. We're looking at abnormal slash next proof point and I want to say checkpoint as a new system as well. So we're looking for something in the base that provides user feedback that reports the phishing to the source like.
+
+Lawrence Lewis   43:28
+OK.
+Mm.
+Proof point is good. Mm-hmm.
+
+Heffner, Scott   43:42
+I kind of have some pretty strong requirements, so something we don't need to manage really. It's just clicking in the background.
+
+Lawrence Lewis   43:46
+I see. OK.
+Correct. Yeah, it should run automatically in the background. Mimecraft also does that, right?
+
+Heffner, Scott   43:54
+Yeah, we're we're disappointed with Microsoft. What's that?
+
+Lawrence Lewis   43:58
+Minecraft also does that.
+
+Heffner, Scott   44:00
+Minecraft.
+
+Lawrence Lewis   44:02
+Mime. There's a tool called.
+
+Heffner, Scott   44:04
+Mine. Oh, oh, oh, oh. Yeah, I think. I think so. Yeah. So we haven't. We haven't got done our vendor. Um.
+
+Lawrence Lewis   44:08
+Damn.
+
+Heffner, Scott   44:13
+candidates yet for the new selection. Yeah, so we
+
+Lawrence Lewis   44:13
+Finalization approval. OK, OK. Oh, you said you're putting on an RFP. OK, got it. Yeah. Yeah.
+
+Heffner, Scott   44:19
+Yeah, we're going to put out an RSP. So we we we expect it to cost around $50,000 a year, which is just brutal because it wasn't in the budget, but we've just got to do it. So I, you know, once I have a final candidate, then I've got to go to finance and try to get money, but you can see why I don't have any other money to.
+
+Lawrence Lewis   44:24
+OK.
+OK.
+
+Heffner, Scott   44:38
+This then it's 'cause they're gonna ask me what do you have left? And I'm gonna say.
+
+Lawrence Lewis   44:43
+Nothing.
+
+Heffner, Scott   44:43
+Literally nothing. Yeah, so but but no, this is interesting. I I mean I think the data loss prevention capabilities, the the shadow IT capabilities are are very important to me. It's technically not data loss prevention, but.
+
+Lawrence Lewis   44:45
+Yeah.
+Nice.
+
+Heffner, Scott   44:59
+You know, preventing people from using unauthorized systems helps me prevent data loss, so.
+Did I lose you? Looks like I might have lost you.
+I still, I see you, Josh. I think we lost Lawrence.
+
+Jalsha Chakma   45:14
+Yes, I I I can hear you, Scott. I think Larry is having some Internet issues.
+
+Heffner, Scott   45:21
+That's fine.
+
+Lawrence Lewis   45:22
+I'm back.
+
+Jalsha Chakma   45:23
+Yeah, he had John again.
+
+Lawrence Lewis   45:27
+Alrighty, can you guys hear me?
+
+Heffner, Scott   45:29
+Yeah, he was. Yeah, we can hear you.
+
+Lawrence Lewis   45:30
+OK. All righty. So great, Scott. So once we have more information, I'll let you know. But otherwise, if you have any questions, comments, thoughts, you know, feel free to let us know. We'll be more than happy to help that. All righty.
+
+Heffner, Scott   45:42
+OK.
+Will do. Have a great day. Thanks guys.
+
+Lawrence Lewis   45:46
+Have a great one. Great connecting with you again, Scott. You have a good one. Take care.
+
+Pranavi   45:49
+Good day, Scott. Yeah. Bye, everyone. Thank you.
+
+Heffner, Scott   45:50
+You too. Take care.
+
+Lawrence Lewis   45:51
+Yeah. Take care. Bye.
+
+Jalsha Chakma   45:52
+Bye.
+
+Jalsha Chakma stopped transcription
+
+--- Transcript Chunk 14 ---
+Q19: Quick question Scott, are you a Google shop or a Microsoft shop?
+A19: Right. Sure. We're we're Microsoft primarily, but we have Google for the G Suite for education. So Google Drive, Forms, Doc Sheets, etcetera. Both OK.
+
+Q20: OK. Oh, I remember. I think we we spoke about a few weeks ago. You didn't mention this, right?
+A20: In in general. Yeah, we just recently used you guys actually to migrate from Dropbox to the Google Drive, yeah. Connect. Yep, Yep.
+
+Q21: Right. So there are a lot of free licenses that come with Microsoft, so they just show it as $0.00, no cost associated, right? You know how many seats you have purchased and how many you have already assigned, right? When you click on that, you'll know who are the users using the.
+A21: Sure.
+
+Q22: A lot of discounts associated and such, so you could just go ahead and edit it. This is you can tell that this is how many licenses I had. This is how much I have purchased it for. Or we do have an invoice pass to sorry, so we do have an invoice pass to. This is also completely AI powered.
+A22: Yeah.
+
+Q23: Let me upload the invoice. So what it does, it passes it, analyzes it and asks you to validate the information before going ahead and saving it, right? So all my data from the invoice is put here. So there's a monthly billing cycle, so it's telling me that it's gonna expire in a month.
+A23: Right from the start date in the invoice and we can go ahead and save it. If it's a new application you're saving, it'll add as a new application to the platform. I did not have lease web on this before, so it'll add as a new application, but if you are buying licenses to a specific application at a later point. Time. You could just go ahead and add that. It'll just add as a different row in my license management section. Right. It'll pull up as a different row here. If I'm gonna add a Microsoft license and in that case you need not edit out the prices because it'll be the actual price that is in the invoice. So it'll reflect the same price here and it'll also take care if it's a monthly recurring or or it'll also take care of the expiry date.
+
+Q24: So this is the in detail view we have for each application, right? So we show all the user management, license management details for all other applications as well. And we do also provide an automated workflow for provisioning and deprovisioning users from licenses.
+A24: Yeah.
+
+Q25: You want them to have and you can store it right? So every time a new student is onboarded or a new employee is onboarded, you could go ahead and assign them to templates based on their role or the department or things like that. So it it will make things easier for you. You could do it in bulk too.
+A25: Right.
+
+Q26: Right. So we we are, we are adding that to the workflow Scott, so the triggering. So which kind of tool do you use for storing the information you use in which our type of tool? OK.
+A26: OK.
+
+Q27: Well, we so we have a data warehouse. We have a data warehouse where we consolidate identities from all of our SAS applications using source of truth depending on the roles for each person. So we consolidate all the different roles that a single person has into one identity.
+A27: OK, OK. OK.
+
+Q28: And then use right now we're using PowerShell primarily to integrate with Active Directory, but we also have, we also have Talend which is a full data fabric platform that we can use for API connectivity. So I mean the only reason we're not doing that today is that we have some dependency on our on Prem Active.
+A28: Mhm. OK. Mm-hmm. Active Directory, but if we moved to a cloud only Active Directory we would we would switch to just using APIs or if we had something like this we might do the same. Got it.
+
+--- Transcript Chunk 15 ---
+Q26: Right. So we we are, we are adding that to the workflow Scott, so the triggering. So which kind of tool do you use for storing the information you use in which our type of tool? OK.
+A26: OK.
+
+Q27: Well, we so we have a data warehouse. We have a data warehouse where we consolidate identities from all of our SAS applications using source of truth depending on the roles for each person. So we consolidate all the different roles that a single person has into one identity.
+A27: OK, OK. OK.
+
+Q28: And then use right now we're using PowerShell primarily to integrate with Active Directory, but we also have, we also have Talend which is a full data fabric platform that we can use for API connectivity. So I mean the only reason we're not doing that today is that we have some dependency on our on Prem Active.
+A28: Mhm. OK. Mm-hmm. Active Directory, but if we moved to a cloud only Active Directory we would we would switch to just using APIs or if we had something like this we might do the same. Got it.
+
+Q29: Yeah. So, so right now what we're doing is we're triggering from HR tools where you add the information like roles and all the identity related information, right. So we're trying to integrate that with the workflow. I'll just check with my team regarding the integration with.
+A29: OK. Data warehouse, data warehouse and such triggering from there, but if. Yeah, I mean, all we would need is API endpoints. We it doesn't even have to be simple. The HR integration wouldn't be helpful to us because we have too many students, yeah. Yeah, yeah, yeah. Yeah, I understand. Yeah, yeah, I understand. Yeah, I'll just check with my team regarding that. If if there are API endpoints, I think we should be able to make use of those figures as well. It'll make things easier if you understand, yeah. Yes. Right so so moving on if you you if a new employer or a new student is being onboarded, you can create them from your and then add them to your intra too if right. So you usually details first name, last name, e-mail and password.
+
+Q30: Right. Right now you would not be able to assign roles as such, but you can just create the user and add them, right? And then you can go ahead and run the workforce for the new users. Like I said, we could choose the template and go ahead assign the template, but you need to have available seats in those licenses.
+A30: Sure.
+
+Q31: Right before you go ahead and start the workflow. Or if you're just adding access to just a single application or such, you just go ahead and just click on that one license and start on board too, right? So when it's preferable to use templates when you're doing it in bulk and if it's just one or two applications.
+A31: it's preferable to go this way.
+
+Q32: Right, so when once we have a users onboarded, we can also offboard them. We can deprovision deprovision them from licenses, right? So it'll give you a list of all the users you have and all the applications they have access to.
+A32: Right, you can just go ahead and start the offport process. You click on the application and start the offport process. We very securely remove them from any groups, file shares, any permissions, all all those things are taken care of. Right. If if they're leaving the organization, you can deactivate the user too. You'd still have access to the data he was holding on to. Once you take action on that, then you can go ahead and delete the user permanently.
+
+Q33: Right. And we do also send you e-mail alerts and notifications when an application is coming up for renewal or a user is added to a specific application, right? Things like that. We notify you. We also tell you that this is how much you've identified that we can save on this application. It's coming up for renewal, so based.
+A33: But. On this information, you can negotiate a better contract. You can buy, you can buy lesser seats. You can save money on that.
+
+Q34: OK. Do you have a budget? Can you produce a budget report or does it just show that stuff coming due soon?
+A34: Right, Bob.
+
+--- Transcript Chunk 16 ---
+Q47: That that are already approved by approved by your IT, right? So these are all the third party applications. You know you'll you'll see it from the user from the user as well and you can also see from the application who are the users using that particular application.
+A47: See you can see that someone's has been someone has been using open AI and then you see that these are the users using that application. That would be interesting. OK, yeah, they do have continue with Microsoft or Google. Interesting. I did not realize that. Yeah. Yeah, a lot of applications do provide that option and usually that's a preferred way. Since it's easier, since they're already logged into the system, we users tend to go ahead with that option mode and if they if they're using their business ID, we'd we'd be able to track that.
+
+Q48: Yeah, I'm fighting a losing battle with kicking people out of those systems, so at least knowing who's in them would be good. Um.
+A48: Yeah. OK. OK, so you're parsing the logs and then identifying the logs that they're logging in through. Cool. Mhm.
+
+Q49: I don't know why I never thought of that. That's interesting.
+A49: Yeah, so. So apart from this, we do have another way that we detect shadow IT that is under development. I'd say it'll still take some time. We need to get some approvals from the browser, so we have a browser extension built. No. So in that case, even if they're not logging in with Google or with Microsoft, even they're just signing up, even if they're just opening a third party website that is not allowed in the organization, you'll be able to detect that. Interesting. OK. Yeah, I mean, that's one of our bigger. Yeah, but we need to get a few approvals from the browser 1st to add the extension, so that will under way. But once that is there, I think you'll be able to detect a lot more applications. Yeah. I think you're right. I think that's for sure. I mean it gets into user privacy areas, but I mean on our computer. Yeah.
+
+Q50: Yeah, if the user have to ask the extension for us to track that, yeah, that's also, yeah, yeah, a lot of companies are, but it's it's a compliance issue, right? If you don't know if someone's logging into a third party applications, it's not allowed.
+A50: Yeah.
+
+Q51: Yeah, a lot of them are concerned about their privacy, but it's up to them if they want to get it. If they want to know what third party applications the users are logging into, they'd have to add the extension and only then we'll be able to track that.
+A51: I think our policy's pretty clear. I doubt people are reading it. But I mean, if you're using our computer, we have the right to review anything we're doing. Yeah, if if nothing else, we're covered there. But yeah, I like, I mean, I like that idea. There is, there's a part of me that. Mhm. Mhm. True. Yeah, yeah.
+
+Q52: Somebody that really wants to get data loss prevention into the browser, and we're looking at Crowdstrike for that right now. You know, something to see what they're doing with shadow IT would also be good.
+A52: Mhm. OK, that would that would be interesting. OK, I. But apart from the browser ID.
+
+Q53: Sorry, we're apart from the browser extension, but this one that you're seeing right now on the screen, the guys who are using it through the the business, the user ID, do you think this?
+A53: OK.
+
+Q54: Is something would be interesting or you have something in place already for this?
+A54: So I.
+
+Q55: I don't have a good answer for that. I hadn't considered that this is how it's done through Microsoft. I suspect that's not a huge percentage of our users that are using their Academy accounts to log into a systems they're not allowed to access. Do you know what I mean? Like they're probably creating local logins.
+A55: Mhm. Mhm. Mhm.
+
+Q56: Because because they know, right? Every time they go to buy a a thing, I my my feedback loop from finance is spectacular. So it's like, hey, this just showed up on an expense report. Is it approved? No. OK, I'm going to reject it and I'm going to lecture the user. So I I suspect they're working around just by creating their own accounts. I I'm sure we find some.
+A56: Mm. OK.
+
+--- Transcript Chunk 17 ---
+Q63: So I think on this demo environment, this is what we have already, Scott, but on the actual production we've got about 60 ish and the 40 would be, you know, coming in by the 31st.
+A63: Yeah. Yeah. Yeah. So I mean like Google, Microsoft, Tableau, GitHub, I mean all that stuff we have. So that's that's something we I like to do the one log in Bitbucket tells me and I suspect that all the infrastructure type stuff would be covered and then at teams. Mhm. Mhm. Um. But the the the SAS apps like Oracle Fusion Financials or UKG for HR, I don't know if those are in your list yet, but those would be ones that we would want probably. I mean UKG would be a source maybe, OK. Mm.
+
+Q64: We can tell you how many is already available and how many because we have you know the list of to do things or you know the roadmap for 2026 already. So if that is already in the list, I can give you a timeline saying that all right Scott, this is gonna be out.
+A64: OK. Yeah.
+
+Q65: By Feb or March or April, whichever right according to the road map that we have and if it's not in that list, we can take it as a priority and bring it up in in in Q1.
+A65: We could do that. That shouldn't be a problem. Yeah, I can come up with a pretty good list right out of the gate. Yeah. Sure. Might be shorter than I thought, but yeah. So mhm. What?
+
+Q66: 1520 which you know, whichever is is a top priority.
+A66: OK.
+
+Q67: And some of these you've already got for sure. 24 What am I missing? We've got Slate, I've got Razor's Edge, Reher, UKG, Oracle. I mean, that's probably our main list.
+A67: It's it's it's not nearly as high as I said. I'm missing anything. I mean, I could go department by department and I'm sure I've come up with stuff that is mildly important, but those are the ones that are primarily important to us 246810. You've obviously already got Microsoft and Google, so really there's eight there. Yeah, ten of them, so OK.
+
+Q68: Yeah. And like I said, we have automation in place today. So you know we're we're doing OK on this. I'm not, I'm not stressed about where we're at, but you know if the if the shadow IT stuff were compelling enough, we would.
+A68: And we would would be likely to use this along with it. OK, so be and Pranavi will go back and do a quick check on these on the app availability and all those things. So once we have that, we can just send you a confirmation. Sure. OK, I can tell you the Blackbud stuff's a mess because their APIs are kind of a mess. So yeah, and we've been working with them. They've been improving it. They've got a great team now, but it's, you know, we started off with three file uploads and like 24 API calls and now we're down to, I want to say one file upload in like 5, so.
+
+Q69: Oh, is it OK?
+A69: Mhm. Yeah. Oh.
+
+Q70: In that case, with Blackbaud, what we could do is we can just help you with the license management, right?
+A70: It's it's still messy. OK. Yeah. I mean we're and like, like I said, we're in a pretty good place cause most of these are automated, but the exception, some of them don't have user account creation, some of them we have to actually manage manage manually, but that's because that capability doesn't exist, not because we haven't done it. Well. OK. Yeah. Right. So yeah, we'll do some background check. We'll get you posted. Now an important thing. See, this is the next thing that I'm about to tell you. No pressure, nothing as such, but it is my duty to go ahead and inform you that something like this is available. OK. Hey.
+
+Q71: It's up to you to go ahead and, you know, take advantage, just that we don't want you to miss out because a lot of customers, they've come back to me, you know, pointing fingers and saying that why didn't you let me know? So that's the reason I make it a point to.
+A71: No, that's OK. I mean, we're our fiscal year won't be until July. So we've got a little bit of time and I mean we're not, I'm not going to get anything out of budget between now and then because I've got to give my budget money to better identity protection. We're just seeing too many phishing attacks. Sure. I see. Sure, sure, absolutely. Right. I completely understand. This is just from, you know, from my own satisfaction, Scott, right. So just because of the holiday season, there is a 20% discounts that is available, right, if you want to take advantage. Yeah.
+
+--- Transcript Chunk 18 ---
+Word document: tmppnmhsk9k.docx
+Contains structured text and formatting information
+CloudFuze CloudFuze Manage Demo - Phillips Exeter Academy-20251202_110233-Meeting Recording
+December 2, 2025, 4:04PM
+45m 56s
+
+Jalsha Chakma started transcription
+
+Lawrence Lewis
+We usually manage about on an average about 100 ish apps. you said, core apps vary from 5 to 15, So where we bring in it, this is kind of a hot gig going on now, especially with the year end with the budgets spending and all that, so.
+We cater to three important criteria, Scott. The first one is cost optimization, the second one being license management, and the third one being shadow IT.
+
+Scott Heffner
+
+Lawrence Lewis
+Some of my customers say wow on shadow IT. Some of my customers are, you know, surprised to see how much they can save. On average, we've been able to help them save between 22 to 2030 percentish, Just with the licenses, we tell them these are the number of apps you use. This is how.
+
+Scott Heffner
+
+Lawrence Lewis
+How much you pay and this is how much you can save. A simple view in that we have a renewal calendar as well. So we'll show you in in the demonstration that Pranavi's gonna extend. So she's showing us that. So you said you said you have something to monitor. Is that the?
+
+Scott Heffner
+It.
+2.
+
+Lawrence Lewis
+Admin console you're talking about in the specific apps or?
+
+Scott Heffner
+No, no, no. We have, we've just centralized monitoring of the availability of the apps. It's really not nothing special. It doesn't even do synthetic transactions. So it's it's not what I would want, but it's enough to stay up, down, down.
+
+Lawrence Lewis
+I see.
+
+I see. And how many users are we talking about with the Philips Exeter?
+
+Scott Heffner
+A little over 1000 employees and about 1100 students.
+
+Lawrence Lewis
+Mm.
+I see. alrighty.
+
+Scott Heffner
+we have a lot of employees considering the number of students.
+
+Lawrence Lewis
+Correct. this includes the staff as well, I'm guessing.
+
+Scott Heffner
+1000 employees, 1100 students.
+
+Lawrence Lewis
+got it. Got it, buddy. So let's get.
+
+Scott Heffner
+We also have a case for parents, but they mostly don't have access.
+
+Lawrence Lewis
+Correct. So for you especially, I think the shadow ID bit might be a lot useful. You might be able to see who's using what app which is not compliant.
+So.
+
+Scott Heffner
+I guess the challenge of shadow IT is detecting in the first place.
+
+Lawrence Lewis
+That's where we come to the picture. So we'll show you that. So Tanvi, let's get started with the demonstration again. Scott, if you have any questions, don't hesitate to stop us and let us know. Or if you feel that this is an there, you know, not something that you would really wanna have.
+
+Scott Heffner
+
+It.
+
+Lawrence Lewis
+You know, I'll be happy to take the feedback. Alrighty. Alright, Ravi, let's get started.
+
+Pranavi
+Larry Thank you. Thanks for the introduction. Hi, Scott, how are you doing today?
+
+Scott Heffner
+Pranavi Good, how are you?
+
+Pranavi
+I'm good. I'm good. Thanks for asking. So, So Larry has given a beautiful introduction on what Cloudfuse Manage does. So I'll just share my screen and I will dive into the demo without wasting any time. So please confirm when you're able to see.
+
+Scott Heffner
+Excellent.
+I can see it.
+
+Pranavi
+so before we start managing the applications, the first step would be to add the applications into the platform or the apps that you that you're using, So Cloudfuse manage integrates with all the major SaaS applications through APIs. So connecting to the application is pretty simple since.
+You have used a migration product before, so it's pretty similar to that. Just click on it, enter your global admin or super admin credentials. The scopes would be slightly different between our migration and our managed product. So we use scopes to pull out users and licenses, that kind of information.
+We don't make any changes as such, So it's connecting to the application. It's pretty simple. So Scott, do you also use a single sign on across with all your applications?
+
+Scott Heffner
+we do. We we use Azure to or Intra ID I guess now.
+
+Pranavi
+
+--- Transcript Chunk 19 ---
+Scott Heffner
+Excellent.
+I can see it.
+
+Pranavi
+so before we start managing the applications, the first step would be to add the applications into the platform or the apps that you that you're using, So Cloudfuse manage integrates with all the major SaaS applications through APIs. So connecting to the application is pretty simple since.
+You have used a migration product before, so it's pretty similar to that. Just click on it, enter your global admin or super admin credentials. The scopes would be slightly different between our migration and our managed product. So we use scopes to pull out users and licenses, that kind of information.
+We don't make any changes as such, So it's connecting to the application. It's pretty simple. So Scott, do you also use a single sign on across with all your applications?
+
+Scott Heffner
+we do. We we use Azure to or Intra ID I guess now.
+
+Pranavi
+
+so connect. So with SSO integration it's even more easier to pull out the applications. Instead of manually adding every application, you can just connect to your intra the same way I just showed and once you connect to your intra it gives you an option to discover application because.
+
+Scott Heffner
+
+Pranavi
+All the applications are already integrated with your single sign on, So you could just connect to it. It'll give you a list of all the applications. It'll even pull up the smallest of the smallest applications that are there. But if you have a specific application as an as an application, you can just go ahead and connect to it, You don't. You don't need to authenticate it.
+
+Scott Heffner
+
+Pranavi
+
+--- Transcript Chunk 20 ---
+Scott Heffner
+we do. We we use Azure to or Intra ID I guess now.
+
+Pranavi
+
+so connect. So with SSO integration it's even more easier to pull out the applications. Instead of manually adding every application, you can just connect to your intra the same way I just showed and once you connect to your intra it gives you an option to discover application because.
+
+Scott Heffner
+
+Pranavi
+All the applications are already integrated with your single sign on, So you could just connect to it. It'll give you a list of all the applications. It'll even pull up the smallest of the smallest applications that are there. But if you have a specific application as an as an application, you can just go ahead and connect to it, You don't. You don't need to authenticate it.
+
+Scott Heffner
+
+Pranavi
+
+So once this process is done, we'll have an inventory of your whole SAS landscape. So you'll know every app that is being used, every app that you're using is on the platform, So there are a lot of cases where the applications do not provide us endpoints, but that's.
+Very minimal. 90% of the SAS applications do provide the API endpoints, but in case we do not have that, you could just manually add the application to just to have a view along with all the other applications, You could just add the application name.
+So we're adding a new feature wherein you can just export your CSV's from your admin portals and just add it here so that you'll have a view similar to other applications as well.
+so once we have this, we can go back to our dashboard. So this is more your Control Center. You know every app that is being used, who's using application, how many users you have across all applications.
+How much you're spending on your SaaS subscription costs, And the major feature that Larry talked about, the cost optimization. I'll show you how we come down to that number, So with our total spend, we show you a spend analytics table for each application. What we show is how many users you have.
+Currently using the application, So Dropbox tells me that there are 22 users using the application total, but when I calculate a license utilization, there are only 7 users who are actively logging into the application every day and using them.
+so there are a lot of inactive and ID users usually with licenses. So when I say ID user, it's someone has not logged into the application for last 30 days. We consider them to be an ID user. Of course you could set that time according to your requirements. We set it to be 30 and then from there we calculate.
+If if the license is being utilized optimally or not, there are a lot of inactive users, Usually you disable a user from you disable a user or you revoke their access. It comes under inactive users in the admin console.
+so that takes up a lot of space and data too. So it's telling me that there are only 7 billable users in actuality. So this is how much you can save based on the calculation of the license utilizations.
+So this is the cost consolidation that we provide. There's also another cost consolidation that we provide, which is overlapping applications, In the total apps you see a section called overlapping applications. Then what we do is we segregate applications based on their functionality. So we have a category for every.
+The application and it's telling me that I have 5 project management tools in my platform which is not always required. So you could if you're looking to cut costs, this is also an area you could look into. You can start cutting costs here. You can consolidate it into one or two depending on the requirements, but you might you might.
+Not always require 5 apps for the same purpose, So that is also a cost consolidation solution that we provide.
+So based on these calculations, which are potential savings number for each application. So it's telling me that I'm paying 2325 for this application, but the optimized cost is only 17151 based on my user activity and license utilization.
+So, Scott, let me just pause here. If you have any questions, I'll answer them and then we'll move forward.
+
+Scott Heffner
+No, I mean I think from from my perspective it's gonna be useful because we we typically sign multi-year contracts. So I wouldn't be looking at this every day, but if I need to go in and see who hasn't been using it for the last six months that could be beneficial.
+
+Pranavi
+
+In.
+
+--- Transcript Chunk 21 ---
+Scott Heffner
+No, I mean I think from from my perspective it's gonna be useful because we we typically sign multi-year contracts. So I wouldn't be looking at this every day, but if I need to go in and see who hasn't been using it for the last six months that could be beneficial.
+
+Pranavi
+
+In.
+
+Usually a lot of our customers utilize them for quarterly audits or monthly audits. According to what their organization requirements are, you'd need this kind of data for those kind of audits.
+
+Scott Heffner
+
+No, that's it's useful. I I'm I'm in a fortunate position where cost savings isn't my top priority, but I think this is still useful for
+
+Pranavi
+
+so with this information, what I want to show next is how we can go in detail for each application and then check, So we have in detail view for each application, the every application that you have added. So let me just show you how it looks. It's pretty much similar to all the other applications as well. I'm showing you to you. I'm showing you.
+
+Scott Heffner
+
+Pranavi
+For Microsoft, you see that the data that we're showing is kind of similar to what is already existing in your admin console. So our idea behind it is we're trying to eliminate the need for you to use 10 different admin portals or 10 different applications, So if you want to check who's using.
+Which application? You can do all that in one single platform, Without using 10 different admin portals just to check if the users they're not So you have all the user information here using the application. You know the type of user if it's a guest user or if it's a standard user that is a Microsoft or if it's an admin.
+
+Scott Heffner
+
+Pranavi
+And you'll also know the status of the user. If he's active, inactive or an ID user here, you could fill out that and check, Similar to that, we have information on groups as well. You could see all your Microsoft groups listed here, public, private group. When you click on the group, you see who are the owners.
+And members in the group. You could add and remove members from the group here. It's When you add members, it'll give you a list of all the existing Microsoft members that you could just go ahead and add them to the group. If you want, you could remove members from the group too.
+
+Lawrence Lewis
+Quick question Scott, are you a Google shop or a Microsoft shop?
+
+Pranavi
+
+Scott Heffner
+We're we're Microsoft primarily, but we have Google for the G Suite for education. So Google Drive, Forms, Doc Sheets, etcetera.
+
+Lawrence Lewis
+Both
+Oh, I remember. I think we we spoke about a few weeks ago. You didn't mention this,
+
+Scott Heffner
+In in general.
+we just recently used you guys to migrate from Dropbox to the Google Drive,
+
+Lawrence Lewis
+Connect.
+
+Pranavi
+So the next major interesting feature is the license management. So when we connect with the application through API, so we can we pull out a list of all the licenses you're using for that application,
+And if there's a cost associated with it, we use AI to parse all that data and it'll pull up a basic cost that is available publicly, And then we can go ahead and change the cost as to how much you have purchased those licenses for.
+So there are a lot of free licenses that come with Microsoft, so they just show it as $0.00, no cost associated, You know how many seats you have purchased and how many you have already assigned, When you click on that, you'll know who are the users using the.
+
+Lawrence Lewis
+
+Pranavi
+Using that particular license and also their status. If there's an idle user, you'll know from here itself you could just signal that user and take action on that further, So I said, the price would not be always the price that you purchase it for. You get it with.
+A lot of discounts associated and such, so you could just go ahead and edit it. This is you can tell that this is how many licenses I had. This is how much I have purchased it for. Or we do have an invoice pass to sorry, so we do have an invoice pass to. This is also completely AI powered.
+
+Scott Heffner
+
+--- Transcript Chunk 22 ---
+Lawrence Lewis
+
+Pranavi
+Using that particular license and also their status. If there's an idle user, you'll know from here itself you could just signal that user and take action on that further, So I said, the price would not be always the price that you purchase it for. You get it with.
+A lot of discounts associated and such, so you could just go ahead and edit it. This is you can tell that this is how many licenses I had. This is how much I have purchased it for. Or we do have an invoice pass to sorry, so we do have an invoice pass to. This is also completely AI powered.
+
+Scott Heffner
+
+Pranavi
+We do not store any invoices as such. We just pass the information and store them, So this is a sample invoice that I have. I'll show you how that works, The application name, the services, the usual details in an invoice, This is a trial version, so there's no fee and it'll also tell me the billing cycle.
+Let me upload the invoice. So what it does, it passes it, analyzes it and asks you to validate the information before going ahead and saving it, So all my data from the invoice is put here. So there's a monthly billing cycle, so it's telling me that it's gonna expire in a month.
+from the start date in the invoice and we can go ahead and save it. If it's a new application you're saving, it'll add as a new application to the platform. I did not have lease web on this before, so it'll add as a new application, but if you are buying licenses to a specific application at a later point.
+Time. You could just go ahead and add that. It'll just add as a different row in my license management section.
+It'll pull up as a different row here. If I'm gonna add a Microsoft license and in that case you need not edit out the prices because it'll be the actual price that is in the invoice. So it'll reflect the same price here and it'll also take care if it's a monthly recurring or or it'll also take care of the expiry date.
+So that is also a slightly easier workaround for editing out the price,
+So this is the in detail view we have for each application, So we show all the user management, license management details for all other applications as well. And we do also provide an automated workflow for provisioning and deprovisioning users from licenses.
+
+Scott Heffner
+
+Pranavi
+so we have a workflow user onboarding and offboarding workflow. So before we go ahead and run workflows, what we can do is we can create templates and store them. So you said, your students would be having access to different applications, different licenses, your staff would be having.
+Access to different applications, different licenses, So you could create templates and store them. So this is so I'll just show you a sample one. I just named it P1. So you want every student to have a Microsoft Copilot license or a Business 365 license and then you could select what license you'd.
+You want them to have and you can store it So every time a new student is onboarded or a new employee is onboarded, you could go ahead and assign them to templates based on their role or the department or things that. So it it will make things easier for you. You could do it in bulk too.
+
+Scott Heffner
+It has an inbound API. Can can we trigger that action without logging into the admin console or does someone have to do it by hand?
+
+Pranavi
+So we we are, we are adding that to the workflow Scott, so the triggering. So which kind of tool do you use for storing the information you use in which our type of tool?
+
+Scott Heffner
+
+Well, we so we have a data warehouse. We have a data warehouse where we consolidate identities from all of our SAS applications using source of truth depending on the roles for each person. So we consolidate all the different roles that a single person has into one identity.
+
+Pranavi
+
+Scott Heffner
+And then use now we're using PowerShell primarily to integrate with Active Directory, but we also have, we also have Talend which is a full data fabric platform that we can use for API connectivity. So I mean the only reason we're not doing that today is that we have some dependency on our on Prem Active.
+
+Pranavi
+
+Scott Heffner
+Active Directory, but if we moved to a cloud only Active Directory we would we would switch to just using APIs or if we had something this we might do the same.
+
+--- Transcript Chunk 23 ---
+Pranavi
+So we we are, we are adding that to the workflow Scott, so the triggering. So which kind of tool do you use for storing the information you use in which our type of tool?
+
+Scott Heffner
+
+Well, we so we have a data warehouse. We have a data warehouse where we consolidate identities from all of our SAS applications using source of truth depending on the roles for each person. So we consolidate all the different roles that a single person has into one identity.
+
+Pranavi
+
+Scott Heffner
+And then use now we're using PowerShell primarily to integrate with Active Directory, but we also have, we also have Talend which is a full data fabric platform that we can use for API connectivity. So I mean the only reason we're not doing that today is that we have some dependency on our on Prem Active.
+
+Pranavi
+
+Scott Heffner
+Active Directory, but if we moved to a cloud only Active Directory we would we would switch to just using APIs or if we had something this we might do the same.
+
+Pranavi
+Got it.
+So, so now what we're doing is we're triggering from HR tools where you add the information roles and all the identity related information, So we're trying to integrate that with the workflow. I'll just check with my team regarding the integration with.
+
+Scott Heffner
+
+Pranavi
+Data warehouse, data warehouse and such triggering from there, but if.
+
+Scott Heffner
+I mean, all we would need is API endpoints. We it doesn't even have to be simple. The HR integration wouldn't be helpful to us because we have too many students,
+
+Pranavi
+
+I understand. I understand. I'll just check with my team regarding that. If if there are API endpoints, I think we should be able to make use of those figures as well. It'll make things easier if you understand,
+
+Scott Heffner
+Yes.
+
+Pranavi
+so moving on if you you if a new employer or a new student is being onboarded, you can create them from your and then add them to your intra too if So you usually details first name, last name, e-mail and password.
+now you would not be able to assign roles as such, but you can just create the user and add them, And then you can go ahead and run the workforce for the new users. I said, we could choose the template and go ahead assign the template, but you need to have available seats in those licenses.
+
+Scott Heffner
+
+Pranavi
+before you go ahead and start the workflow. Or if you're just adding access to just a single application or such, you just go ahead and just click on that one license and start on board too, So when it's preferable to use templates when you're doing it in bulk and if it's just one or two applications.
+it's preferable to go this way.
+so when once we have a users onboarded, we can also offboard them. We can deprovision deprovision them from licenses, So it'll give you a list of all the users you have and all the applications they have access to.
+you can just go ahead and start the offport process. You click on the application and start the offport process. We very securely remove them from any groups, file shares, any permissions, all all those things are taken care of.
+If if they're leaving the organization, you can deactivate the user too. You'd still have access to the data he was holding on to. Once you take action on that, then you can go ahead and delete the user permanently.
+So this is the provisioning and deprovisioning workflow that we offer. And the other cool feature that we have is the renewal calendar. So the renewal calendar shows for the next six months. It projects SAS budgets for your next six months, how much you're gonna spend on your renewals that are coming up.
+So even if it's a per user or pay per user model, it'll calculate how many users have been added and removed from the applications in a month, We track all that and then we show you this is how much you're gonna spend in the month of December for all your SaaS application.
+And we do also send you e-mail alerts and notifications when an application is coming up for renewal or a user is added to a specific application, Things that. We notify you. We also tell you that this is how much you've identified that we can save on this application. It's coming up for renewal, so based.
+
+Scott Heffner
+But.
+
+Pranavi
+On this information, you can negotiate a better contract. You can buy, you can buy lesser seats. You can save money on that.
+
+--- Transcript Chunk 24 ---
+Scott Heffner
+But.
+
+Pranavi
+On this information, you can negotiate a better contract. You can buy, you can buy lesser seats. You can save money on that.
+
+Scott Heffner
+Do you have a budget? Can you produce a budget report or does it just show that stuff coming due soon?
+
+Pranavi
+Bob
+
+Scott Heffner
+And can you show the annual cost?
+
+Pranavi
+So we so we do show annual cost this way. We calculate it in in the spend, we show you that there's how much you're spending and we have a total cost column for all the applications, And if it's a because not everything is annual cost, So it's a lot of.
+
+Scott Heffner
+
+So.
+
+Pranavi
+The applications are month to month as well. So we calculate a month to month renewal if it's coming up or if it's an annual renewal to a lot of the annual renewals come up in December or the months that you've purchased it from. So we.
+
+Scott Heffner
+ours, ours come due in, ours usually come due at the end of June because we're our fiscal year is July 1.
+
+Pranavi
+Take care of that control,
+
+Yes.
+
+Scott Heffner
+And I guess you, you still have the shadow IT, which I'm interested in, but on this side where you've got a list of applications, cost is interesting, but does does this face users at all? could our users see a catalog of all the software that we offer through this or is this just intended for admins?
+
+Pranavi
+Yes, yes.
+
+so now we do give only admin access. So it's more for people who are managing the applications and need to see the data on how much you're spending, how many users are being added.
+
+Scott Heffner
+The bigger value anyway,
+
+Pranavi
+So it's not employee focus. It's not employee facing application now.
+
+Scott Heffner
+
+Pranavi
+So about the IT
+
+Lawrence Lewis
+Any reason? Sorry, sorry Pranavi. So Scott, any reason why you wanna give access to all the users?
+
+Pranavi
+No, go ahead, live.
+
+Scott Heffner
+Well, not to manage licenses, but to see what we already have and request licenses potentially. You know, as opposed to this whole they're going out and finding a solution to a problem we've already solved twice. You know, if you're looking for an e-mail application, you can go in here and see the e-mail or cloud storage or.
+
+Lawrence Lewis
+
+Scott Heffner
+I mean, I've been, it's been on my mind to publish the software catalog for a while now, but it doesn't have to be through this tool. I have a separate inventory tool for software too.
+
+Lawrence Lewis
+
+Maybe, or what we could do is maybe we could generate a list. Once we've added all the clouds with Philips, etcetera, we can, you know, give you a.
+
+Scott Heffner
+It isn't a high priority, it's just a question, If it was already there, it might be an interesting feature. I mean, I'm thinking specifically on AI tools is probably probably where my biggest exposure is slash will be soon.
+
+Lawrence Lewis
+Mm.
+Got it.
+
+Scott Heffner
+And wanting people to stick to the tools we provide is it's it's but that doesn't. Again, I've got another tool that's already doing software inventory that theoretically has a service catalog and I'm just not using it. So I don't know if I would even use it if it was available. I was just kind of.
+
+Lawrence Lewis
+More important,
+
+Mm.
+
+Scott Heffner
+Interested to see if you have.
+
+Lawrence Lewis
+I see.
+Got to know.
+This is a good feedback So Pranavi, maybe we can, you know, do something around it, a catalog with a list of apps.
+
+Scott Heffner
+I mean honestly, if I were gonna suggest something, I would say the API integration inbound that would allow us to try creating and deactivating users would be a better functionality than software catalog just cause you now if you have to go in and you have to manually add users and then assign templates.
+
+Pranavi
+
+Scott Heffner
+I I kind of have a better system in place now than that. This is more visibility, it's better for cost control, it's just the automation on the user side is is what I have now is better even though it's harder to see into.
+And that that would change I think with the API, I I I'm not we could do that anyway. So I don't want to get you kind of spun up on it because we still have on-prem Active Directory. So unless you can integrate with an on-prem Active Directory, which is hard to imagine until we get off of that, which we're trying to do.
+
+Pranavi
+Alex
+
+Lawrence Lewis
+Got it.
+
+--- Transcript Chunk 25 ---
+Lawrence Lewis
+I see.
+Got to know.
+This is a good feedback So Pranavi, maybe we can, you know, do something around it, a catalog with a list of apps.
+
+Scott Heffner
+I mean honestly, if I were gonna suggest something, I would say the API integration inbound that would allow us to try creating and deactivating users would be a better functionality than software catalog just cause you now if you have to go in and you have to manually add users and then assign templates.
+
+Pranavi
+
+Scott Heffner
+I I kind of have a better system in place now than that. This is more visibility, it's better for cost control, it's just the automation on the user side is is what I have now is better even though it's harder to see into.
+And that that would change I think with the API, I I I'm not we could do that anyway. So I don't want to get you kind of spun up on it because we still have on-prem Active Directory. So unless you can integrate with an on-prem Active Directory, which is hard to imagine until we get off of that, which we're trying to do.
+
+Pranavi
+Alex
+
+Lawrence Lewis
+Got it.
+
+Scott Heffner
+We we probably couldn't use this to manage that anyway. We'd still have to keep our existing automation for a little while.
+
+Pranavi
+I understand. So we are already working on that Scott triggering of triggering to the workflows. I've mentioned before, we're doing it for HR tools first, so once we have that then it will automatically trigger any options.
+
+Scott Heffner
+good.
+
+That makes sense.
+
+Pranavi
+Boarding and onboarding based on if they've added it to the tool. so it will automatically trigger a workflow and assign based on the rule that they've added it to.
+Yes.
+
+Scott Heffner
+I mean and and then from my perspective trying to get it off of our on-prem Active Directory, I mean the earliest we could do this is next year because we still have a bunch of stuff on premise that relies on it, so.
+
+Pranavi
+
+it's a major task,
+
+Scott Heffner
+It is. We're trying to retire all legacy systems. It just takes a long time.
+
+Pranavi
+
+Scott Heffner
+I I'm really interested in the shadow IT as the primary interest for me probably.
+
+Pranavi
+I.
+
+so with the shadow ID Larry mentioned, if someone's using an third party application that's not already on your approved ID list, So what we do is we majorly track them.
+Based on their logins, if they're logged in with Google or they're logged in with Microsoft, we track all the third party systems that third party applications that are being used. You can just filter out if you have, you said, you have both Microsoft and Google, You can just add both the accounts and just filter out which one you want to see.
+
+Scott Heffner
+
+Pranavi
+This is a third party application again and you'll know who are the users using the application, So it's similar. You could see that this is a third party application again and you'll know if.
+They're using any AI tools too, a ChatGPT or things that. So someone says use Miro, so you know who's using Miro in the platform, Similarly, you'll all sorry.
+
+Scott Heffner
+This is.
+Does this assume that they're clicking the login with Microsoft or login with Google button as opposed to creating? that makes sense. I was wondering how you collect it, you know?
+
+Pranavi
+
+So we track from, the logs,
+So even in the user management section, so Microsoft has a user management section, So if you click on the user, you'll also know all the third party applications that he or she is using, Apart from the applications that are.
+
+Scott Heffner
+Interesting.
+
+Pranavi
+That that are already approved by approved by your IT, So these are all the third party applications. You know you'll you'll see it from the user from the user as well and you can also see from the application who are the users using that particular application.
+See you can see that someone's has been someone has been using open AI and then you see that these are the users using that application.
+
+Scott Heffner
+That would be interesting. they do have continue with Microsoft or Google. Interesting. I did not realize that.
+
+Pranavi
+
+a lot of applications do provide that option and usually that's a preferred way. Since it's easier, since they're already logged into the system, we users tend to go ahead with that option mode and if they if they're using their business ID, we'd we'd be able to track that.
+
+--- Transcript Chunk 26 ---
+Lawrence Lewis
+But apart from the browser ID.
+Sorry, we're apart from the browser extension, but this one that you're seeing now on the screen, the guys who are using it through the the business, the user ID, do you think this?
+
+Scott Heffner
+
+Lawrence Lewis
+Is something would be interesting or you have something in place already for this?
+
+Scott Heffner
+So I.
+I don't have a good answer for that. I hadn't considered that this is how it's done through Microsoft. I suspect that's not a huge percentage of our users that are using their Academy accounts to log into a systems they're not allowed to access. Do you know what I mean? they're probably creating local logins.
+
+Lawrence Lewis
+
+Scott Heffner
+Because because they know, Every time they go to buy a a thing, I my my feedback loop from finance is spectacular. So it's hey, this just showed up on an expense report. Is it approved? No. I'm going to reject it and I'm going to lecture the user. So I I suspect they're working around just by creating their own accounts. I I'm we find some.
+
+Lawrence Lewis
+Mm.
+
+Scott Heffner
+This way I just, I couldn't sell it as a solution for shadow IT. It's sort of a window into it with I would guess being on the high end, maybe 25% of the shadow IT. It's still better than nothing. I just, I don't. I have to think about how to sell it.
+
+Lawrence Lewis
+
+Scott Heffner
+I don't. I don't have a better solution for shadow IT. I mean, as I said that I'm fascinated by the idea of trying to catch it. This is this makes sense. I don't. I don't know what else you would do. We can't even monitor our network edge because people work from home. So the browser extension would be.
+
+Lawrence Lewis
+Mm.
+Correct.
+
+Scott Heffner
+Potentially the other answer and it have to be married to zero trust, which we're not, we're not there yet, but at that point it could really be a solution.
+
+Lawrence Lewis
+With, I mean we we are working on it. So this feedback was given to us by a lot of them. So it's already in action. So I think once we have the approvals, you know, that should be out soon.
+
+Scott Heffner
+
+And I do, I do foresee us going with CrowdStrike for identity protection, which would then allow us to restrict employee logins to devices that we manage that have CrowdStrike installed. So that, you know, we could reduce our risk there and we'd still have students, but I mean, you know, whatever.
+
+Lawrence Lewis
+Mm.
+Mm.
+
+Scott Heffner
+They don't pose the same risk.
+
+Lawrence Lewis
+Eric.
+
+Scott Heffner
+So you know, I I think that could be really interesting. And then the shadow IT layering on top of that could be compelling at that point, because then we'd know we'd have that browser extension to say, here's all the stuff you're not supposed to go to that you're doing, and it would follow them off campus, which would be useful.
+
+Lawrence Lewis
+Makes sense.
+so I wanna be back to you.
+
+Scott Heffner
+
+Pranavi
+I think I've covered all the features. Scott, if you have any other questions, I'll be happy to answer them.
+
+Scott Heffner
+I guess my other question would just be, do you have a a list of integrations that are supported? I think some of our apps are going to be unique to schools and may not be in your list Blackbaud. We have a lot of Blackbaud applications, Education Management, Razor's Edge, Reher.
+That are core to our business, along with, stuff that.
+
+Lawrence Lewis
+
+now we've got close to about 60 ish available by the month end would be getting another 40, so 100 would be available. So now if you want to see on this demo environment, Pranavi, if you could, if you could just go to the integration section.
+
+Scott Heffner
+
+Yes.
+
+Pranavi
+Yes.
+
+Lawrence Lewis
+So I think on this demo environment, this is what we have already, Scott, but on the actual production we've got about 60 ish and the 40 would be, you know, coming in by the 31st.
+
+Scott Heffner
+
+So I mean Google, Microsoft, Tableau, GitHub, I mean all that stuff we have. So that's that's something we I to do the one log in Bitbucket tells me and I suspect that all the infrastructure type stuff would be covered and then at teams.
+
+Lawrence Lewis
+
+Scott Heffner
+
+But the the SAS apps Oracle Fusion Financials or UKG for HR, I don't know if those are in your list yet, but those would be ones that we would want probably. I mean UKG would be a source maybe,
+
+--- Transcript Chunk 27 ---
+Lawrence Lewis
+
+now we've got close to about 60 ish available by the month end would be getting another 40, so 100 would be available. So now if you want to see on this demo environment, Pranavi, if you could, if you could just go to the integration section.
+
+Scott Heffner
+
+Yes.
+
+Pranavi
+Yes.
+
+Lawrence Lewis
+So I think on this demo environment, this is what we have already, Scott, but on the actual production we've got about 60 ish and the 40 would be, you know, coming in by the 31st.
+
+Scott Heffner
+
+So I mean Google, Microsoft, Tableau, GitHub, I mean all that stuff we have. So that's that's something we I to do the one log in Bitbucket tells me and I suspect that all the infrastructure type stuff would be covered and then at teams.
+
+Lawrence Lewis
+
+Scott Heffner
+
+But the the SAS apps Oracle Fusion Financials or UKG for HR, I don't know if those are in your list yet, but those would be ones that we would want probably. I mean UKG would be a source maybe,
+
+Lawrence Lewis
+Mm.
+HR we've got bamboo available already so for the other see what how we work with the other customers is.
+Whatever we have now, yes, they are the most priority now. you said, you have the top priority of 15, If you can share the list of those 15 top priority apps,
+We can tell you how many is already available and how many because we have you know the list of to do things or you know the roadmap for 2026 already. So if that is already in the list, I can give you a timeline saying that all Scott, this is gonna be out.
+
+Scott Heffner
+
+Lawrence Lewis
+By Feb or March or April, whichever according to the road map that we have and if it's not in that list, we can take it as a priority and bring it up in in Q1.
+We could do that. That shouldn't be a problem.
+
+Scott Heffner
+I can come up with a pretty good list out of the gate.
+
+Lawrence Lewis
+
+Scott Heffner
+Might be shorter than I thought, but
+
+Lawrence Lewis
+So
+
+Scott Heffner
+What?
+
+Lawrence Lewis
+1520 which you know, whichever is is a top priority.
+
+Scott Heffner
+
+And some of these you've already got for 24 What am I missing? We've got Slate, I've got Razor's Edge, Reher, UKG, Oracle. I mean, that's probably our main list.
+It's it's not nearly as high as I said.
+I'm missing anything.
+I mean, I could go department by department and I'm I've come up with stuff that is mildly important, but those are the ones that are primarily important to us 246810. You've already got Microsoft and Google, so really there's eight there.
+
+Lawrence Lewis
+ten of them, so
+
+Scott Heffner
+And I said, we have automation in place today. So you know we're we're doing on this. I'm not, I'm not stressed about where we're at, but you know if the if the shadow IT stuff were compelling enough, we would.
+And we would would be likely to use this along with it.
+
+Lawrence Lewis
+so be and Pranavi will go back and do a quick check on these on the app availability and all those things. So once we have that, we can just send you a confirmation.
+
+Scott Heffner
+
+I can tell you the Blackbud stuff's a mess because their APIs are kind of a mess. So and we've been working with them. They've been improving it. They've got a great team now, but it's, you know, we started off with three file uploads and 24 API calls and now we're down to, I want to say one file upload in 5, so.
+
+Lawrence Lewis
+Oh, is it
+
+Oh.
+In that case, with Blackbaud, what we could do is we can just help you with the license management,
+
+Scott Heffner
+It's it's still messy.
+I mean we're and I said, we're in a pretty good place cause most of these are automated, but the exception, some of them don't have user account creation, some of them we have to manage manage manually, but that's because that capability doesn't exist, not because we haven't done it.
+
+Lawrence Lewis
+Well.
+
+Scott Heffner
+
+Lawrence Lewis
+So we'll do some background check. We'll get you posted. Now an important thing. See, this is the next thing that I'm about to tell you. No pressure, nothing as such, but it is my duty to go ahead and inform you that something this is available.
+
+Scott Heffner
+
+Hey.
+
+Lawrence Lewis
+It's up to you to go ahead and, you know, take advantage, just that we don't want you to miss out because a lot of customers, they've come back to me, you know, pointing fingers and saying that why didn't you let me know? So that's the reason I make it a point to.
+
+--- Transcript Chunk 28 ---
+Lawrence Lewis
+Oh, is it
+
+Oh.
+In that case, with Blackbaud, what we could do is we can just help you with the license management,
+
+Scott Heffner
+It's it's still messy.
+I mean we're and I said, we're in a pretty good place cause most of these are automated, but the exception, some of them don't have user account creation, some of them we have to manage manage manually, but that's because that capability doesn't exist, not because we haven't done it.
+
+Lawrence Lewis
+Well.
+
+Scott Heffner
+
+Lawrence Lewis
+So we'll do some background check. We'll get you posted. Now an important thing. See, this is the next thing that I'm about to tell you. No pressure, nothing as such, but it is my duty to go ahead and inform you that something this is available.
+
+Scott Heffner
+
+Hey.
+
+Lawrence Lewis
+It's up to you to go ahead and, you know, take advantage, just that we don't want you to miss out because a lot of customers, they've come back to me, you know, pointing fingers and saying that why didn't you let me know? So that's the reason I make it a point to.
+
+Scott Heffner
+No, that's I mean, we're our fiscal year won't be until July. So we've got a little bit of time and I mean we're not, I'm not going to get anything out of budget between now and then because I've got to give my budget money to better identity protection. We're just seeing too many phishing attacks.
+
+Lawrence Lewis
+
+I see. absolutely. I completely understand. This is just from, you know, from my own satisfaction, Scott, So just because of the holiday season, there is a 20% discounts that is available, if you want to take advantage.
+
+Scott Heffner
+
+But I there's I I mean, I don't know what the price is, but I'm I'm hard pressed too. I I probably wouldn't have any money available anyway. So I I don't know. Do you have a rough estimate?
+
+Lawrence Lewis
+
+Absolutely. It's the pricing is simple. It's based on per user, Per user per month, and it's $0.50 per user per month.
+
+Scott Heffner
+
+That's a reasonable price, So that would be $0.50 per user per month, 2100 users, 1000 bucks. So that's that's pretty reasonable.
+
+Lawrence Lewis
+The.
+
+Scott Heffner
+I don't have the money for it now, but that isn't that.
+
+Lawrence Lewis
+Now the other thing is I'm not gonna charge you for the students. I'm gonna be charging only for the staff. So students I don't wanna use. we we don't because on the Google side also it is not charged, So.
+
+Scott Heffner
+
+Well, that's true. I mean on the Microsoft side, it kind of is depending on the license. I get where you're going. certainly I can't commit to anything now. I said, I don't have budget for it and then but but it's interesting and I I think it gets more interesting with that browser plug in because for me the big.
+
+Lawrence Lewis
+
+No problem.
+
+Scott Heffner
+Selling point would be shadow IT detection and while you'll see some shadow IT, I think I could see that in Crowdstrike now if I put together the report. What I'd love to see is the browser stuff. If you if you're able to do that, it would be very interesting and I would not expect that to be $0.50 per user. I think you'd have to raise that.
+
+Lawrence Lewis
+
+No, the pricing wouldn't change. That's the pricing. That's the pricing across. See, I'll be honest, less than 200 users. It is a dollar, And between to 7:50.
+
+Scott Heffner
+The.
+The value is there.
+
+Lawrence Lewis
+It's about 75 and then more than 750 users. It's at $0.50.
+
+Scott Heffner
+
+I mean, it's compelling. I mean, it's pretty compelling. I think once we get our identity protection in place, we had someone log in from Lagos, Nigeria a week ago. That was not legitimate. So our identity protection is letting us down. It's Microsoft, but it's letting us down. So that's my focus now.
+
+Lawrence Lewis
+
+Scott Heffner
+But I think once we tee into Crowdstrike's identity protection, a tool the browser-based theme where we can say you're on our device, which means you're in our browser, which means we can force the plug-in, would be compelling, at least for employees. And then for students, I probably couldn't deploy. I mean, we don't manage student devices, so I couldn't even deploy.
+
+Lawrence Lewis
+
+Mm.
+Got it.
+
+Scott Heffner
+To students anyway. So I mean in that sense, not charging for students would be helpful.
+it doesn't care 'cause I think those devices today.
+
+--- Transcript Chunk 29 ---
+Scott Heffner
+The.
+The value is there.
+
+Lawrence Lewis
+It's about 75 and then more than 750 users. It's at $0.50.
+
+Scott Heffner
+
+I mean, it's compelling. I mean, it's pretty compelling. I think once we get our identity protection in place, we had someone log in from Lagos, Nigeria a week ago. That was not legitimate. So our identity protection is letting us down. It's Microsoft, but it's letting us down. So that's my focus now.
+
+Lawrence Lewis
+
+Scott Heffner
+But I think once we tee into Crowdstrike's identity protection, a tool the browser-based theme where we can say you're on our device, which means you're in our browser, which means we can force the plug-in, would be compelling, at least for employees. And then for students, I probably couldn't deploy. I mean, we don't manage student devices, so I couldn't even deploy.
+
+Lawrence Lewis
+
+Mm.
+Got it.
+
+Scott Heffner
+To students anyway. So I mean in that sense, not charging for students would be helpful.
+it doesn't care 'cause I think those devices today.
+
+Lawrence Lewis
+Got it. So let me do this.
+Correct. So once you implement the identity one from CrowdStrike or you know if sooner if we have the browser based plugin already available, I'll immediately let you know and we can take things forward from there,
+
+Scott Heffner
+
+that would be interesting.
+I I think that is my it's not my number one problem. It's probably 3 or 4 behind phishing and identity protection and maybe but shadow IT is is top three for
+
+Lawrence Lewis
+
+I see. so for phishing and thing, have you tried or have you known this? I've come across this one tool called Graphis. Have you tried that?
+
+Scott Heffner
+So we're putting out for an RFP now. I have not. We're looking at abnormal slash next proof point and I want to say checkpoint as a new system as well. So we're looking for something in the base that provides user feedback that reports the phishing to the source
+
+Lawrence Lewis
+
+Mm.
+Proof point is good.
+
+Scott Heffner
+I kind of have some pretty strong requirements, so something we don't need to manage really. It's just clicking in the background.
+
+Lawrence Lewis
+I see.
+Correct. it should run automatically in the background. Mimecraft also does that,
+
+Scott Heffner
+we're we're disappointed with Microsoft. What's that?
+
+Lawrence Lewis
+Minecraft also does that.
+
+Scott Heffner
+Minecraft.
+
+Lawrence Lewis
+Mime. There's a tool called.
+
+Scott Heffner
+Mine. Oh, oh, oh. I think. I think so. So we haven't. We haven't got done our vendor.
+
+Lawrence Lewis
+Damn.
+
+Scott Heffner
+candidates yet for the new selection. so we
+
+Lawrence Lewis
+Finalization approval. Oh, you said you're putting on an RFP. got it.
+
+Scott Heffner
+we're going to put out an RSP. So we we expect it to cost around $50,000 a year, which is just brutal because it wasn't in the budget, but we've just got to do it. So I, you know, once I have a final candidate, then I've got to go to finance and try to get money, but you can see why I don't have any other money to.
+
+Lawrence Lewis
+
+Scott Heffner
+This then it's 'cause they're gonna ask me what do you have left? And I'm gonna say.
+
+Lawrence Lewis
+Nothing.
+
+Scott Heffner
+nothing. so but but no, this is interesting. I I mean I think the data loss prevention capabilities, the the shadow IT capabilities are are very important to me. It's technically not data loss prevention, but.
+
+Lawrence Lewis
+
+Nice.
+
+Scott Heffner
+You know, preventing people from using unauthorized systems helps me prevent data loss, so.
+Did I lose you? Looks I might have lost you.
+I still, I see you, Josh. I think we lost Lawrence.
+
+Jalsha Chakma
+Yes, I I can hear you, Scott. I think Larry is having some Internet issues.
+
+Scott Heffner
+That's fine.
+
+Lawrence Lewis
+I'm back.
+
+Jalsha Chakma
+he had John again.
+
+Lawrence Lewis
+Alrighty, can you guys hear me?
+
+Scott Heffner
+he was. we can hear you.
+
+Lawrence Lewis
+All righty. So great, Scott. So once we have more information, I'll let you know. But otherwise, if you have any questions, comments, thoughts, you know, feel free to let us know. We'll be more than happy to help that. All righty.
+
+Scott Heffner
+
+Will do. Have a great day. Thanks guys.
+
+Lawrence Lewis
+Have a great one. Great connecting with you again, Scott. You have a good one. Take care.
+
+Pranavi
+Good day, Scott. Bye, everyone. Thank you.
+
+Scott Heffner
+You too. Take care.
+
+Lawrence Lewis
+Take care. Bye.
+
+Jalsha Chakma
+Bye.
+
