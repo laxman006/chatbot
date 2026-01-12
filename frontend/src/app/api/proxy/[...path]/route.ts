@@ -173,6 +173,7 @@ async function proxyRequest(
         },
         data: body,
         maxRedirects: 5,
+        timeout: 35000, // 35 seconds (slightly longer than backend's 30s timeout)
         validateStatus: () => true, // Don't throw on any status code
         // ⚠️ CRITICAL: Don't use arraybuffer - use default to let axios parse headers correctly
         // Axios automatically exposes Set-Cookie in response.headers['set-cookie']
@@ -180,15 +181,27 @@ async function proxyRequest(
     } catch (fetchError) {
       console.error('[PROXY] ❌ Axios error:', fetchError);
       const errorMessage = fetchError instanceof Error ? fetchError.message : 'Unknown error';
-      const isConnectionRefused = errorMessage.includes('ECONNREFUSED') || errorMessage.includes('connect') || 
-                                  errorMessage.includes('ECONNREFUSED');
+      const errorCode = (fetchError as any)?.code || '';
+      const isConnectionRefused = errorMessage.includes('ECONNREFUSED') || 
+                                  errorMessage.includes('connect') || 
+                                  errorCode === 'ECONNREFUSED';
+      const isConnectionReset = errorCode === 'ECONNRESET' || 
+                                errorMessage.includes('ECONNRESET');
+      const isTimeout = errorCode === 'ECONNABORTED' || 
+                       errorMessage.includes('timeout') ||
+                       errorMessage.includes('ETIMEDOUT');
       
       return NextResponse.json(
         { 
           error: 'Backend connection failed', 
           message: errorMessage,
+          code: errorCode,
           hint: isConnectionRefused 
-            ? 'Backend server is not running. Please start it with: python server.py' 
+            ? 'Backend server is not running. Please start it with: python server.py'
+            : isConnectionReset
+            ? 'Backend server closed the connection. It may be overloaded, crashed, or taking too long to respond.'
+            : isTimeout
+            ? 'Request timed out. The backend server may be slow or unresponsive.'
             : undefined
         },
         { status: 502 }

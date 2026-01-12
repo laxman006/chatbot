@@ -71,3 +71,11 @@ node_modules
 out/
 *.tsbuildinfo
 next-env.d.ts
+# Transcripts data (large files)
+transcripts/
+*.vtt
+*.srt
+*.transcript.json
+
+
+
