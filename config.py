@@ -393,8 +393,11 @@ RERANKER_WEIGHT = float(os.getenv("RERANKER_WEIGHT", "0.8"))  # Weight for cross
 
 # Score-based relevance filtering (prevent low-quality responses when all scores are poor)
 # After cross-encoder normalization, scores are in 0-1 range, so thresholds should be positive
-MIN_SCORE_THRESHOLD = float(os.getenv("MIN_SCORE_THRESHOLD", "0.3"))  # Minimum reranker score to accept documents (0-1 range)
-SCORE_MARGIN_THRESHOLD = float(os.getenv("SCORE_MARGIN_THRESHOLD", "0.3"))  # Minimum gap between max and avg score
+# STEP 4: Lowered from 0.3 to 0.15 for better recall (enterprise KBs have overlapping questions)
+MIN_SCORE_THRESHOLD = float(os.getenv("MIN_SCORE_THRESHOLD", "0.15"))  # Minimum reranker score to accept documents (0-1 range)
+# STEP 1: Margin threshold replaced with percentile-based confidence model (see retrieval_confidence function)
+# SCORE_MARGIN_THRESHOLD is deprecated - kept for backward compatibility but not used
+SCORE_MARGIN_THRESHOLD = float(os.getenv("SCORE_MARGIN_THRESHOLD", "0.0"))  # DEPRECATED: Replaced with confidence model
 
 # ============================================================================
 # TRANSCRIPT PROCESSING CONFIGURATION (Secondary KB)

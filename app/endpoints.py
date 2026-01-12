@@ -863,6 +863,103 @@ def is_conversational_query(question: str) -> bool:
     
     return False
 
+def extract_migration_direction(text: str) -> dict:
+    """
+    Extract migration direction from text (query or document).
+    Returns: {"source_platform": str or None, "target_platform": str or None, "direction_detected": bool}
+    """
+    if not text:
+        return {"source_platform": None, "target_platform": None, "direction_detected": False}
+    
+    text_lower = text.lower()
+    
+    # Platform name mappings (normalize variations)
+    platform_patterns = {
+        "google_workspace": [
+            r"google\s+workspace", r"g\s+suite", r"gmail", r"google\s+drive",
+            r"google\s+shared\s+drive", r"gsuite"
+        ],
+        "microsoft_365": [
+            r"microsoft\s+365", r"office\s+365", r"m365", r"o365",
+            r"outlook", r"onedrive", r"sharepoint\s+online", r"microsoft\s+teams"
+        ],
+        "slack": [r"slack"],
+        "teams": [r"microsoft\s+teams", r"teams"],
+        "dropbox": [r"dropbox"],
+        "box": [r"box"],
+    }
+    
+    # Compile patterns
+    platform_regex = {}
+    for platform, patterns in platform_patterns.items():
+        platform_regex[platform] = re.compile("|".join(patterns), re.IGNORECASE)
+    
+    # Find all platforms mentioned
+    mentioned_platforms = []
+    for platform, pattern in platform_regex.items():
+        if pattern.search(text_lower):
+            mentioned_platforms.append(platform)
+    
+    # Try to extract direction using common patterns
+    direction_patterns = [
+        # "from X to Y"
+        (r"from\s+([^,\s]+(?:\s+[^,\s]+)*?)\s+to\s+([^,\s]+(?:\s+[^,\s]+)*?)", True),
+        # "X to Y migration"
+        (r"([^,\s]+(?:\s+[^,\s]+)*?)\s+to\s+([^,\s]+(?:\s+[^,\s]+)*?)\s+migration", True),
+        # "migrate X to Y"
+        (r"migrat(?:e|ing|ion)\s+([^,\s]+(?:\s+[^,\s]+)*?)\s+to\s+([^,\s]+(?:\s+[^,\s]+)*?)", True),
+        # "transfer X to Y"
+        (r"transfer(?:ring)?\s+([^,\s]+(?:\s+[^,\s]+)*?)\s+to\s+([^,\s]+(?:\s+[^,\s]+)*?)", True),
+        # "move X to Y"
+        (r"mov(?:e|ing)\s+([^,\s]+(?:\s+[^,\s]+)*?)\s+to\s+([^,\s]+(?:\s+[^,\s]+)*?)", True),
+        # "X → Y" or "X -> Y" or "X - Y"
+        (r"([^,\s]+(?:\s+[^,\s]+)*?)\s*(?:→|->|-)\s*([^,\s]+(?:\s+[^,\s]+)*?)", True),
+    ]
+    
+    source_platform = None
+    target_platform = None
+    direction_detected = False
+    
+    for pattern, is_directional in direction_patterns:
+        match = re.search(pattern, text_lower)
+        if match:
+            source_text = match.group(1).strip()
+            target_text = match.group(2).strip()
+            
+            # Map text to normalized platform names
+            source_normalized = None
+            target_normalized = None
+            
+            for platform, pattern_regex in platform_regex.items():
+                if pattern_regex.search(source_text):
+                    source_normalized = platform
+                if pattern_regex.search(target_text):
+                    target_normalized = platform
+            
+            if source_normalized and target_normalized:
+                source_platform = source_normalized
+                target_platform = target_normalized
+                direction_detected = True
+                break
+    
+    # If no explicit direction found but platforms mentioned, try to infer from context
+    if not direction_detected and len(mentioned_platforms) >= 2:
+        # Look for migration keywords that might indicate direction
+        # This is less reliable but better than nothing
+        migration_keywords = ["migrate", "transfer", "move", "from", "to"]
+        if any(kw in text_lower for kw in migration_keywords):
+            # Use first two platforms as source -> target (heuristic)
+            source_platform = mentioned_platforms[0]
+            target_platform = mentioned_platforms[1]
+            direction_detected = False  # Mark as inferred, not explicit
+    
+    return {
+        "source_platform": source_platform,
+        "target_platform": target_platform,
+        "direction_detected": direction_detected,
+        "mentioned_platforms": mentioned_platforms
+    }
+
 def analyze_retrieved_documents(docs_with_scores):
     """Analyze retrieved documents and extract metadata."""
     if not docs_with_scores:
@@ -1112,13 +1209,34 @@ def perplexity_style_retrieve(
             print(f"[WARN] Query expansion failed: {e}")
 
     # ---- 1. Dense retrieval (embeddings) ----
+    # RISK 1 FIX: Track expansion impact for monitoring
+    expansion_doc_tracking = {}
+    original_query_docs = set()
+    
     dense_candidates = []
-    for q in queries:
+    for i, q in enumerate(queries):
         try:
             # similarity_search_with_score returns (doc, distance) with lower=better
             results = vectorstore.similarity_search_with_score(q, k=k_dense)
+            query_docs = set()
             for doc, dist in results:
                 dense_candidates.append((doc, float(dist)))
+                # Track which query found this doc
+                doc_key = (doc.page_content[:120], doc.metadata.get("source_type", ""), doc.metadata.get("page_url", ""))
+                query_docs.add(doc_key)
+            
+            # Track expansion impact
+            if i == 0:
+                original_query_docs = query_docs
+                expansion_doc_tracking['original'] = len(query_docs)
+            else:
+                # Count docs unique to this expansion
+                expansion_unique = query_docs - original_query_docs
+                expansion_doc_tracking[f'expansion_{i}'] = {
+                    'total': len(query_docs),
+                    'unique': len(expansion_unique),
+                    'overlap': len(query_docs & original_query_docs)
+                }
         except Exception as e:
             print(f"[WARN] Dense retrieval failed for query '{q}': {e}")
 
@@ -1129,6 +1247,14 @@ def perplexity_style_retrieve(
         if key not in dense_map or dist < dense_map[key][1]:
             dense_map[key] = (doc, dist)
     dense_list = list(dense_map.values())
+    
+    # Log expansion impact if expansions were used
+    if use_expansion and len(queries) > 1:
+        total_from_expansions = sum(v.get('unique', 0) if isinstance(v, dict) else 0 for v in expansion_doc_tracking.values())
+        expansion_ratio = total_from_expansions / len(dense_list) if dense_list else 0
+        print(f"[EXPANSION IMPACT] Original: {expansion_doc_tracking.get('original', 0)} docs, Expansions added: {total_from_expansions} unique docs ({expansion_ratio*100:.1f}%)")
+        if expansion_ratio > 0.6:
+            print(f"[WARN] Expansions dominating ({expansion_ratio*100:.1f}%) - consider reducing n=3 to n=2")
 
     if dense_list:
         dists = [d for _, d in dense_list]
@@ -1156,13 +1282,30 @@ def perplexity_style_retrieve(
                 bm25_map[key] = (doc, score)
         bm25_list = list(bm25_map.values())
 
+        # CRITICAL FIX: Normalize BM25 scores BEFORE fusion
+        # BM25 scores are unbounded and corpus-dependent, must be normalized to 0-1 range
+        # to be comparable with dense scores (which are already in 0-1 range)
         if bm25_list:
-            s = [s for _, s in bm25_list]
-            s_min, s_max = min(s), max(s)
+            raw_scores = [s for _, s in bm25_list]
+            s_min, s_max = min(raw_scores), max(raw_scores)
+            
+            # Normalize all BM25 scores to 0-1 range using min-max normalization
+            if s_max == s_min:
+                # All scores are identical, set all to 1.0
+                bm25_list = [(doc, 1.0) for doc, _ in bm25_list]
+            else:
+                # Normalize: (score - min) / (max - min)
+                bm25_list = [(doc, (score - s_min) / (s_max - s_min)) for doc, score in bm25_list]
+            
+            # Store normalization parameters for potential future use (though scores are already normalized)
+            _bm25_s_min, _bm25_s_max = s_min, s_max
+            
+            # Normalization function for any additional scores (shouldn't be needed, but kept for safety)
             def norm_bm25(score):
-                if s_max == s_min:
+                # Scores should already be normalized, but handle edge cases
+                if _bm25_s_max == _bm25_s_min:
                     return 1.0
-                return (score - s_min) / (s_max - s_min)
+                return (score - _bm25_s_min) / (_bm25_s_max - _bm25_s_min)
         else:
             norm_bm25 = lambda _: 0.0
     else:
@@ -1170,6 +1313,8 @@ def perplexity_style_retrieve(
         norm_bm25 = lambda _: 0.0
 
     # ---- 3. Merge dense + BM25 ----
+    # Note: BM25 scores in bm25_list are already normalized to 0-1 range
+    # Dense scores will be normalized during fusion (they're distances, need conversion)
     combined = {}
     for doc, dist in dense_list:
         key = (doc.page_content[:120], doc.metadata.get("source_type", ""), doc.metadata.get("page_url", ""))
@@ -1177,6 +1322,7 @@ def perplexity_style_retrieve(
         combined[key]["dense"].append(dist)
 
     for doc, score in bm25_list:
+        # score is already normalized (0-1 range) from step 2
         key = (doc.page_content[:120], doc.metadata.get("source_type", ""), doc.metadata.get("page_url", ""))
         combined.setdefault(key, {"doc": doc, "dense": [], "bm25": []})
         combined[key]["bm25"].append(score)
@@ -1193,7 +1339,9 @@ def perplexity_style_retrieve(
         else:
             dense_sim = 0.0
         if info["bm25"]:
-            bm25_sim = max(norm_bm25(s) for s in info["bm25"])
+            # BM25 scores are already normalized to 0-1 range before fusion
+            # Use max to get the best normalized score for this document
+            bm25_sim = max(info["bm25"])
         else:
             bm25_sim = 0.0
 
@@ -1244,7 +1392,9 @@ def perplexity_style_retrieve(
         elif priority == "medium":
             base_score += 0.02
 
-        candidates.append((doc, base_score))
+        # STEP 2 & 3: Store dense and BM25 scores separately for proper fusion in reranker
+        # Format: (doc, base_score, dense_sim, bm25_sim)
+        candidates.append((doc, base_score, dense_sim, bm25_sim))
 
     # Sort by base score descending
     candidates.sort(key=lambda x: x[1], reverse=True)
@@ -1254,7 +1404,9 @@ def perplexity_style_retrieve(
     primary_candidates = []
     secondary_candidates = []
     
-    for doc, score in candidates:
+    for item in candidates:
+        # Unpack: (doc, base_score, dense_sim, bm25_sim)
+        doc, score = item[0], item[1]
         meta = doc.metadata or {}
         kb_tier = meta.get("kb_tier", "").lower()
         
@@ -1273,15 +1425,16 @@ def perplexity_style_retrieve(
     # Secondary KB: Lower threshold (conversational content scores lower but still valuable)
     SECONDARY_SCORE_THRESHOLD = 0.15
     
-    filtered_primary = [(d, s) for d, s in primary_candidates if s >= PRIMARY_SCORE_THRESHOLD]
-    filtered_secondary = [(d, s) for d, s in secondary_candidates if s >= SECONDARY_SCORE_THRESHOLD]
+    # Preserve full candidate info (doc, base_score, dense_sim, bm25_sim) through filtering
+    filtered_primary = [item for item in primary_candidates if item[1] >= PRIMARY_SCORE_THRESHOLD]
+    filtered_secondary = [item for item in secondary_candidates if item[1] >= SECONDARY_SCORE_THRESHOLD]
     
     print(f"[HYBRID RETRIEVAL] Primary: {len(primary_candidates)} candidates → {len(filtered_primary)} after filtering (threshold: {PRIMARY_SCORE_THRESHOLD})")
     print(f"[HYBRID RETRIEVAL] Secondary: {len(secondary_candidates)} candidates → {len(filtered_secondary)} after filtering (threshold: {SECONDARY_SCORE_THRESHOLD})")
     
     # Step 3: Calculate Primary KB Confidence for Adaptive Quota
     if filtered_primary:
-        primary_scores = [score for _, score in filtered_primary]
+        primary_scores = [item[1] for item in filtered_primary]  # item[1] is base_score
         max_primary_score = max(primary_scores)
         avg_primary_score = sum(primary_scores) / len(primary_scores)
         primary_confidence = (max_primary_score + avg_primary_score) / 2  # Combined confidence metric
@@ -1321,10 +1474,10 @@ def perplexity_style_retrieve(
     
     # Prioritize artifacts in secondary KB (Q&A, objections, features, decision drivers)
     artifact_types = ["q&a", "objection", "feature", "decision driver"]
-    artifact_candidates = [(d, s) for d, s in filtered_secondary 
-                          if d.metadata.get("artifact_type", "").lower() in artifact_types]
-    raw_candidates = [(d, s) for d, s in filtered_secondary 
-                     if d.metadata.get("artifact_type", "").lower() not in artifact_types]
+    artifact_candidates = [item for item in filtered_secondary 
+                          if item[0].metadata.get("artifact_type", "").lower() in artifact_types]
+    raw_candidates = [item for item in filtered_secondary 
+                     if item[0].metadata.get("artifact_type", "").lower() not in artifact_types]
     
     # Add secondary KB documents (artifacts first, then raw transcripts)
     remaining_quota = secondary_quota
@@ -1342,6 +1495,7 @@ def perplexity_style_retrieve(
     print(f"[HYBRID RETRIEVAL] Final assembly: {len(final_candidates)} docs (ratio: {primary_quota}:{secondary_quota}, reason: {ratio_reason}, primary confidence: {primary_confidence:.3f})")
     
     # ---- 5. Cross-encoder reranking ----
+    # STEP 2 & 3: final_candidates already contains full info (doc, base_score, dense_sim, bm25_sim)
     final_candidates = final_candidates[: max(k_final * 3, k_final)]  # pre-filter
     reranked = cross_reranker.rerank(query, final_candidates, top_k=k_final)
 
@@ -1860,6 +2014,7 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
             # Initialize diversity_metrics early to avoid UnboundLocalError
             diversity_metrics = {}
             doc_results = []
+            retrieval_time_ms = 0  # Initialize to avoid UnboundLocalError if exception occurs
             
             try:
                 # Send status: Query expansion
@@ -1872,6 +2027,9 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
                 await asyncio.sleep(0.05)
                 
                 # ====== PERPLEXITY-STYLE RAG (OPTION E) ======
+                # Initialize expansion tracking (for diagnostic logging)
+                expansion_doc_tracking = {}
+                
                 # Retrieve docs with dense + BM25 + reranker
                 doc_results = perplexity_style_retrieve(
                     query=enhanced_query,
@@ -2008,6 +2166,9 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
                     fallback_strategy = "no_retrieval"
                 if 'expanded_query' not in locals():
                     expanded_query = enhanced_query
+                # BUG FIX: Ensure retrieval_time_ms is set even on error
+                if 'retrieval_time_ms' not in locals() or retrieval_time_ms == 0:
+                    retrieval_time_ms = int((time.time() - retrieval_start_time) * 1000)
             
             # Filter out documents with None page_content
             final_docs = [doc for doc in final_docs if doc.page_content is not None and doc.page_content.strip()]
@@ -2042,6 +2203,15 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
             yield f"data: {json.dumps({'type': 'status', 'status': 'selecting_docs', 'message': f'Selected top {len(final_docs)} most relevant documents'})}\n\n"
             await asyncio.sleep(0.05)
             
+            # ============ STEP 6: RETRIEVAL BASELINE LOGGING ============
+            # Log retrieval metrics for baseline comparison (before/after fixes)
+            retrieval_log = {
+                "query": enhanced_query,
+                "top_docs_count": len(doc_results),
+                "top_docs_scores": [score for _, score in doc_results[:10]],  # Top 10 scores
+                "final_docs_count_before_filtering": len(final_docs),
+            }
+            
             # Analyze final documents after deduplication for accurate metadata
             # We need to pair final_docs with their scores from doc_results
             final_docs_with_scores = []
@@ -2052,15 +2222,51 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
                         final_docs_with_scores.append((final_doc, score))
                         break
             
-            # ============ SCORE-BASED RELEVANCE FILTERING ============
+            # ============ SCORE-BASED RELEVANCE FILTERING (CALIBRATED RAG) ============
             # Filter out documents with poor relevance scores to prevent hallucination
+            # Uses percentile-based confidence model instead of margin threshold
+            
+            # Initialize confidence variables for logging
+            confidence = None
+            confidence_level = None
+            effective_threshold = None
+            
+            def retrieval_confidence(scores: List[float]) -> float:
+                """
+                Measures how concentrated relevance is at the top.
+                Stable for enterprise KBs where similar docs naturally cluster.
+                
+                Returns:
+                    - High (>1.25): One standout document (high confidence)
+                    - Medium (1.05-1.25): Moderate concentration (medium confidence)
+                    - Low (<1.05): Similar docs (low confidence, but still valid)
+                """
+                if len(scores) < 3:
+                    return 1.0
+                
+                sorted_scores = sorted(scores, reverse=True)
+                top_1 = sorted_scores[0]
+                top_5_avg = sum(sorted_scores[:5]) / min(5, len(sorted_scores))
+                
+                # Avoid division by zero
+                return top_1 / (top_5_avg + 1e-6)
+            
             if final_docs_with_scores:
                 scores = [score for _, score in final_docs_with_scores]
                 max_score = max(scores)
                 avg_score = sum(scores) / len(scores)
-                score_margin = max_score - avg_score
                 
-                print(f"[SCORE FILTERING] Max: {max_score:.3f}, Avg: {avg_score:.3f}, Margin: {score_margin:.3f}")
+                # STEP 1: Use percentile-based confidence instead of margin
+                confidence = retrieval_confidence(scores)
+                
+                if confidence < 1.05:
+                    confidence_level = "low"
+                elif confidence < 1.25:
+                    confidence_level = "medium"
+                else:
+                    confidence_level = "high"
+                
+                print(f"[SCORE FILTERING] Max: {max_score:.3f}, Avg: {avg_score:.3f}, Confidence: {confidence:.3f} ({confidence_level})")
                 
                 # Check if we have transcript documents (they may score lower due to conversational format)
                 has_transcripts = any(
@@ -2071,52 +2277,155 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
                     for doc, _ in final_docs_with_scores
                 )
                 
-                # Apply quality gates
-                # Gate 1: Maximum score must be above threshold
-                # Gate 2: There must be sufficient separation (avoid all-mediocre results)
-                from config import MIN_SCORE_THRESHOLD, SCORE_MARGIN_THRESHOLD
+                # STEP 4: Lower threshold and ensure minimum K documents
+                from config import MIN_SCORE_THRESHOLD
                 
                 # Use more lenient threshold for transcripts (conversational format scores lower)
                 # After normalization, scores are in 0-1 range, so thresholds should be positive
-                effective_threshold = MIN_SCORE_THRESHOLD
+                effective_threshold = MIN_SCORE_THRESHOLD  # Now 0.15 instead of 0.3
                 if has_transcripts:
-                    # More lenient threshold for transcripts: 0.2 (instead of default 0.3)
-                    # Transcripts are conversational and may have lower similarity scores
-                    effective_threshold = 0.2
+                    # More lenient threshold for transcripts: 0.1 (instead of default 0.15)
+                    effective_threshold = 0.1
                     print(f"[SCORE FILTERING] Transcripts detected - using lenient threshold {effective_threshold:.3f} (default: {MIN_SCORE_THRESHOLD:.3f})")
                 
+                # Gate 1: Maximum score must be above threshold
                 if max_score < effective_threshold:
                     print(f"[SCORE FILTERING] ❌ Max score {max_score:.3f} below threshold {effective_threshold:.3f}")
                     print(f"[SCORE FILTERING] All documents deemed irrelevant - returning no context")
                     final_docs_with_scores = []
                     final_docs = []
-                elif score_margin < SCORE_MARGIN_THRESHOLD and avg_score < 0.3:
-                    # Updated: check for low avg_score (<0.3) instead of negative
-                    print(f"[SCORE FILTERING] ⚠️ Low score margin {score_margin:.3f} with low avg {avg_score:.3f}")
-                    print(f"[SCORE FILTERING] All documents mediocre - returning no context")
-                    final_docs_with_scores = []
-                    final_docs = []
                 else:
-                    # Keep only documents above a reasonable threshold
-                    # For transcripts, use effective_threshold directly (don't subtract from avg)
-                    # For primary KB, use dynamic threshold based on avg
-                    if has_transcripts:
-                        # For transcripts, use the lenient threshold directly
-                        dynamic_threshold = effective_threshold
-                    else:
-                        # For primary KB, use dynamic threshold: avg_score - 0.3 (changed from -1.0)
-                        dynamic_threshold = max(effective_threshold, avg_score - 0.3)
+                    # Keep documents above threshold, but ensure we keep at least K documents
+                    # STEP 4: Never drop below K documents (recall > precision at retrieval stage)
+                    from config import FINAL_RETRIEVAL_K
+                    min_docs = FINAL_RETRIEVAL_K
                     
-                    filtered = [(doc, score) for doc, score in final_docs_with_scores if score > dynamic_threshold]
+                    filtered = [(doc, score) for doc, score in final_docs_with_scores if score >= effective_threshold]
+                    
+                    # Ensure we keep at least min_docs (take top K if filtered is too small)
+                    if len(filtered) < min_docs:
+                        # Take top K documents even if some are below threshold
+                        sorted_all = sorted(final_docs_with_scores, key=lambda x: x[1], reverse=True)
+                        filtered = sorted_all[:min_docs]
+                        print(f"[SCORE FILTERING] ⚠️ Only {len([s for _, s in filtered if s >= effective_threshold])} docs above threshold, keeping top {min_docs} for recall")
                     
                     if filtered:
                         final_docs_with_scores = filtered
                         final_docs = [doc for doc, score in filtered]
-                        print(f"[SCORE FILTERING] ✅ Kept {len(final_docs)} docs above dynamic threshold {dynamic_threshold:.3f}")
+                        print(f"[SCORE FILTERING] ✅ Kept {len(final_docs)} docs (confidence: {confidence_level}, threshold: {effective_threshold:.3f})")
                     else:
-                        print(f"[SCORE FILTERING] ❌ All docs below dynamic threshold")
+                        print(f"[SCORE FILTERING] ❌ All docs below threshold")
                         final_docs_with_scores = []
                         final_docs = []
+            
+            # STEP 6: Complete retrieval baseline logging
+            if 'retrieval_log' in locals():
+                retrieval_log.update({
+                    "final_docs_count": len(final_docs),
+                    "final_docs_scores": [score for _, score in final_docs_with_scores[:10]] if final_docs_with_scores else [],
+                    "confidence": confidence,
+                    "confidence_level": confidence_level,
+                    "dropped_docs_count": retrieval_log["top_docs_count"] - len(final_docs),
+                    "effective_threshold": effective_threshold,
+                })
+                # RISK 1 FIX: Add expansion breakdown to baseline log
+                # Note: expansion_doc_tracking is created inside perplexity_style_retrieve
+                # If it exists and has data, add it to the log
+                try:
+                    if expansion_doc_tracking:
+                        retrieval_log["expansion_breakdown"] = expansion_doc_tracking
+                except NameError:
+                    # expansion_doc_tracking not available (expansion disabled or error)
+                    pass
+                print(f"[RETRIEVAL BASELINE] {json.dumps(retrieval_log, indent=2, default=str)}")
+            
+            # ===== DIRECTIONALITY DIAGNOSTIC LOGGING =====
+            # Extract query intent (migration direction from user query)
+            query_intent = extract_migration_direction(enhanced_query)
+            
+            if query_intent["source_platform"] or query_intent["target_platform"]:
+                print(f"\n[DIRECTIONALITY DIAGNOSTIC] Query Intent:")
+                print(f"  Source Platform: {query_intent['source_platform']}")
+                print(f"  Target Platform: {query_intent['target_platform']}")
+                print(f"  Direction Explicit: {query_intent['direction_detected']}")
+                print(f"  Mentioned Platforms: {query_intent.get('mentioned_platforms', [])}")
+                
+                # Analyze each retrieved document
+                doc_directions = []
+                direction_matches = 0
+                direction_mismatches = 0
+                direction_unknown = 0
+                
+                for idx, (doc, score) in enumerate(final_docs_with_scores[:10], 1):  # Analyze top 10
+                    # Get document text (title + content preview)
+                    title = doc.metadata.get('title', '') or doc.metadata.get('post_title', '') or ''
+                    content_preview = doc.page_content[:500] if doc.page_content else ''
+                    doc_text = f"{title} {content_preview}"
+                    
+                    doc_direction = extract_migration_direction(doc_text)
+                    
+                    # Determine match status
+                    match_status = "unknown"
+                    if doc_direction["source_platform"] and doc_direction["target_platform"]:
+                        if (doc_direction["source_platform"] == query_intent["source_platform"] and
+                            doc_direction["target_platform"] == query_intent["target_platform"]):
+                            match_status = "match"
+                            direction_matches += 1
+                        elif (doc_direction["source_platform"] == query_intent["target_platform"] and
+                              doc_direction["target_platform"] == query_intent["source_platform"]):
+                            match_status = "reversed"
+                            direction_mismatches += 1
+                        else:
+                            match_status = "different"
+                            direction_mismatches += 1
+                    else:
+                        direction_unknown += 1
+                    
+                    doc_directions.append({
+                        "rank": idx,
+                        "score": round(score, 4),
+                        "title": title[:80] if title else "(no title)",
+                        "source_platform": doc_direction["source_platform"],
+                        "target_platform": doc_direction["target_platform"],
+                        "direction_explicit": doc_direction["direction_detected"],
+                        "match_status": match_status,
+                        "mentioned_platforms": doc_direction.get("mentioned_platforms", [])
+                    })
+                
+                # Print diagnostic summary
+                print(f"\n[DIRECTIONALITY DIAGNOSTIC] Document Analysis:")
+                print(f"  Total Documents Analyzed: {len(doc_directions)}")
+                print(f"  Direction Matches: {direction_matches}")
+                print(f"  Direction Mismatches (reversed/different): {direction_mismatches}")
+                print(f"  Direction Unknown: {direction_unknown}")
+                
+                if direction_mismatches > direction_matches:
+                    print(f"  ⚠️ WARNING: More mismatches than matches! Retrieval may have wrong direction.")
+                
+                # Print detailed breakdown
+                print(f"\n[DIRECTIONALITY DIAGNOSTIC] Detailed Breakdown:")
+                for doc_info in doc_directions:
+                    status_icon = "✅" if doc_info["match_status"] == "match" else "❌" if doc_info["match_status"] == "reversed" else "⚠️"
+                    print(f"  [{doc_info['rank']}] {status_icon} Score: {doc_info['score']:.4f}")
+                    print(f"      Title: {doc_info['title']}")
+                    print(f"      Doc Direction: {doc_info['source_platform']} → {doc_info['target_platform']}")
+                    print(f"      Match Status: {doc_info['match_status']}")
+                    if doc_info['mentioned_platforms']:
+                        print(f"      Platforms Mentioned: {', '.join(doc_info['mentioned_platforms'])}")
+                
+                # Add to retrieval log
+                if 'retrieval_log' in locals():
+                    retrieval_log["directionality_analysis"] = {
+                        "query_intent": query_intent,
+                        "documents": doc_directions,
+                        "summary": {
+                            "matches": direction_matches,
+                            "mismatches": direction_mismatches,
+                            "unknown": direction_unknown,
+                            "match_rate": round(direction_matches / len(doc_directions), 2) if doc_directions else 0.0
+                        }
+                    }
+                    print(f"\n[DIRECTIONALITY DIAGNOSTIC] Added to retrieval log")
             
             doc_analysis = analyze_retrieved_documents(final_docs_with_scores)
             
@@ -2156,15 +2465,32 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
                     print(f"[DEBUG] Context length: {len(context_text)} characters")
                     print(f"[DEBUG] First 500 chars of context: {context_text[:500]}...")
                     
-                    # ============ CONTEXT COMPRESSION (OPTION E) ============
-                    if ENABLE_CONTEXT_COMPRESSION and len(context_text) > 8000:
-                        print(f"[CONTEXT] Context too long ({len(context_text)} chars), compressing...")
-                        try:
-                            context_text = context_compressor.compress(final_docs, max_chars=8000)
-                            print(f"[CONTEXT] Compressed length: {len(context_text)} chars")
-                        except Exception as e:
-                            print(f"[WARN] Context compression failed: {e}")
-                            # Keep original context if compression fails
+                    # ============ CONTEXT COMPRESSION (STEP 5: Token-Aware) ============
+                    # STEP 5: Only compress if near model token limit (90% threshold)
+                    # This preserves edge facts and transcript details that are valuable
+                    if ENABLE_CONTEXT_COMPRESSION:
+                        # Estimate tokens: ~5.5 chars per token for English
+                        CHARS_PER_TOKEN = 5.5
+                        estimated_tokens = len(context_text) / CHARS_PER_TOKEN
+                        
+                        # Model context limits (conservative defaults)
+                        # GPT-3.5: 16K, GPT-4: 128K, Gemini Pro: 32K
+                        # Use 16K as safe default (can be made configurable)
+                        MODEL_CONTEXT_LIMIT_TOKENS = 16000  # Conservative default
+                        COMPRESSION_THRESHOLD = MODEL_CONTEXT_LIMIT_TOKENS * 0.9  # 90% of limit
+                        
+                        if estimated_tokens > COMPRESSION_THRESHOLD:
+                            print(f"[CONTEXT] Context near token limit ({estimated_tokens:.0f} tokens, limit: {MODEL_CONTEXT_LIMIT_TOKENS}), compressing...")
+                            try:
+                                # Compress to 80% of limit to leave room for prompt + response
+                                max_chars = int(COMPRESSION_THRESHOLD * CHARS_PER_TOKEN * 0.8)
+                                context_text = context_compressor.compress(final_docs, max_chars=max_chars)
+                                print(f"[CONTEXT] Compressed to {len(context_text)} chars (~{len(context_text)/CHARS_PER_TOKEN:.0f} tokens)")
+                            except Exception as e:
+                                print(f"[WARN] Context compression failed: {e}")
+                                # Keep original context if compression fails
+                        else:
+                            print(f"[CONTEXT] Context size OK ({estimated_tokens:.0f} tokens, threshold: {COMPRESSION_THRESHOLD:.0f}), passing raw context")
             except Exception as e:
                 print(f"[ERROR] Failed to format documents: {e}")
                 import traceback
@@ -2266,6 +2592,36 @@ IMPORTANT - TRANSCRIPT SOURCES DETECTED:
 - If transcript information conflicts with official documentation, ALWAYS prefer official knowledge base content
 - Transcripts are contextual and may contain discussions, not official commitments"""
                 enhanced_system_prompt = SYSTEM_PROMPT + guardrail_instruction
+            
+            # RISK 3 FIX: Add confidence-aware instructions to guide answer quality
+            # confidence_level is set earlier in score filtering section
+            if confidence_level and confidence_level in ["low", "medium", "high"]:
+                if confidence_level == "low":
+                    confidence_instruction = """
+
+RETRIEVAL CONFIDENCE: LOW
+- Retrieved documents have similar relevance scores (indicating broad topic coverage)
+- Provide a comprehensive answer using ALL available context
+- Synthesize information from multiple documents when they complement each other
+- If documents provide different perspectives, acknowledge the variety of information available"""
+                elif confidence_level == "medium":
+                    confidence_instruction = """
+
+RETRIEVAL CONFIDENCE: MEDIUM
+- Some documents are more relevant than others
+- Prioritize the top-scoring documents in your answer
+- Use lower-scoring documents to provide additional context or examples
+- Balance depth (from top docs) with breadth (from all docs)"""
+                else:  # high
+                    confidence_instruction = """
+
+RETRIEVAL CONFIDENCE: HIGH
+- One document is highly relevant to the query
+- Use it as the primary source for your answer
+- Supplement with other documents only if they add valuable context
+- Provide a focused, authoritative answer based on the top document"""
+                
+                enhanced_system_prompt = enhanced_system_prompt + confidence_instruction
             
             # Adapt prompt based on whether we have relevant context
             if forced_no_context:
