@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Deployment Script for ai.cloudfuze.com (64.227.160.206)
-# This script deploys the CF_Chatbot-V1 branch with frontend
+# This script deploys the before-agentic-rag branch with frontend and data folder sync
 
 set -e  # Exit on any error
 
@@ -21,8 +21,24 @@ SERVER_IP="64.227.160.206"
 SERVER_USER="root"
 DOMAIN="ai.cloudfuze.com"
 PROJECT_DIR="/opt/slack2teams-ai"
-BRANCH="CF_Chatbot-V1"
+BRANCH="before-agentic-rag"
 FRONTEND_IMAGE="laxman006/slack2teams-frontend:ai"
+LOCAL_DATA_DIR="./data"  # Local data folder path (relative to script location)
+
+# Step 0: Commit uncommitted changes (if any)
+echo -e "${YELLOW}Step 0: Checking for uncommitted changes...${NC}"
+if [ -n "$(git status --porcelain)" ]; then
+    echo -e "${YELLOW}Found uncommitted changes. Committing them...${NC}"
+    git add .gitignore frontend/src/app/api/proxy/[...path]/route.ts frontend/src/lib/chat-initialization.ts frontend/src/lib/session-utils.ts
+    git commit -m "feat: Add retry logic for session sync and improve error handling" || echo "No changes to commit or already committed"
+    echo -e "${GREEN}✓ Changes committed${NC}"
+    
+    echo -e "${YELLOW}Pushing changes to remote...${NC}"
+    git push origin ${BRANCH} || echo "Push failed or already up to date"
+    echo -e "${GREEN}✓ Changes pushed${NC}"
+else
+    echo -e "${GREEN}✓ No uncommitted changes${NC}"
+fi
 
 # Step 1: Build and push frontend Docker image locally
 echo -e "${YELLOW}Step 1: Building frontend Docker image...${NC}"
@@ -82,6 +98,33 @@ echo "Repository setup complete!"
 ENDSSH
 echo -e "${GREEN}✓ Repository cloned${NC}"
 
+# Step 3.5: Sync local data folder to server
+echo -e "${YELLOW}Step 4.5: Syncing local data folder to server...${NC}"
+if [ -d "${LOCAL_DATA_DIR}" ]; then
+    echo -e "${YELLOW}Backing up existing server data folder...${NC}"
+    ssh ${SERVER_USER}@${SERVER_IP} << ENDSSH
+cd /opt/slack2teams-ai
+if [ -d "data" ]; then
+    echo "Backing up existing data folder..."
+    tar -czf data_backup_\$(date +%Y%m%d_%H%M%S).tar.gz data/ || true
+    echo "Backup created"
+fi
+ENDSSH
+    
+    echo -e "${YELLOW}Syncing data folder to server...${NC}"
+    # Use rsync if available, otherwise use scp
+    if command -v rsync &> /dev/null; then
+        rsync -avz --progress --delete ${LOCAL_DATA_DIR}/ ${SERVER_USER}@${SERVER_IP}:${PROJECT_DIR}/data/
+    else
+        echo -e "${YELLOW}rsync not found, using scp...${NC}"
+        scp -r ${LOCAL_DATA_DIR} ${SERVER_USER}@${SERVER_IP}:${PROJECT_DIR}/
+    fi
+    echo -e "${GREEN}✓ Data folder synced${NC}"
+else
+    echo -e "${RED}⚠️  Local data folder not found at ${LOCAL_DATA_DIR}${NC}"
+    echo -e "${YELLOW}Skipping data folder sync. Using existing server data folder.${NC}"
+fi
+
 # Step 4: Copy environment file
 echo -e "${YELLOW}Step 5: Setting up environment variables...${NC}"
 echo -e "${RED}IMPORTANT: Copy env.ai.example to .env.ai on the server and fill in the secrets${NC}"
@@ -111,8 +154,13 @@ certbot certonly --standalone -d ${DOMAIN} --agree-tos --non-interactive --email
 ENDSSH
 echo -e "${GREEN}✓ SSL certificate configured${NC}"
 
-# Step 7: Deploy services
-echo -e "${YELLOW}Step 8: Deploying services...${NC}"
+# Step 7: Copy nginx config
+echo -e "${YELLOW}Step 8: Copying nginx configuration...${NC}"
+scp nginx-ai.conf ${SERVER_USER}@${SERVER_IP}:${PROJECT_DIR}/nginx-ai.conf
+echo -e "${GREEN}✓ Nginx config copied${NC}"
+
+# Step 8: Deploy services
+echo -e "${YELLOW}Step 9: Deploying services...${NC}"
 ssh ${SERVER_USER}@${SERVER_IP} << 'ENDSSH'
 cd /opt/slack2teams-ai
 
@@ -142,7 +190,7 @@ docker logs slack2teams-frontend-ai --tail 5
 ENDSSH
 echo -e "${GREEN}✓ Services deployed${NC}"
 
-# Step 8: Final verification
+# Step 9: Final verification
 echo ""
 echo -e "${GREEN}================================${NC}"
 echo -e "${GREEN}Deployment Complete!${NC}"
@@ -150,14 +198,14 @@ echo -e "${GREEN}================================${NC}"
 echo ""
 echo -e "URLs:"
 echo -e "  Frontend: https://${DOMAIN}/"
-echo -e "  Backend Health: https://${DOMAIN}/api/health"
+echo -e "  Backend Health: https://${DOMAIN}/health"
+echo -e "  API Health: https://${DOMAIN}/api/health"
 echo -e "  Auth Config: https://${DOMAIN}/auth/config"
 echo ""
 echo -e "${YELLOW}Next Steps:${NC}"
 echo -e "1. Test the application: https://${DOMAIN}"
-echo -e "2. Add redirect URLs to Microsoft App Registration:"
-echo -e "   - https://${DOMAIN}/api/auth/callback"
-echo -e "   - https://${DOMAIN}/"
-echo -e "3. Monitor logs: ssh ${SERVER_USER}@${SERVER_IP} 'cd ${PROJECT_DIR} && docker-compose -f docker-compose.ai.yml logs -f'"
+echo -e "2. Verify data folder: ssh ${SERVER_USER}@${SERVER_IP} 'ls -lh ${PROJECT_DIR}/data'"
+echo -e "3. Check backend logs: ssh ${SERVER_USER}@${SERVER_IP} 'cd ${PROJECT_DIR} && docker logs slack2teams-backend-ai --tail=100'"
+echo -e "4. Monitor all logs: ssh ${SERVER_USER}@${SERVER_IP} 'cd ${PROJECT_DIR} && docker-compose -f docker-compose.ai.yml logs -f'"
 echo ""
 
