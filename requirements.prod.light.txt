@@ -83,3 +83,4 @@ rank-bm25==0.2.2
 
 google-generativeai>=0.3.0
 langchain-google-genai>=0.1.0
+jira>=3.5.0
