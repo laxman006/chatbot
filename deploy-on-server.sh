@@ -41,6 +41,20 @@ docker --version
 docker-compose --version || docker compose version
 echo ""
 
+# Step 1.5: Configure firewall (UFW) - Open required ports
+echo -e "${YELLOW}Step 1.5: Configuring firewall...${NC}"
+# Check if UFW is active
+if command -v ufw &> /dev/null; then
+    echo "UFW firewall detected. Opening ports 80 and 443..."
+    ufw allow 80/tcp
+    ufw allow 443/tcp
+    ufw --force enable || true
+    echo -e "${GREEN}✓ Firewall configured - ports 80 and 443 opened${NC}"
+else
+    echo -e "${YELLOW}UFW not found, skipping firewall configuration${NC}"
+fi
+echo ""
+
 # Step 2: Stop any existing services
 echo -e "${YELLOW}Step 2: Stopping existing services...${NC}"
 cd /opt/chatbot 2>/dev/null && docker-compose -f docker-compose.ai.yml down || true
