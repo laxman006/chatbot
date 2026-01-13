@@ -24,7 +24,12 @@ services:
       - app-network
 
   frontend:
-    image: laxman006/slack2teams-frontend:ai
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.frontend
+      args:
+        NEXT_PUBLIC_API_URL: https://ai.cloudfuze.com
+    image: slack2teams-frontend-ai:latest
     container_name: slack2teams-frontend-ai
     environment:
       - NODE_ENV=production
