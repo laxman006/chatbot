@@ -11,8 +11,16 @@ import re
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
-from jira import JIRA
-from jira.exceptions import JIRAError
+
+# Optional Jira import - allows backend to start without jira package
+try:
+    from jira import JIRA
+    from jira.exceptions import JIRAError
+    JIRA_AVAILABLE = True
+except ImportError:
+    JIRA_AVAILABLE = False
+    JIRA = None
+    JIRAError = Exception
 
 from langchain_core.documents import Document
 from config import (
@@ -61,6 +69,9 @@ class JiraProcessor:
     
     def _connect(self):
         """Connect to Jira."""
+        if not JIRA_AVAILABLE:
+            raise ImportError("Jira package is not installed. Install with: pip install jira")
+        
         try:
             if not self.api_token:
                 raise ValueError("JIRA_API_TOKEN is required")

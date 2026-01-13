@@ -10,7 +10,15 @@ from typing import List, Optional
 from langchain_openai import OpenAIEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
-from app.jira_processor import process_jira_content
+
+# Optional Jira processor import - allows backend to start without jira package
+try:
+    from app.jira_processor import process_jira_content
+    JIRA_PROCESSOR_AVAILABLE = True
+except ImportError as e:
+    JIRA_PROCESSOR_AVAILABLE = False
+    process_jira_content = None
+    print(f"[WARNING] Jira processor not available: {e}")
 from app.enhanced_helpers import EnhancedVectorstoreBuilder
 from config import (
     JIRA_VECTORSTORE_PATH, 
@@ -47,6 +55,11 @@ def load_jira_vectorstore():
 
 def build_jira_vectorstore():
     """Build separate vectorstore for Jira tickets."""
+    if not JIRA_PROCESSOR_AVAILABLE:
+        print("[ERROR] Cannot build Jira vectorstore: Jira processor not available")
+        print("[INFO] Install jira package with: pip install jira")
+        return None
+    
     print("=" * 60)
     print("BUILDING SEPARATE JIRA VECTORSTORE")
     print("=" * 60)

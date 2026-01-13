@@ -19,7 +19,16 @@ logger = logging.getLogger(__name__)
 from app.llm import setup_qa_chain
 from app.llm_factory import get_llm
 from app.vectorstore import retriever, vectorstore, bm25_retriever
-from app.jira_vectorstore import jira_retriever, jira_vectorstore
+# Optional Jira vectorstore import - allows backend to start without jira package
+try:
+    from app.jira_vectorstore import jira_retriever, jira_vectorstore
+    JIRA_VECTORSTORE_AVAILABLE = True
+except ImportError as e:
+    JIRA_VECTORSTORE_AVAILABLE = False
+    jira_retriever = None
+    jira_vectorstore = None
+    print(f"[WARNING] Jira vectorstore not available: {e}")
+    print("[INFO] Jira features will be disabled. Install jira package with: pip install jira")
 from app.mongodb_memory import (
     mongodb_memory,
     add_to_conversation, get_conversation_context, get_user_chat_history, 
