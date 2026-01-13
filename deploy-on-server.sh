@@ -28,7 +28,8 @@ FRONTEND_IMAGE="laxman006/slack2teams-frontend:ai"
 # Step 1: Update system packages
 echo -e "${YELLOW}Step 1: Updating system packages...${NC}"
 apt-get update
-apt-get install -y docker.io docker-compose git curl wget || true
+apt-get install -y docker.io git curl wget || true
+# Note: Docker Compose v2 comes with Docker, no need to install separately
 
 # Ensure Docker is running
 systemctl start docker || true
@@ -38,7 +39,16 @@ systemctl enable docker || true
 echo ""
 echo "Docker version:"
 docker --version
-docker-compose --version || docker compose version
+# Check for docker compose (v2) or docker-compose (v1)
+if docker compose version &> /dev/null; then
+    echo "Docker Compose version:"
+    docker compose version
+    COMPOSE_CMD="docker compose"
+else
+    echo "Docker Compose version:"
+    docker-compose --version
+    COMPOSE_CMD="docker-compose"
+fi
 echo ""
 
 # Step 1.5: Configure firewall (UFW) - Open required ports
@@ -57,9 +67,14 @@ echo ""
 
 # Step 2: Stop any existing services
 echo -e "${YELLOW}Step 2: Stopping existing services...${NC}"
-cd /opt/chatbot 2>/dev/null && docker-compose -f docker-compose.ai.yml down || true
-cd /opt/slack2teams 2>/dev/null && docker-compose down || true
-cd /opt/slack2teams-prod 2>/dev/null && docker-compose down || true
+# Use docker compose (v2) or docker-compose (v1)
+COMPOSE_CMD="docker compose"
+if ! docker compose version &> /dev/null; then
+    COMPOSE_CMD="docker-compose"
+fi
+cd /opt/chatbot 2>/dev/null && ${COMPOSE_CMD} -f docker-compose.ai.yml down || true
+cd /opt/slack2teams 2>/dev/null && ${COMPOSE_CMD} down || true
+cd /opt/slack2teams-prod 2>/dev/null && ${COMPOSE_CMD} down || true
 echo -e "${GREEN}✓ Existing services stopped${NC}"
 
 # Step 3: Create project directory
@@ -108,7 +123,13 @@ echo -e "${GREEN}✓ Frontend image ready${NC}"
 
 # Step 7: Build backend Docker image
 echo -e "${YELLOW}Step 7: Building backend Docker image...${NC}"
-docker-compose -f docker-compose.ai.yml build backend
+# Detect docker compose command (v2 uses 'docker compose', v1 uses 'docker-compose')
+if docker compose version &> /dev/null; then
+    COMPOSE_CMD="docker compose"
+else
+    COMPOSE_CMD="docker-compose"
+fi
+${COMPOSE_CMD} -f docker-compose.ai.yml build backend
 echo -e "${GREEN}✓ Backend image built${NC}"
 
 # Step 8: Setup SSL Certificate (optional - only if domain is mapped)
@@ -139,7 +160,8 @@ echo -e "${GREEN}✓ Directories created${NC}"
 
 # Step 11: Deploy services
 echo -e "${YELLOW}Step 11: Deploying services...${NC}"
-docker-compose -f docker-compose.ai.yml --env-file .env.ai up -d
+# Use detected compose command
+${COMPOSE_CMD} -f docker-compose.ai.yml --env-file .env.ai up -d
 
 # Wait for services to start
 echo "Waiting for services to start..."
@@ -150,7 +172,7 @@ echo ""
 echo -e "${GREEN}================================${NC}"
 echo -e "${GREEN}Service Status${NC}"
 echo -e "${GREEN}================================${NC}"
-docker-compose -f docker-compose.ai.yml ps
+${COMPOSE_CMD} -f docker-compose.ai.yml ps
 
 # Step 13: Health checks
 echo ""
@@ -192,8 +214,8 @@ echo -e "3. Enable HTTPS redirect in nginx-ai.conf"
 echo -e "4. Restart nginx: docker restart slack2teams-nginx-ai"
 echo ""
 echo -e "${YELLOW}Useful Commands:${NC}"
-echo -e "  View logs:    docker-compose -f docker-compose.ai.yml logs -f"
-echo -e "  Restart:      docker-compose -f docker-compose.ai.yml restart"
-echo -e "  Stop:         docker-compose -f docker-compose.ai.yml down"
-echo -e "  Status:       docker-compose -f docker-compose.ai.yml ps"
+echo -e "  View logs:    ${COMPOSE_CMD} -f docker-compose.ai.yml logs -f"
+echo -e "  Restart:      ${COMPOSE_CMD} -f docker-compose.ai.yml restart"
+echo -e "  Stop:         ${COMPOSE_CMD} -f docker-compose.ai.yml down"
+echo -e "  Status:       ${COMPOSE_CMD} -f docker-compose.ai.yml ps"
 echo ""
