@@ -470,6 +470,21 @@ def build_combined_vectorstore(url: str = None, pdf_directory: str = None, excel
     else:
         print("Outlook processing disabled - skipping...")
     
+    # Process Jira tickets and comments if enabled
+    jira_enabled = os.getenv("ENABLE_JIRA_SOURCE", "false").lower() == "true"
+    if jira_enabled:
+        print("Processing Jira tickets and comments...")
+        try:
+            from app.jira_processor import process_jira_content
+            jira_docs = process_jira_content()
+            all_docs.extend(jira_docs)
+            print(f"  - Jira ticket documents: {len(jira_docs)}")
+        except Exception as e:
+            print(f"[ERROR] Jira processing failed: {e}")
+            print("  - Jira ticket documents: 0 (failed)")
+    else:
+        print("Jira processing disabled - skipping...")
+    
     print(f"Total documents to process: {len(all_docs)}")
     
     # Create embeddings and vectorstore with batch processing to avoid token limits

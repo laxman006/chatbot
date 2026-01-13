@@ -43,83 +43,34 @@ class CrossEncoderReranker:
             else:
                 return candidates[:top_k]
 
-        pairs = [[query, d.page_content] for d, _, _, _ in candidates] if has_separate_scores else [[query, d.page_content] for d, _ in candidates]
-        ce_scores = self.model.predict(pairs)  # Raw logits (can be negative)
+        pairs = [[query, d.page_content] for d, _ in candidates]
+        scores = self.model.predict(pairs)  # higher is better
         
-        # RISK 2 FIX: Track absolute CE scores for monitoring batch-relative bias
-        # BUG FIX: Check length instead of truthiness (numpy arrays are ambiguous)
-        if len(ce_scores) > 0:
-            ce_scores_float = [float(s) for s in ce_scores]
-            mean_ce_absolute = sum(ce_scores_float) / len(ce_scores_float)
-            
-            # Maintain history for monitoring (keep last 100 queries)
-            if not hasattr(self, '_ce_score_history'):
-                self._ce_score_history = []
-            
-            self._ce_score_history.append(mean_ce_absolute)
-            
-            # Keep only last 100 for rolling average
-            if len(self._ce_score_history) > 100:
-                self._ce_score_history = self._ce_score_history[-100:]
-            
-            # Log rolling mean every 10 queries to detect corpus/chunking issues
-            if len(self._ce_score_history) % 10 == 0:
-                rolling_mean = sum(self._ce_score_history) / len(self._ce_score_history)
-                print(f"[CE MONITOR] Mean absolute CE score (last {len(self._ce_score_history)} queries): {rolling_mean:.3f}")
-                # Alert if mean drops significantly (potential corpus mismatch)
-                if len(self._ce_score_history) >= 20:
-                    recent_mean = sum(self._ce_score_history[-20:]) / 20
-                    older_mean = sum(self._ce_score_history[-40:-20]) / 20 if len(self._ce_score_history) >= 40 else recent_mean
-                    if recent_mean < older_mean * 0.7:  # 30% drop
-                        print(f"[CE MONITOR] ⚠️ WARNING: CE scores dropped 30% (recent: {recent_mean:.3f}, older: {older_mean:.3f}) - possible corpus/chunking issue")
-        
-        # STEP 2: Normalize ALL scores to the same space (0-1 range)
-        def normalize(scores):
-            """Global min-max normalization per query batch."""
-            if not scores:
-                return scores
-            min_s, max_s = min(scores), max(scores)
-            if max_s - min_s < 1e-6:
-                return [0.5] * len(scores)  # All same, set to neutral
-            return [(s - min_s) / (max_s - min_s) for s in scores]
-        
-        # Normalize cross-encoder scores
-        normalized_ce_scores = normalize([float(s) for s in ce_scores])
-        
-        if has_separate_scores:
-            # STEP 2: Normalize dense and BM25 scores together with CE scores
-            # Extract all scores
-            dense_scores = [item[2] for item in candidates]
-            bm25_scores = [item[3] for item in candidates]
-            
-            # Normalize dense and BM25 separately (they're already in 0-1, but normalize for consistency)
-            normalized_dense = normalize(dense_scores)
-            normalized_bm25 = normalize(bm25_scores)
-            
-            # STEP 3: Proper fusion: 0.4 dense + 0.3 BM25 + 0.3 CE
-            reranked = []
-            for i, item in enumerate(candidates):
-                doc = item[0]
-                dense_norm = normalized_dense[i]
-                bm25_norm = normalized_bm25[i]
-                ce_norm = normalized_ce_scores[i]
-                
-                # Production-safe fusion weights
-                final_score = 0.4 * dense_norm + 0.3 * bm25_norm + 0.3 * ce_norm
-                reranked.append((doc, final_score))
+        # Normalize cross-encoder scores to 0-1 range
+        # This prevents very negative scores (e.g., -7 to -8) from causing filtering issues
+        if len(scores) > 1:
+            ce_min, ce_max = min(scores), max(scores)
+            if ce_max != ce_min:
+                normalized_scores = [(s - ce_min) / (ce_max - ce_min) for s in scores]
+            else:
+                # All scores are the same, assign equal normalized score
+                normalized_scores = [1.0] * len(scores)
         else:
-            # Backward compatibility: use base_score
-            base_scores = [item[1] for item in candidates]
-            normalized_base = normalize(base_scores)
-            
-            # Fallback fusion: 0.6 base + 0.4 CE
-            reranked = []
-            for i, item in enumerate(candidates):
-                doc = item[0]
-                base_norm = normalized_base[i]
-                ce_norm = normalized_ce_scores[i]
-                final_score = 0.6 * base_norm + 0.4 * ce_norm
-                reranked.append((doc, final_score))
+            # Single score, keep as is but ensure non-negative
+            normalized_scores = [max(0.0, float(scores[0]))] if scores else [0.0]
+        
+        # Debug logging for score normalization
+        if len(scores) > 0:
+            raw_min, raw_max = min(scores), max(scores)
+            norm_min, norm_max = min(normalized_scores), max(normalized_scores)
+            print(f"[RERANKER] Cross-encoder raw scores: min={raw_min:.4f}, max={raw_max:.4f}")
+            print(f"[RERANKER] Normalized scores: min={norm_min:.4f}, max={norm_max:.4f}")
+
+        reranked = []
+        for (doc, base_score), ce_score in zip(candidates, normalized_scores):
+            # Combine: 80% cross-encoder (now normalized 0-1), 20% base score
+            final_score = 0.8 * float(ce_score) + 0.2 * float(base_score)
+            reranked.append((doc, final_score))
 
         reranked.sort(key=lambda x: x[1], reverse=True)
         return reranked[:top_k]

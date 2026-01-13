@@ -93,3 +93,8 @@ coverage.xml
 # Backup files
 *.bak
 *.backup
+*.tar.gz
+
+# Data folder (mounted as volume, don't copy into image)
+data/
+data_backup_*.tar.gz

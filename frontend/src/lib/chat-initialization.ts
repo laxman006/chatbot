@@ -629,7 +629,7 @@ export function initializeChatApp(options: InitOptions = {}) {
   }
   
   // ✅ NEW: Sync session metadata to backend (session-based auth)
-  async function syncSessionToBackend(sessionData: ChatSession) {
+  async function syncSessionToBackend(sessionData: ChatSession, retries = 2) {
     try {
       // ✅ Session-based auth - no token check needed, session_id cookie sent automatically
       console.log('[SESSION SYNC] Syncing to backend with', sessionData.messages.length, 'messages');
@@ -649,6 +649,11 @@ export function initializeChatApp(options: InitOptions = {}) {
       
       if (response.ok) {
         console.log('[SESSION SYNC] Successfully synced to backend');
+      } else if (response.status === 502 && retries > 0) {
+        // ✅ Retry on 502 errors (backend unavailable) - transient connection issues
+        console.warn(`[SESSION SYNC] Backend unavailable (502) - retrying (${retries} attempts left)`);
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second before retry
+        return syncSessionToBackend(sessionData, retries - 1);
       } else {
         // ✅ Improved error handling for 502 and other errors
         const errorText = await response.text().catch(() => 'No error details');
@@ -656,7 +661,8 @@ export function initializeChatApp(options: InitOptions = {}) {
           statusText: response.statusText,
           error: errorText,
           sessionId: sessionData.id,
-          messageCount: sessionData.messages.length
+          messageCount: sessionData.messages.length,
+          retriesLeft: retries
         });
         
         // ✅ Don't throw error - session sync failure shouldn't break the app
@@ -670,8 +676,20 @@ export function initializeChatApp(options: InitOptions = {}) {
       console.error('[SESSION] Failed to sync session to backend:', {
         error: error instanceof Error ? error.message : String(error),
         stack: error instanceof Error ? error.stack : undefined,
-        sessionId: sessionData.id
+        sessionId: sessionData.id,
+        retriesLeft: retries
       });
+      
+      // ✅ Retry on network errors if retries available
+      if (retries > 0 && (error instanceof TypeError || error instanceof Error)) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        // Retry on network errors (fetch failures, connection errors)
+        if (errorMessage.includes('fetch') || errorMessage.includes('network') || errorMessage.includes('Failed to fetch')) {
+          console.warn(`[SESSION SYNC] Network error - retrying (${retries} attempts left)`);
+          await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second before retry
+          return syncSessionToBackend(sessionData, retries - 1);
+        }
+      }
       
       // ✅ Don't throw - session is saved locally, sync can retry later
       console.warn('[SESSION SYNC] Session saved locally - will retry sync on next save');

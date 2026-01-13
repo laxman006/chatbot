@@ -160,11 +160,16 @@ export default function TeamsAnalyticsPage() {
         let timeoutId: NodeJS.Timeout | null = null;
         
         try {
-          // Increased timeout to 90 seconds for large datasets
+          // Adaptive timeout based on time filter - longer periods need more time
+          // Backend optimization should make this faster, but keeping longer timeout as safety net
+          const timeoutDuration = filter === 'today' || filter === 'yesterday' 
+            ? 90000   // 90 seconds for short periods
+            : 120000; // 120 seconds (2 minutes) for longer periods (this_week, last_week, etc.)
+          
           timeoutId = setTimeout(() => {
-            console.warn('[Teams Fetch] Request timeout after 90 seconds, aborting...');
+            console.warn(`[Teams Fetch] Request timeout after ${timeoutDuration/1000} seconds, aborting...`);
             controller.abort();
-          }, 90000); // 90 second timeout
+          }, timeoutDuration);
 
           const response = await fetch(url, {
             method: 'GET',

@@ -5,12 +5,13 @@ from app.ingest_reporter import IngestReporter
 from app.graph_store import get_graph_store
 from config import (
     CHROMA_DB_PATH, INITIALIZE_VECTORSTORE,
-    ENABLE_WEB_SOURCE, ENABLE_PDF_SOURCE, ENABLE_EXCEL_SOURCE, ENABLE_DOC_SOURCE, ENABLE_SHAREPOINT_SOURCE, ENABLE_OUTLOOK_SOURCE,
+    ENABLE_WEB_SOURCE, ENABLE_PDF_SOURCE, ENABLE_EXCEL_SOURCE, ENABLE_DOC_SOURCE, ENABLE_SHAREPOINT_SOURCE, ENABLE_OUTLOOK_SOURCE, ENABLE_JIRA_SOURCE,
     ENABLE_SHAREPOINT_SALES_SOURCE,
     WEB_SOURCE_URL, PDF_SOURCE_DIR, EXCEL_SOURCE_DIR, DOC_SOURCE_DIR, BLOG_START_PAGE,
     SHAREPOINT_SITE_URL, SHAREPOINT_START_PAGE,
     SHAREPOINT_SALES_SITE_URL, SHAREPOINT_SALES_FOLDER_PATH,
     OUTLOOK_USER_EMAIL, OUTLOOK_FOLDER_NAME,
+    JIRA_SERVER, JIRA_PROJECT_KEYS, JIRA_DATE_FILTER,
 )
 import os
 import shutil
@@ -93,6 +94,16 @@ def get_current_metadata():
         # Store Outlook metadata - folder and user email
         metadata["outlook"] = f"{OUTLOOK_USER_EMAIL}/{OUTLOOK_FOLDER_NAME}"
         metadata["enabled_sources"].append("outlook")
+    
+    if ENABLE_JIRA_SOURCE:
+        # Store Jira metadata - server, projects, and date filter
+        jira_info = f"{JIRA_SERVER}"
+        if JIRA_PROJECT_KEYS:
+            jira_info += f"/projects:{JIRA_PROJECT_KEYS}"
+        if JIRA_DATE_FILTER:
+            jira_info += f"/filter:{JIRA_DATE_FILTER}"
+        metadata["jira"] = jira_info
+        metadata["enabled_sources"].append("jira")
     
     return metadata
 
@@ -333,6 +344,16 @@ def build_incremental_vectorstore(changed_sources):
         except Exception as e:
             print(f"[ERROR] Outlook processing failed: {e}")
     
+    if "jira" in changed_sources:
+        print("[*] Processing changed Jira tickets and comments...")
+        from app.jira_processor import process_jira_content
+        try:
+            jira_docs = process_jira_content()
+            new_docs.extend(jira_docs)
+            print(f"[OK] Processed {len(jira_docs)} Jira ticket documents")
+        except Exception as e:
+            print(f"[ERROR] Jira processing failed: {e}")
+    
     if not new_docs:
         print("[WARNING] No new documents found for changed sources")
         return existing_vectorstore
@@ -559,6 +580,25 @@ def build_enhanced_vectorstore_full() -> Chroma:
                 print(f"[WARN] Outlook ingestion failed: {e}")
         else:
             print("[INFO] Skipping Outlook ingestion in incremental mode")
+    
+    # ---- JIRA / TICKETS ----
+    # NOTE: Jira tickets are now handled separately in jira_vectorstore.py
+    # They are NOT added to the main vectorstore to keep issue resolution queries separate
+    if ENABLE_JIRA_SOURCE:
+        print("[WARN] ENABLE_JIRA_SOURCE is enabled but Jira is handled separately.")
+        print("[WARN] Set ENABLE_JIRA_SOURCE=false and use INITIALIZE_JIRA_VECTORSTORE=true instead.")
+        # Keep this disabled to prevent adding Jira to main vectorstore
+        # if not existing_vectorstore:  # Only process Jira if building from scratch
+        #     try:
+        #         from app.jira_processor import process_jira_content
+        #         jira_docs = process_jira_content()
+        #         print(f"[INGEST] Jira docs: {len(jira_docs)}")
+        #         chunks = builder.process_documents(jira_docs, source_type="jira")
+        #         all_chunks.extend(chunks)
+        #     except Exception as e:
+        #         print(f"[WARN] Jira ingestion failed: {e}")
+        # else:
+        #     print("[INFO] Skipping Jira ingestion in incremental mode")
 
     print(f"[INGEST] Total enhanced chunks: {len(all_chunks)}")
 

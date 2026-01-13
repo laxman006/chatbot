@@ -24,7 +24,12 @@ services:
       - app-network
 
   frontend:
-    image: laxman006/slack2teams-frontend:ai
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.frontend
+      args:
+        NEXT_PUBLIC_API_URL: https://ai.cloudfuze.com
+    image: slack2teams-frontend-ai:latest
     container_name: slack2teams-frontend-ai
     environment:
       - NODE_ENV=production
@@ -48,6 +53,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.prod.light
+    image: slack2teams-backend-ai:latest
     container_name: slack2teams-backend-ai
     environment:
       # Production environment variables
@@ -101,6 +107,20 @@ services:
       # Graph Storage
       GRAPH_DB_PATH: "${GRAPH_DB_PATH}"
       ENABLE_GRAPH_STORAGE: "${ENABLE_GRAPH_STORAGE}"
+      # Jira Configuration
+      JIRA_SERVER: "${JIRA_SERVER}"
+      JIRA_EMAIL: "${JIRA_EMAIL}"
+      JIRA_API_TOKEN: "${JIRA_API_TOKEN}"
+      JIRA_PROJECT_KEYS: "${JIRA_PROJECT_KEYS}"
+      JIRA_DATE_FILTER: "${JIRA_DATE_FILTER}"
+      JIRA_MAX_ISSUES: "${JIRA_MAX_ISSUES}"
+      JIRA_VECTORSTORE_PATH: "${JIRA_VECTORSTORE_PATH}"
+      ENABLE_JIRA_VECTORSTORE: "${ENABLE_JIRA_VECTORSTORE}"
+      INITIALIZE_JIRA_VECTORSTORE: "${INITIALIZE_JIRA_VECTORSTORE}"
+      JIRA_CHUNK_TARGET_TOKENS: "${JIRA_CHUNK_TARGET_TOKENS}"
+      JIRA_CHUNK_OVERLAP_TOKENS: "${JIRA_CHUNK_OVERLAP_TOKENS}"
+      JIRA_CHUNK_MIN_TOKENS: "${JIRA_CHUNK_MIN_TOKENS}"
+      ENABLE_JIRA_SOURCE: "${ENABLE_JIRA_SOURCE}"
       # Reranker Configuration
       RERANKER_SHADOW: "${RERANKER_SHADOW}"
       RERANKER_ENABLED: "${RERANKER_ENABLED}"

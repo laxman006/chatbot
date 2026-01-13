@@ -119,7 +119,7 @@ export function deleteSession(sessionId: string): void {
 }
 
 // ✅ NEW: Sync session with messages to backend (session-based auth)
-export async function syncSessionToBackend(sessionData: ChatSession): Promise<void> {
+export async function syncSessionToBackend(sessionData: ChatSession, retries = 2): Promise<void> {
   try {
     if (typeof window === 'undefined') return;
     
@@ -137,13 +137,21 @@ export async function syncSessionToBackend(sessionData: ChatSession): Promise<vo
     });
     
     if (!response.ok) {
+      if (response.status === 502 && retries > 0) {
+        // ✅ Retry on 502 errors (backend unavailable) - transient connection issues
+        console.warn(`[SESSION SYNC] Backend unavailable (502) - retrying (${retries} attempts left)`);
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second before retry
+        return syncSessionToBackend(sessionData, retries - 1);
+      }
+      
       // ✅ Improved error handling for 502 and other errors
       const errorText = await response.text().catch(() => 'No error details');
       console.error('[SESSION SYNC] Failed with status:', response.status, {
         statusText: response.statusText,
         error: errorText,
         sessionId: sessionData.id,
-        messageCount: sessionData.messages.length
+        messageCount: sessionData.messages.length,
+        retriesLeft: retries
       });
       
       if (response.status === 502) {
@@ -157,8 +165,20 @@ export async function syncSessionToBackend(sessionData: ChatSession): Promise<vo
     console.error('[SESSION] Failed to sync session to backend:', {
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,
-      sessionId: sessionData.id
+      sessionId: sessionData.id,
+      retriesLeft: retries
     });
+    
+    // ✅ Retry on network errors if retries available
+    if (retries > 0 && (error instanceof TypeError || error instanceof Error)) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      // Retry on network errors (fetch failures, connection errors)
+      if (errorMessage.includes('fetch') || errorMessage.includes('network') || errorMessage.includes('Failed to fetch')) {
+        console.warn(`[SESSION SYNC] Network error - retrying (${retries} attempts left)`);
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second before retry
+        return syncSessionToBackend(sessionData, retries - 1);
+      }
+    }
     
     // ✅ Don't throw - session is saved locally, sync can retry later
     console.warn('[SESSION SYNC] Session saved locally - will retry sync on next save');
