@@ -7,7 +7,7 @@ import { getCurrentUser } from '@/lib/session-utils';
 import { isAdminEmail, ADMIN_EMAILS } from '@/constants/admins';
 import { User } from '@/types/chat';
 import DateRangeFilterDropdown, { DateRange } from '@/components/DateRangeFilterDropdown';
-import DeveloperExclusionFilterDropdown from '@/components/DeveloperExclusionFilterDropdown';
+import CombinedExclusionFilterDropdown from '@/components/CombinedExclusionFilterDropdown';
 import {
   PieChart,
   Pie,
@@ -57,6 +57,7 @@ export default function TeamsDashboardPage() {
   // Filter states
   const [dateRange, setDateRange] = useState<DateRange>({ startDate: null, endDate: null });
   const [excludedUsers, setExcludedUsers] = useState<string[]>([]);
+  const [excludedTeams, setExcludedTeams] = useState<string[]>([]);
 
   // Verify admin access on mount
   useEffect(() => {
@@ -174,11 +175,16 @@ export default function TeamsDashboardPage() {
   const formatLocalDate = useCallback((utcTime: string | null) => {
     if (!utcTime) return '—';
     try {
-      const date = new Date(utcTime);
+      // Extract date from ISO string to avoid timezone conversion issues
+      // ISO format: "2026-01-14T23:59:59.999Z" -> extract "2026-01-14"
+      const dateStr = utcTime.split('T')[0];
+      const [year, month, day] = dateStr.split('-').map(Number);
+      const date = new Date(Date.UTC(year, month - 1, day));
       return date.toLocaleString('en-US', {
         month: 'short',
         day: 'numeric',
-        year: 'numeric'
+        year: 'numeric',
+        timeZone: 'UTC'
       });
     } catch (error) {
       console.error('[TEAMS DASHBOARD] Error formatting date:', utcTime, error);
@@ -186,30 +192,38 @@ export default function TeamsDashboardPage() {
     }
   }, []);
 
-  // Top 5 teams
-  const top5Teams = useMemo(() => {
-    return teamStats.slice(0, 5);
-  }, [teamStats]);
+  // Filter team stats based on excluded teams
+  const filteredTeamStats = useMemo(() => {
+    if (excludedTeams.length === 0) {
+      return teamStats;
+    }
+    return teamStats.filter(team => !excludedTeams.includes(team.team_name));
+  }, [teamStats, excludedTeams]);
 
-  // Pie chart data
+  // Top 5 teams (use filtered stats)
+  const top5Teams = useMemo(() => {
+    return filteredTeamStats.slice(0, 5);
+  }, [filteredTeamStats]);
+
+  // Pie chart data (use filtered stats)
   const pieChartData = useMemo(() => {
-    const top5 = teamStats.slice(0, 5);
+    const top5 = filteredTeamStats.slice(0, 5);
     const total = top5.reduce((sum, team) => sum + team.total_messages, 0);
     return top5.map(team => ({
       name: team.team_name,
       value: team.total_messages,
       percentage: total > 0 ? ((team.total_messages / total) * 100).toFixed(1) : '0'
     }));
-  }, [teamStats]);
+  }, [filteredTeamStats]);
 
-  // Bar chart data
+  // Bar chart data (use filtered stats)
   const messagesBarData = useMemo(() => {
-    return teamStats.slice(0, 10).map(team => ({
+    return filteredTeamStats.slice(0, 10).map(team => ({
       name: team.team_name.length > 15 ? team.team_name.substring(0, 15) + '...' : team.team_name,
       messages: team.total_messages,
       activeMembers: team.active_members_count
     }));
-  }, [teamStats]);
+  }, [filteredTeamStats]);
 
   if (loading) {
     return (
@@ -236,7 +250,10 @@ export default function TeamsDashboardPage() {
           </div>
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             <DateRangeFilterDropdown onFilterChange={setDateRange} />
-            <DeveloperExclusionFilterDropdown onExclusionChange={setExcludedUsers} />
+            <CombinedExclusionFilterDropdown 
+              onDeveloperExclusionChange={setExcludedUsers}
+              onTeamExclusionChange={setExcludedTeams}
+            />
             <button
               onClick={() => router.push('/admin/top-questions')}
               style={{
@@ -300,7 +317,7 @@ export default function TeamsDashboardPage() {
             <>
               {' • '}
               <span style={{ color: '#059669', fontWeight: 500 }}>
-                Date Range: {dateRange.startDate ? formatLocalTime(dateRange.startDate).split(',')[0] : 'All'} - {dateRange.endDate ? formatLocalTime(dateRange.endDate).split(',')[0] : 'All'}
+                Date Range: {dateRange.startDate ? formatLocalDate(dateRange.startDate) : 'All'} - {dateRange.endDate ? formatLocalDate(dateRange.endDate) : 'All'}
               </span>
             </>
           ) : (
@@ -318,7 +335,7 @@ export default function TeamsDashboardPage() {
         </div>
       )}
 
-      {!error && teamStats.length === 0 && !fetching && (
+      {!error && filteredTeamStats.length === 0 && !fetching && (
         <div style={{ 
           background: '#f0f9ff', 
           color: '#0369a1', 
@@ -400,7 +417,7 @@ export default function TeamsDashboardPage() {
       )}
 
       {/* Charts Section */}
-      {teamStats.length > 0 && (
+      {filteredTeamStats.length > 0 && (
         <div style={{ marginBottom: '32px' }}>
           <h2 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '16px', color: '#111827' }}>
             Visualizations
@@ -485,10 +502,10 @@ export default function TeamsDashboardPage() {
           <div style={{ textAlign: 'right' }}>Total Members</div>
         </div>
 
-        {teamStats.length === 0 ? (
+        {filteredTeamStats.length === 0 ? (
           <div style={{ padding: '16px', color: '#6b7280' }}>No data available.</div>
         ) : (
-          teamStats.map((team, idx) => (
+          filteredTeamStats.map((team, idx) => (
             <div
               key={team.team_name || idx}
               style={{

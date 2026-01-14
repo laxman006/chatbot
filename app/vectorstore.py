@@ -6,10 +6,11 @@ from app.graph_store import get_graph_store
 from config import (
     CHROMA_DB_PATH, INITIALIZE_VECTORSTORE,
     ENABLE_WEB_SOURCE, ENABLE_PDF_SOURCE, ENABLE_EXCEL_SOURCE, ENABLE_DOC_SOURCE, ENABLE_SHAREPOINT_SOURCE, ENABLE_OUTLOOK_SOURCE, ENABLE_JIRA_SOURCE,
-    ENABLE_SHAREPOINT_SALES_SOURCE,
+    ENABLE_SHAREPOINT_SALES_SOURCE, ENABLE_SHAREPOINT_PRESALES_SOURCE,
     WEB_SOURCE_URL, PDF_SOURCE_DIR, EXCEL_SOURCE_DIR, DOC_SOURCE_DIR, BLOG_START_PAGE,
     SHAREPOINT_SITE_URL, SHAREPOINT_START_PAGE,
     SHAREPOINT_SALES_SITE_URL, SHAREPOINT_SALES_FOLDER_PATH,
+    SHAREPOINT_PRESALES_SITE_URL, SHAREPOINT_PRESALES_FOLDER_PATH,
     OUTLOOK_USER_EMAIL, OUTLOOK_FOLDER_NAME,
     JIRA_SERVER, JIRA_PROJECT_KEYS, JIRA_DATE_FILTER,
 )
@@ -89,6 +90,12 @@ def get_current_metadata():
         # Store SharePoint Sales metadata (entire Documents library)
         metadata["sharepoint_sales"] = SHAREPOINT_SALES_SITE_URL
         metadata["enabled_sources"].append("sharepoint_sales")
+    
+    if ENABLE_SHAREPOINT_PRESALES_SOURCE:
+        # Store Presales SharePoint metadata
+        presales_path = f"{SHAREPOINT_PRESALES_FOLDER_PATH}" if SHAREPOINT_PRESALES_FOLDER_PATH else "Documents Library"
+        metadata["sharepoint_presales"] = f"{SHAREPOINT_PRESALES_SITE_URL}/{presales_path}"
+        metadata["enabled_sources"].append("sharepoint_presales")
     
     if ENABLE_OUTLOOK_SOURCE:
         # Store Outlook metadata - folder and user email
@@ -566,6 +573,92 @@ def build_enhanced_vectorstore_full() -> Chroma:
                 all_chunks.extend(chunks)
         except Exception as e:
             print(f"[WARN] SharePoint Sales ingestion failed: {e}")
+
+    # ---- SHAREPOINT PRESALES (Pre-SalesTrining - separate, incremental) ----
+    if ENABLE_SHAREPOINT_PRESALES_SOURCE:
+        try:
+            from app.helpers import fetch_latest_sharepoint_presales
+            
+            if existing_vectorstore:
+                # INCREMENTAL MODE: Only fetch latest documents (new files/folders)
+                print("[*] INCREMENTAL MODE: Fetching latest Presales SharePoint documents...")
+                print("[*] This will scan all folders (including new ones) and only add NEW documents")
+                presales_docs = fetch_latest_sharepoint_presales(max_items=100)
+                print(f"[INGEST] Latest Presales SharePoint docs: {len(presales_docs)}")
+                
+                # Deduplicate by checking existing vectorstore
+                if presales_docs:
+                    existing_identifiers = set()
+                    existing_docs = existing_vectorstore.get(include=["metadatas"])
+                    
+                    print(f"[DEBUG] Checking {len(presales_docs)} new documents against {len(existing_docs.get('metadatas', []))} existing documents")
+                    
+                    for meta in existing_docs.get("metadatas", []):
+                        # Use unique identifiers: page_url/file_url first, then file_name+folder_path combo
+                        identifier = (
+                            meta.get("page_url") or 
+                            meta.get("file_url") or 
+                            meta.get("webUrl") or
+                            # Fallback: create unique ID from file_name + folder_path
+                            (f"{meta.get('file_name', '')}||{meta.get('folder_path', '')}" if meta.get('file_name') else None)
+                        )
+                        if identifier:
+                            existing_identifiers.add(identifier)
+                            # Also add normalized versions (remove query params, trailing slashes)
+                            if isinstance(identifier, str) and identifier.startswith('http'):
+                                # Add normalized URL (remove query params)
+                                normalized = identifier.split('?')[0].rstrip('/')
+                                if normalized != identifier:
+                                    existing_identifiers.add(normalized)
+                    
+                    print(f"[DEBUG] Found {len(existing_identifiers)} unique identifiers in existing vectorstore")
+                    
+                    def get_doc_identifier(doc_meta):
+                        """Get unique identifier for a document."""
+                        identifier = (
+                            doc_meta.get("page_url") or 
+                            doc_meta.get("file_url") or 
+                            doc_meta.get("webUrl") or
+                            # Fallback: create unique ID from file_name + folder_path
+                            (f"{doc_meta.get('file_name', '')}||{doc_meta.get('folder_path', '')}" if doc_meta.get('file_name') else None)
+                        )
+                        # Return both original and normalized version
+                        if identifier and isinstance(identifier, str) and identifier.startswith('http'):
+                            return [identifier, identifier.split('?')[0].rstrip('/')]
+                        return [identifier] if identifier else [None]
+                    
+                    new_presales_docs = []
+                    duplicate_count = 0
+                    for doc in presales_docs:
+                        doc_identifiers = get_doc_identifier(doc.metadata)
+                        # Check if any identifier variant matches
+                        is_duplicate = any(ident in existing_identifiers for ident in doc_identifiers if ident)
+                        
+                        if not is_duplicate:
+                            new_presales_docs.append(doc)
+                        else:
+                            duplicate_count += 1
+                            if duplicate_count <= 5:  # Log first 5 duplicates for debugging
+                                print(f"[DEBUG] Duplicate found: {doc.metadata.get('file_name', 'Unknown')} - {doc_identifiers[0]}")
+                    
+                    print(f"[OK] New Presales SharePoint documents to add: {len(new_presales_docs)} (skipped {duplicate_count} duplicates)")
+                    if len(new_presales_docs) == 0 and len(presales_docs) > 0:
+                        print(f"[WARNING] All {len(presales_docs)} documents were marked as duplicates!")
+                        print(f"[DEBUG] Sample document metadata: {presales_docs[0].metadata}")
+                        print(f"[DEBUG] Sample identifier: {get_doc_identifier(presales_docs[0].metadata)}")
+                    
+                    presales_docs = new_presales_docs
+            else:
+                # FULL BUILD MODE: Fetch all documents from entire folder/library
+                print("[*] FULL BUILD MODE: Fetching all Presales SharePoint documents...")
+                presales_docs = fetch_latest_sharepoint_presales(max_items=99999)  # Get all documents
+                print(f"[INGEST] Presales SharePoint docs: {len(presales_docs)}")
+            
+            if presales_docs:
+                chunks = builder.process_documents(presales_docs, source_type="sharepoint_presales")
+                all_chunks.extend(chunks)
+        except Exception as e:
+            print(f"[WARN] Presales SharePoint ingestion failed: {e}")
 
     # ---- OUTLOOK / EMAIL ----
     if ENABLE_OUTLOOK_SOURCE:

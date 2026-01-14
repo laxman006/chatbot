@@ -307,6 +307,13 @@ SHAREPOINT_SALES_FOLDER_PATH = os.getenv("SHAREPOINT_SALES_FOLDER_PATH", "Pre-Sa
 SHAREPOINT_SALES_MAX_DEPTH = int(os.getenv("SHAREPOINT_SALES_MAX_DEPTH", "999"))
 SHAREPOINT_SALES_PRIORITY = os.getenv("SHAREPOINT_SALES_PRIORITY", "false").lower() == "true"
 
+# Presales SharePoint (separate source with incremental ingestion)
+ENABLE_SHAREPOINT_PRESALES_SOURCE = os.getenv("ENABLE_SHAREPOINT_PRESALES_SOURCE", "false").lower() == "true"
+SHAREPOINT_PRESALES_SITE_URL = os.getenv("SHAREPOINT_PRESALES_SITE_URL", "https://cloudfuzecom.sharepoint.com/sites/Pre-SalesTrining")
+SHAREPOINT_PRESALES_FOLDER_PATH = os.getenv("SHAREPOINT_PRESALES_FOLDER_PATH", "Release 1")
+SHAREPOINT_PRESALES_MAX_DEPTH = int(os.getenv("SHAREPOINT_PRESALES_MAX_DEPTH", "999"))
+# SHAREPOINT_PRESALES_PRIORITY removed - works like regular SharePoint (no priority flag needed)
+
 # SharePoint Transcripts Configuration
 ENABLE_TRANSCRIPT_PROCESSING = os.getenv("ENABLE_TRANSCRIPT_PROCESSING", "false").lower() == "true"
 SHAREPOINT_TRANSCRIPTS_SITE_URL = os.getenv("SHAREPOINT_TRANSCRIPTS_SITE_URL", "https://cloudfuzecom.sharepoint.com/sites/Repository25")

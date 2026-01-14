@@ -67,14 +67,15 @@ export default function DateRangeFilterDropdown({ onFilterChange, initialFilterT
     const month = now.getUTCMonth();
     const day = now.getUTCDate();
     
-    // End of today in UTC
-    const end = new Date(Date.UTC(year, month, day, 23, 59, 59, 999));
-    // Start of N days ago in UTC
-    const startDate = new Date(end);
-    startDate.setUTCDate(startDate.getUTCDate() - days);
+    // End of yesterday in UTC (Last N days excludes today)
+    const yesterday = new Date(Date.UTC(year, month, day - 1, 23, 59, 59, 999));
+    // Start date: N days before yesterday (so we get exactly N days, excluding today)
+    // Example: Last 7 days from Jan 14 = Jan 7 to Jan 13 (7 days, excluding Jan 14)
+    const startDate = new Date(yesterday);
+    startDate.setUTCDate(startDate.getUTCDate() - (days - 1));
     startDate.setUTCHours(0, 0, 0, 0);
     
-    return { startDate: startDate.toISOString(), endDate: end.toISOString() };
+    return { startDate: startDate.toISOString(), endDate: yesterday.toISOString() };
   };
 
   const getCustomRange = (): DateRange | null => {

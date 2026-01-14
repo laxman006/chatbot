@@ -4269,18 +4269,30 @@ async def get_teams_summary_mongodb(
         await mongodb_memory.connect()
         
         # Parse dates if provided
+        # Note: Dates are parsed as UTC to match how message_events stores created_at (naive UTC from datetime.utcnow())
+        # We explicitly create UTC datetimes by parsing as UTC timezone-aware, then converting to naive UTC
         start_date = None
         end_date = None
         if from_date:
             try:
-                start_date = datetime.strptime(from_date, "%Y-%m-%d")
+                # Parse date string and create timezone-aware UTC datetime, then convert to naive UTC
+                # This ensures the datetime represents UTC time regardless of server timezone
+                parsed_naive = datetime.strptime(from_date, "%Y-%m-%d")
+                # Create timezone-aware UTC datetime
+                parsed_utc = datetime(parsed_naive.year, parsed_naive.month, parsed_naive.day, 0, 0, 0, 0, tzinfo=timezone.utc)
+                # Convert to naive UTC (remove timezone info but keep UTC time values)
+                start_date = parsed_utc.replace(tzinfo=None)
             except ValueError:
                 raise HTTPException(status_code=400, detail=f"Invalid from_date format. Use YYYY-MM-DD")
         
         if to_date:
             try:
-                end_date = datetime.strptime(to_date, "%Y-%m-%d")
-                end_date = end_date.replace(hour=23, minute=59, second=59)
+                # Parse date string and create timezone-aware UTC datetime for end of day
+                parsed_naive = datetime.strptime(to_date, "%Y-%m-%d")
+                # Create timezone-aware UTC datetime for end of day
+                parsed_utc = datetime(parsed_naive.year, parsed_naive.month, parsed_naive.day, 23, 59, 59, 0, tzinfo=timezone.utc)
+                # Convert to naive UTC (remove timezone info but keep UTC time values)
+                end_date = parsed_utc.replace(tzinfo=None)
             except ValueError:
                 raise HTTPException(status_code=400, detail=f"Invalid to_date format. Use YYYY-MM-DD")
         

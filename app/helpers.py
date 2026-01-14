@@ -2,7 +2,7 @@ import os
 import requests
 import json
 import markdown
-from typing import List
+from typing import List, Optional
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -11,7 +11,8 @@ from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
 from config import (
     CHROMA_DB_PATH, BLOG_POSTS_PER_PAGE, BLOG_MAX_PAGES, BLOG_START_PAGE,
-    SHAREPOINT_SALES_SITE_URL, SHAREPOINT_SALES_FOLDER_PATH, SHAREPOINT_SALES_MAX_DEPTH
+    SHAREPOINT_SALES_SITE_URL, SHAREPOINT_SALES_FOLDER_PATH, SHAREPOINT_SALES_MAX_DEPTH,
+    SHAREPOINT_PRESALES_SITE_URL, SHAREPOINT_PRESALES_FOLDER_PATH, SHAREPOINT_PRESALES_MAX_DEPTH
 )
 from app.pdf_processor import process_pdf_directory, chunk_pdf_documents
 from app.excel_processor import process_excel_directory, chunk_excel_documents
@@ -348,6 +349,168 @@ def fetch_latest_sharepoint_sales(max_items: int = 100) -> List[Document]:
         doc.metadata['priority'] = True  # Mark for priority boosting
     
     print(f"[OK] Fetched {len(documents)} SharePoint Sales documents from CFSales")
+    return documents
+
+def find_folder_by_path_helper(extractor, drive_id: str, folder_path: str) -> Optional[str]:
+    """
+    Find folder ID by path in SharePoint.
+    Helper function for SharePoint extraction.
+    
+    Args:
+        extractor: SharePointGraphExtractor instance
+        drive_id: SharePoint drive ID
+        folder_path: Folder path like "Release 1" or "Folder1/Folder2"
+    
+    Returns:
+        Folder item ID or None
+    """
+    try:
+        from app.sharepoint_auth import sharepoint_auth
+        import requests
+        
+        # Split path into components
+        path_parts = [p.strip() for p in folder_path.split('/') if p.strip()]
+        
+        # Start from root
+        current_item_id = None
+        
+        for folder_name in path_parts:
+            # List items in current folder
+            if current_item_id:
+                graph_url = f"{extractor.graph_base_url}/drives/{drive_id}/items/{current_item_id}/children"
+            else:
+                graph_url = f"{extractor.graph_base_url}/drives/{drive_id}/root/children"
+            
+            headers = sharepoint_auth.get_headers()
+            response = requests.get(graph_url, headers=headers, timeout=30)
+            
+            if response.status_code != 200:
+                print(f"[ERROR] Failed to list items: {response.status_code}")
+                return None
+            
+            data = response.json()
+            items = data.get('value', [])
+            
+            # Find folder with matching name
+            found = False
+            for item in items:
+                if 'folder' in item and item.get('name', '').strip() == folder_name:
+                    current_item_id = item.get('id')
+                    found = True
+                    break
+            
+            if not found:
+                print(f"[ERROR] Folder not found: {folder_name} in path {folder_path}")
+                return None
+        
+        return current_item_id
+        
+    except Exception as e:
+        print(f"[ERROR] Error finding folder: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
+def fetch_latest_sharepoint_presales(max_items: int = 100) -> List[Document]:
+    """
+    Fetch SharePoint documents from Presales Training site.
+    Extracts from the specified folder path (e.g., "Release 1") or entire Documents library.
+    Similar to fetch_latest_sharepoint_sales - optimized for incremental updates.
+    
+    Args:
+        max_items: Maximum number of latest documents to fetch (default: 100)
+                  Set to 9999 to get all documents
+    
+    Returns:
+        List of Document objects for Presales SharePoint documents
+    """
+    from app.sharepoint_graph_extractor import SharePointGraphExtractor
+    
+    print(f"[*] Fetching SharePoint documents from Presales Training...")
+    print(f"   Site: {SHAREPOINT_PRESALES_SITE_URL}")
+    
+    # Extract just the site URL from the full path if needed
+    parsed_url = urlparse(SHAREPOINT_PRESALES_SITE_URL)
+    path_parts = [p for p in parsed_url.path.split('/') if p]
+    
+    # Find 'sites' in path and extract site URL
+    clean_site_url = SHAREPOINT_PRESALES_SITE_URL  # Default to original
+    if 'sites' in path_parts:
+        site_idx = path_parts.index('sites')
+        if site_idx + 1 < len(path_parts):
+            # Build clean site URL: https://hostname/sites/sitename
+            clean_site_url = f"{parsed_url.scheme}://{parsed_url.netloc}/sites/{path_parts[site_idx + 1]}"
+            print(f"[*] Extracted site URL: {clean_site_url}")
+        else:
+            print("[ERROR] Could not extract site name from URL")
+            return []
+    else:
+        # If no 'sites' found, use URL as-is (might already be clean)
+        print(f"[*] Using site URL as-is: {clean_site_url}")
+    
+    # Create extractor with cleaned presales site URL
+    extractor = SharePointGraphExtractor()
+    extractor.site_url = clean_site_url
+    # Reset cached IDs so they're fetched for the new site
+    extractor.site_id = None
+    extractor.drive_id = None
+    
+    # Get site and drive IDs
+    site_id = extractor.get_site_id()
+    if not site_id:
+        print("[ERROR] Failed to get Presales Training site ID")
+        return []
+    
+    drive_id = extractor.get_drive_id()
+    if not drive_id:
+        print("[ERROR] Failed to get Presales Training drive ID")
+        return []
+    
+    # Check if a specific folder path is configured
+    folder_id = None
+    folder_path_list = []
+    
+    if SHAREPOINT_PRESALES_FOLDER_PATH:
+        print(f"[*] Extracting from specific folder: {SHAREPOINT_PRESALES_FOLDER_PATH}")
+        # Find folder by path
+        folder_id = find_folder_by_path_helper(extractor, drive_id, SHAREPOINT_PRESALES_FOLDER_PATH)
+        if folder_id:
+            # Convert folder path string to list for extract_from_folder
+            folder_path_list = [p.strip() for p in SHAREPOINT_PRESALES_FOLDER_PATH.split('/') if p.strip()]
+            print(f"[OK] Found folder ID: {folder_id[:50]}...")
+        else:
+            print(f"[WARNING] Folder not found: {SHAREPOINT_PRESALES_FOLDER_PATH}")
+            print("[*] Falling back to entire Documents library...")
+    else:
+        print(f"[*] Extracting from entire Documents library...")
+    
+    # Extract documents from the folder (or root if no folder specified)
+    # This will recursively scan ALL folders, including new ones
+    documents = extractor.extract_from_folder(
+        item_id=folder_id,  # None means root folder (Documents library)
+        folder_path=folder_path_list,  # Empty list means root
+        visited_ids=set(),
+        depth=0
+    )
+    
+    # Sort by modified date (newest first) and limit
+    # Note: SharePoint documents may have 'lastModifiedDateTime' in metadata
+    documents.sort(
+        key=lambda d: d.metadata.get('modified_at', '') or d.metadata.get('lastModifiedDateTime', ''),
+        reverse=True
+    )
+    documents = documents[:max_items]
+    
+    # Add tag and source type (works like regular SharePoint - no priority flag)
+    for doc in documents:
+        doc.metadata['source_type'] = 'sharepoint_presales'
+        # Get folder path from metadata if available
+        folder_path = doc.metadata.get('folder_tags', '').replace('sharepoint/', '') or 'Documents'
+        doc.metadata['tag'] = f"sharepoint_presales/{folder_path}"
+        # No priority flag - works like regular SharePoint
+    
+    print(f"[OK] Fetched {len(documents)} Presales SharePoint documents")
     return documents
 
 def strip_markdown(md_text: str) -> str:
