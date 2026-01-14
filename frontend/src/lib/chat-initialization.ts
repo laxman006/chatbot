@@ -2364,7 +2364,23 @@ export function initializeChatApp(options: InitOptions = {}) {
         // ✅ PHASE 2.5.4: Removed abort check - streams complete independently
         // Streams now run to completion regardless of navigation
         
-        const { done, value } = await reader.read();
+        let readResult;
+        try {
+          readResult = await reader.read();
+        } catch (readError) {
+          console.error("[CHAT] Stream read error:", readError);
+          // Check if it's a connection closed error
+          if (readError instanceof Error && (readError.message.includes('Connection closed') || readError.message.includes('connection closed'))) {
+            console.error("[CHAT] Connection closed unexpectedly. Backend may be unavailable.");
+            botDiv.innerHTML = "Sorry, the connection was closed. Please check if the backend is running and try again.";
+            setSessionGenerating(sessionId!, false);
+            botDiv.dataset.generating = 'false';
+            return;
+          }
+          throw readError; // Re-throw if it's a different error
+        }
+        
+        const { done, value } = readResult;
         if (done) break;
         
         buffer += decoder.decode(value, { stream: true });
