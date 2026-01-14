@@ -10,7 +10,8 @@ import {
   getCurrentUser,
   deleteSession as deleteSessionUtil,
   saveAllSessions,
-  setCurrentSessionId
+  setCurrentSessionId,
+  clearUserLocalStorage
 } from '@/lib/session-utils';
 import { isAdminEmail } from '@/constants/admins';
 import { apiFetch } from '@/lib/api';
@@ -462,6 +463,10 @@ export default function ChatSidebar({
   // ✅ NEW: Handle logout confirmation (session-based auth)
   const handleLogoutConfirm = async () => {
     try {
+      // ✅ Get user ID BEFORE removing user data (needed to clear user-specific keys)
+      const currentUser = getCurrentUser();
+      const userId = currentUser?.id;
+      
       // ✅ Session-based auth - session_id cookie sent automatically via proxy
       const response = await apiFetch('/auth/logout', {
         method: 'POST'
@@ -475,8 +480,12 @@ export default function ChatSidebar({
     } catch (error) {
       console.error('[AUTH] Logout error:', error);
     } finally {
-      // Always clear local data
+      // ✅ Clear all user-specific localStorage data (must be before removing 'user')
+      clearUserLocalStorage();
+      
+      // ✅ Always clear user data (must be last to allow clearUserLocalStorage to get userId)
       localStorage.removeItem('user');
+      
       // 🔒 CRITICAL: Clear session expiration flag on manual logout
       // This prevents showing "session expired" error when user manually logs out
       sessionStorage.removeItem('session_expired');

@@ -33,6 +33,13 @@ export function setCurrentSessionId(sessionId: string): void {
 export function getAllSessions(): ChatSession[] {
   if (typeof window === 'undefined') return [];
   
+  // ✅ Safety check: ensure user exists before loading sessions
+  const user = getCurrentUser();
+  if (!user?.id) {
+    console.warn('[SIDEBAR] User missing, not loading chat sessions.');
+    return [];
+  }
+  
   try {
     const storageKey = getUserStorageKey('chat_sessions');
     const sessionsStr = localStorage.getItem(storageKey);
@@ -393,18 +400,117 @@ export function getCurrentUser(): User | null {
   }
 }
 
+// ✅ Hydrate user from backend when session exists but localStorage.user is missing
+export async function hydrateUserFromBackend(): Promise<boolean> {
+  try {
+    console.log('[AUTH] Hydrating user from backend...');
+
+    // ✅ Use existing endpoint (recommended)
+    const res = await apiFetch('/user/profile', { method: 'GET' });
+
+    if (res.status !== 200) {
+      console.warn('[AUTH] Failed to hydrate user, status:', res.status);
+      return false;
+    }
+
+    const data = await res.json();
+
+    // ✅ Normalize possible backend response structures
+    const user = {
+      id: data.user_id || data.id || data.email,
+      name: data.user_name || data.name || 'User',
+      email: data.user_email || data.email
+    };
+
+    if (!user?.id || !user?.email) {
+      console.warn('[AUTH] Hydration failed: Invalid user data:', data);
+      return false;
+    }
+
+    localStorage.setItem('user', JSON.stringify(user));
+
+    console.log('[AUTH] ✅ User hydrated successfully:', user.email);
+    return true;
+  } catch (err) {
+    console.error('[AUTH] hydrateUserFromBackend error:', err);
+    return false;
+  }
+}
+
 // ✅ SIMPLE SESSION CHECK (ONLY SOURCE OF TRUTH)
 // This is the ONLY function that should be used to check authentication
+// Now also ensures user is hydrated when session is valid
 export async function checkSession(): Promise<boolean> {
   try {
     const response = await apiFetch('/chat/sessions/all?limit=1', {
       method: 'GET'
     });
-    return response.status === 200;
+
+    if (response.status !== 200) {
+      console.log('[SESSION] No valid cookie session:', response.status);
+      return false;
+    }
+
+    // ✅ Cookie session valid → now ensure localStorage user exists
+    const currentUser = getCurrentUser();
+
+    if (!currentUser) {
+      console.warn('[AUTH] Session valid but localStorage user missing → Hydrating...');
+
+      const hydrated = await hydrateUserFromBackend();
+
+      if (!hydrated) {
+        console.warn('[AUTH] Hydration failed even though session exists');
+        return false;
+      }
+    }
+
+    return true;
   } catch (error) {
     console.error('[SESSION] checkSession failed:', error);
     return false;
   }
+}
+
+/**
+ * Clear all user-specific data from localStorage
+ * Used during logout to ensure complete cleanup
+ * 
+ * @param userId - User ID to clear data for (if not provided, gets from current user)
+ */
+export function clearUserLocalStorage(userId?: string): void {
+  if (typeof window === 'undefined') return;
+  
+  // Get userId if not provided
+  if (!userId) {
+    const user = getCurrentUser();
+    userId = user?.id || 'anonymous';
+  }
+  
+  if (!userId || userId === 'anonymous') {
+    console.warn('[LOGOUT] No user ID provided, cannot clear user-specific data');
+    return;
+  }
+  
+  // Clear all user-specific keys
+  const keysToRemove: string[] = [
+    `chat_sessions_${userId}`,
+    `chatbot_session_id_${userId}`,
+    `deleted_chat_sessions_${userId}`
+  ];
+  
+  // Remove each key
+  keysToRemove.forEach(key => {
+    localStorage.removeItem(key);
+  });
+  
+  // Clear any section collapse states for this user
+  const sectionKeys = Object.keys(localStorage).filter(key => 
+    key.startsWith(`section_collapsed_`) && key.includes(userId!)
+  );
+  sectionKeys.forEach(key => localStorage.removeItem(key));
+  
+  console.log(`[LOGOUT] ✅ Cleared all localStorage data for user: ${userId}`);
 }
 
 // ✅ DEPRECATED: Token verification no longer needed

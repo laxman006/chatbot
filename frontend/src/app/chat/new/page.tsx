@@ -58,11 +58,19 @@ export default function NewChatPage() {
           return;
         }
 
-        // Get user info for UI (optional - session is validated by cookie)
+        // ✅ checkSession() now guarantees user exists (or fails)
         const currentUser = getCurrentUser();
-        if (currentUser) {
-          console.log('[AUTH] ✅ User authenticated via session:', currentUser.email);
+
+        if (!currentUser) {
+          console.error('[AUTH] Session valid but still no user found (unexpected). Redirecting...');
+          localStorage.removeItem('user');
+          setIsAuthenticated(false);
+          setIsLoading(false);
+          router.replace('/login');
+          return;
         }
+
+        console.log('[AUTH] ✅ Logged in user:', currentUser.email);
         
         setIsAuthenticated(true);
         setIsLoading(false);

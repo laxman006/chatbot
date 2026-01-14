@@ -4,6 +4,8 @@
 
 Manages chat sessions, conversation history, and user data persistence. Sessions can be saved, retrieved, shared, and managed across multiple devices.
 
+> **📖 For complete workflow documentation, see:** [AUTHENTICATION_SESSION_WORKFLOW.md](./AUTHENTICATION_SESSION_WORKFLOW.md)
+
 ---
 
 ## Related Files
@@ -77,12 +79,25 @@ Manages chat sessions, conversation history, and user data persistence. Sessions
 
 ## Feature Workflow
 
+### Quick Overview
+
 1. **User starts chat** → Creates new session or loads existing
 2. **Messages sent** → Saved to conversation history
 3. **Session save** → User saves session with title
 4. **Session retrieval** → Load session from MongoDB
 5. **Session list** → Display all user sessions
 6. **Session deletion** → Remove session from database
+
+### Detailed Workflow
+
+For complete step-by-step workflow including:
+- Authentication flow (Microsoft OAuth)
+- Session creation and validation
+- Token refresh
+- Logout process
+- Error handling
+
+See: [AUTHENTICATION_SESSION_WORKFLOW.md](./AUTHENTICATION_SESSION_WORKFLOW.md)
 
 ---
 

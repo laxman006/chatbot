@@ -34,7 +34,8 @@ export default function LoginPage() {
     const redirectUrl = sessionStorage.getItem('oauth_redirect') || 
                        localStorage.getItem('oauth_redirect_backup') || 
                        '/';
-    window.location.href = redirectUrl;
+    // ✅ Use router instead of window.location.href to avoid full page reload
+    router.replace(redirectUrl);
   };
 
   return (
@@ -151,7 +152,8 @@ function initializeLoginPage(onShowOnboarding?: (email: string, name: string) =>
       // Clear any stored session expiration error
       sessionStorage.removeItem('session_expired');
       sessionStorage.removeItem('manual_logout');
-      window.location.href = "/";
+      // ✅ Use router instead of window.location.href to avoid full page reload
+      router.replace('/');
     } else {
       // Session expired or invalid - stay on login page
       console.log('[AUTH] No valid session');

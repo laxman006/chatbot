@@ -3,7 +3,7 @@
 
 import { AppRouterInstance } from 'next/dist/shared/lib/app-router-context.shared-runtime';
 import type { ChatSession, SuggestedQuestion } from '@/types/chat';
-import { fetchAndMergeUserSessions, getCurrentUser } from '@/lib/session-utils';
+import { fetchAndMergeUserSessions, getCurrentUser, clearUserLocalStorage } from '@/lib/session-utils';
 import { apiFetch } from '@/lib/api';
 
 // Character limit constants
@@ -3778,8 +3778,12 @@ export function initializeChatApp(options: InitOptions = {}) {
     } catch (error) {
       console.error('[AUTH] Logout error:', error);
     } finally {
-      // Always clear local data
+      // ✅ Clear all user-specific localStorage data (must be before removing 'user')
+      clearUserLocalStorage();
+      
+      // ✅ Always clear user data (must be last to allow clearUserLocalStorage to get userId)
       localStorage.removeItem('user');
+      
       // 🔒 CRITICAL: Clear session expiration flag on manual logout
       // This prevents showing "session expired" error when user manually logs out
       sessionStorage.removeItem('session_expired');
