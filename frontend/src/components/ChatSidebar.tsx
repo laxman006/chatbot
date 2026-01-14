@@ -146,9 +146,12 @@ export default function ChatSidebar({
     if (othersChats.length > 0) {
       othersChats.forEach((chat: OtherUserChat) => {
         const displayTitle = chat.title.length > 40 ? chat.title.substring(0, 40) + '...' : chat.title;
-        const isActive = chat.session_id === activeSessionId;
+        // Use conversation_id for URL routing, fallback to session_id for backward compatibility
+        const urlId = chat.conversation_id || chat.session_id;
+        const isActive = urlId === activeSessionId;
+        
         othersHtml += `
-          <div class="history-item others-item ${isActive ? 'active' : ''}" data-session-id="${chat.session_id}" data-is-others="true">
+          <div class="history-item others-item ${isActive ? 'active' : ''}" data-session-id="${urlId}" data-is-others="true">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
             </svg>
@@ -194,15 +197,13 @@ export default function ChatSidebar({
         // Navigate based on chat type
         // NOTE: Sidebar will remain open during navigation (no onToggle called)
         if (isOthers) {
-          // Client-side load for others' session (read-only) - no page reload
+          // Client-side load for others' session (read-only)
           if (typeof (window as any).loadOthersSession === 'function') {
             (window as any).loadOthersSession(sid);
-            // Update URL without page reload
-            window.history.pushState({}, '', `/chat/others/${sid}`);
-          } else {
-            // Fallback to router if function not available
-            router.push(`/chat/others/${sid}`);
           }
+          // ✅ CORRECT FIX: Use router.push() instead of window.history.pushState()
+          // This keeps Next.js router in sync with browser URL
+          router.push(`/chat/others/${sid}`);
         } else {
           // Navigate to own session
           // Sidebar stays open
@@ -259,6 +260,7 @@ export default function ChatSidebar({
 
           // If deleted current session, navigate to new chat
           if (sid === activeSessionId) {
+            // REQUIRED: Always navigate to /chat/new
             router.push('/chat/new');
           }
 
@@ -658,7 +660,10 @@ export default function ChatSidebar({
         <div className="sidebar-top-row">
           <button
             className="sidebar-icon"
-            onClick={() => router.push('/chat/new')}
+            onClick={() => {
+              // REQUIRED: Always navigate to /chat/new
+              router.push('/chat/new');
+            }}
             title="New chat"
             style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
           >

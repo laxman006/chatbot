@@ -725,13 +725,29 @@ export function initializeChatApp(options: InitOptions = {}) {
       
       console.log('[SESSION] Loading others session:', otherSessionId);
       
-      // Extract user_id from session_id (format: "user_chat_{user_id}")
-      const userId = otherSessionId.replace('user_chat_', '');
+      let response: Response;
       
-      // ✅ Session-based auth - session_id cookie sent automatically via proxy
-      const response = await apiFetch(`/chat/sessions/messages/${userId}`, {
-        method: 'GET'
-      });
+      // Check if this is a conversation_id format (MongoDB ObjectId - 24 hex characters)
+      const isConversationId = /^[0-9a-fA-F]{24}$/.test(otherSessionId);
+      
+      if (isConversationId) {
+        // New format: conversation_id (MongoDB _id)
+        console.log('[SESSION] Loading others session with conversation_id:', otherSessionId);
+        response = await apiFetch(`/chat/sessions/by-conversation/${otherSessionId}`, {
+          method: 'GET'
+        });
+      } else if (otherSessionId.startsWith('user_chat_')) {
+        // Legacy format: user_chat_{user_id} (backward compatibility)
+        const userId = otherSessionId.replace('user_chat_', '');
+        console.log('[SESSION] Loading others session with userId (legacy format):', userId);
+        response = await apiFetch(`/chat/sessions/messages/${userId}`, {
+          method: 'GET'
+        });
+      } else {
+        console.error('[SESSION] Invalid others session format:', otherSessionId);
+        showToast('Invalid chat session format', 'error', 5000);
+        return;
+      }
       
       if (response.status === 403) {
         console.error('[SESSION] Access denied (403) - You do not have permission to view this chat');
@@ -1584,9 +1600,12 @@ export function initializeChatApp(options: InitOptions = {}) {
       // Render all others' chats without date grouping
       othersChats.forEach((chat: OtherUserChat) => {
         const displayTitle = chat.title.length > 40 ? chat.title.substring(0, 40) + '...' : chat.title;
-        const isActive = chat.session_id === activeSessionId;
+        // Use conversation_id for URL routing, fallback to session_id for backward compatibility
+        const urlId = chat.conversation_id || chat.session_id;
+        const isActive = urlId === activeSessionId;
+        
         othersHtml += `
-          <div class="history-item others-item ${isActive ? 'active' : ''}" data-session-id="${chat.session_id}" data-is-others="true">
+          <div class="history-item others-item ${isActive ? 'active' : ''}" data-session-id="${urlId}" data-is-others="true">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
             </svg>
@@ -1651,17 +1670,23 @@ export function initializeChatApp(options: InitOptions = {}) {
         
         // Now perform client-side session switch
         if (isOthers) {
-          // Client-side load only, no navigation
+          // Load others' session
           loadOthersSession(sid!);
-          // Update URL passively (for deep linking and browser history)
-          window.history.pushState({}, '', `/chat/others/${sid}`);
+          // ✅ CORRECT FIX: Use router.push() instead of window.history.pushState()
+          // This keeps Next.js router in sync with browser URL
+          if (router) {
+            router.push(`/chat/others/${sid}`);
+          }
         } else {
-          // Client-side load only, no navigation
+          // Load own session
           const session = sessions.find(s => s.id === sid);
           if (session) {
             loadSession(session, false);
-            // Update URL passively (for deep linking and browser history)
-            window.history.pushState({}, '', `/chat/${sid}`);
+            // ✅ CORRECT FIX: Use router.push() instead of window.history.pushState()
+            // This keeps Next.js router in sync with browser URL
+            if (router) {
+              router.push(`/chat/${sid}`);
+            }
           }
         }
         /* ===================================================== */
@@ -2467,9 +2492,8 @@ export function initializeChatApp(options: InitOptions = {}) {
                 saveCurrentSession();
                 
                 // If this was a new session from /chat/new, update URL to session-specific path
-                // ✅ CRITICAL FIX: Only update URL AFTER streaming is completely done
-                // ✅ Use window.history.replaceState() to update URL WITHOUT triggering Next.js navigation
-                // ✅ This prevents page reload while still updating the browser URL
+                // ✅ CORRECT FIX: Use router.replace() to keep Next.js router in sync
+                // This ensures URL, router state, and app state stay synchronized
                 if (router && sessionId && isNewSessionPendingNavigation) {
                   const currentPath = window.location.pathname;
                   const targetPath = `/chat/${sessionId}`;
@@ -2479,29 +2503,23 @@ export function initializeChatApp(options: InitOptions = {}) {
                   // 2. Streaming is completely done (we're in the 'done' event handler)
                   // 3. We're actually on /chat/new route
                   if (currentPath !== targetPath && currentPath === '/chat/new') {
-                    console.log('[SESSION] First message complete, updating URL to /chat/' + sessionId);
+                    console.log('[SESSION] First message complete, navigating to /chat/' + sessionId);
                     isNewSessionPendingNavigation = false; // Clear flag
                     
-                    // ✅ CRITICAL FIX: Use window.history.replaceState() instead of router.replace()
-                    // This updates the URL without triggering Next.js route change or page reload
-                    // We use a longer delay to ensure streaming is completely finished
+                    // ✅ CORRECT FIX: Use router.replace() instead of window.history.replaceState()
+                    // This keeps Next.js router in sync with browser URL
+                    // Delay slightly to ensure streaming is completely finished
                     setTimeout(() => {
-                      if (typeof window !== 'undefined' && window.history && !isSessionGenerating(sessionId!)) {
+                      if (typeof window !== 'undefined' && !isSessionGenerating(sessionId!)) {
                         try {
-                          // Update browser URL without navigation
-                          // This should NOT trigger Next.js route change
-                          const currentState = window.history.state || {};
-                          window.history.replaceState(
-                            { ...currentState, as: targetPath, url: targetPath },
-                            '',
-                            targetPath
-                          );
-                          console.log('[SESSION] ✓ URL updated to:', targetPath, '(no page reload)');
+                          // Use Next.js router to update URL and route state
+                          router.replace(targetPath);
+                          console.log('[SESSION] ✓ Navigated to:', targetPath);
                         } catch (e) {
-                          console.error('[SESSION] Failed to update URL:', e);
+                          console.error('[SESSION] Failed to navigate:', e);
                         }
                       }
-                    }, 500); // Longer delay to ensure streaming is completely done
+                    }, 500); // Delay to ensure streaming is completely done
                   } else {
                     // Already on correct path or not on /chat/new, just clear the flag
                     console.log('[SESSION] Skipping URL update - current path:', currentPath, 'target:', targetPath);
@@ -3481,8 +3499,11 @@ export function initializeChatApp(options: InitOptions = {}) {
         
         // Load the new session
         if (initialSessionId) {
-          // Check if this is an Others Chat (starts with "user_chat_")
-          if (initialSessionId.startsWith('user_chat_')) {
+          // Check if this is an Others Chat (conversation_id format or legacy user_chat_ format)
+          const isConversationId = /^[0-9a-fA-F]{24}$/.test(initialSessionId);
+          const isLegacyOthersChat = initialSessionId.startsWith('user_chat_');
+          
+          if (isConversationId || isLegacyOthersChat) {
             console.log('[SESSION] Loading Others Chat from backend:', initialSessionId);
             loadOthersSession(initialSessionId);
           } else {
@@ -3552,8 +3573,11 @@ export function initializeChatApp(options: InitOptions = {}) {
       // Load current session if it exists in localStorage
       // BUT only if we're on /chat/[sessionId] route (not /chat/new)
       if (initialSessionId) {
-        // Check if this is an Others Chat (starts with "user_chat_")
-        if (initialSessionId.startsWith('user_chat_')) {
+        // Check if this is an Others Chat (conversation_id format or legacy user_chat_ format)
+        const isConversationId = /^[0-9a-fA-F]{24}$/.test(initialSessionId);
+        const isLegacyOthersChat = initialSessionId.startsWith('user_chat_');
+        
+        if (isConversationId || isLegacyOthersChat) {
           console.log('[SESSION] Loading Others Chat from backend:', initialSessionId);
           loadOthersSession(initialSessionId);
         } else {
@@ -3676,12 +3700,16 @@ export function initializeChatApp(options: InitOptions = {}) {
     // Reset read-only mode when creating new chat
     isReadOnlyMode = false;
     
-    // If router is available, navigate to /chat/new
+    // If router is available, ALWAYS navigate to /chat/new
     if (router) {
       // Save current session before navigating
       if (messagesDiv!.children.length > 0) {
         saveCurrentSession();
       }
+      
+      // REQUIRED: Always force route change to /chat/new
+      // Don't check current path - always navigate
+      console.log('[NEW CHAT] Navigating to /chat/new');
       router.push('/chat/new');
       return;
     }

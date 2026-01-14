@@ -2903,9 +2903,10 @@ async def get_all_chat_sessions(
         await mongodb_memory.connect()
         
         # Get all users who have chat history (sorted by last activity)
+        # Include _id in the projection to use as conversation_id
         users_cursor = mongodb_memory.collection.find(
             {"messages": {"$exists": True, "$ne": []}},
-            {"user_id": 1, "messages": 1, "last_updated": 1}
+            {"user_id": 1, "messages": 1, "last_updated": 1, "_id": 1}
         ).sort("last_updated", -1).limit(limit + 10)  # Fetch extra to account for filtering
         
         sessions = []
@@ -2922,6 +2923,9 @@ async def get_all_chat_sessions(
             if not messages:
                 continue
             
+            # Get MongoDB document _id as conversation_id
+            mongo_id = str(user_doc.get("_id", ""))
+            
             # Get first user message as title
             first_message = next((msg for msg in messages if msg.get("role") == "user"), None)
             title = first_message["content"][:50] + "..." if first_message else "Chat conversation"
@@ -2931,11 +2935,12 @@ async def get_all_chat_sessions(
             timestamp = int(last_updated.timestamp() * 1000) if last_updated else 0
             
             sessions.append({
-                "session_id": f"user_chat_{user_id}",
+                "session_id": mongo_id,  # Use conversation_id as session_id for URL routing
                 "user_id": user_id,
                 "user_email": user_id,  # Using user_id as email for now
                 "user_name": user_id.split("@")[0] if "@" in user_id else user_id,
                 "title": title,
+                "conversation_id": mongo_id,  # MongoDB _id as conversation identifier
                 "created_at": timestamp,
                 "updated_at": timestamp,
                 "message_count": len(messages)
@@ -3017,6 +3022,57 @@ async def get_user_chat_messages(
             "message_count": len(formatted_messages)
         }
         
+    except Exception as e:
+        return {"error": str(e)}
+
+@router.get("/chat/sessions/by-conversation/{conversation_id}")
+async def get_user_by_conversation_id(
+    conversation_id: str,
+    auth_user: dict = Depends(require_auth)
+):
+    """Get user_id and messages from MongoDB conversation_id (_id)."""
+    try:
+        from bson import ObjectId
+        from app.mongodb_memory import mongodb_memory
+        
+        await mongodb_memory.connect()
+        
+        # Find user document by MongoDB _id
+        try:
+            mongo_object_id = ObjectId(conversation_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid conversation ID format")
+        
+        user_doc = await mongodb_memory.collection.find_one({"_id": mongo_object_id})
+        
+        if not user_doc:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        
+        user_id = user_doc.get("user_id")
+        messages = user_doc.get("messages", [])
+        
+        # Get title from first user message
+        first_message = next((msg for msg in messages if msg.get("role") == "user"), None)
+        title = first_message["content"][:50] + "..." if first_message else "Chat conversation"
+        
+        # Format messages for frontend
+        formatted_messages = []
+        for msg in messages:
+            formatted_messages.append({
+                "role": msg.get("role", "user"),
+                "content": msg.get("content", "")
+            })
+        
+        return {
+            "messages": formatted_messages,
+            "title": title,
+            "user_id": user_id,
+            "conversation_id": conversation_id,
+            "message_count": len(formatted_messages)
+        }
+        
+    except HTTPException:
+        raise
     except Exception as e:
         return {"error": str(e)}
 

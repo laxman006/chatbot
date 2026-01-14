@@ -114,6 +114,7 @@ export default function OthersSessionChatPage() {
   }
 
   const handleNewChat = () => {
+    // REQUIRED: Always navigate to /chat/new
     router.push('/chat/new');
   };
 

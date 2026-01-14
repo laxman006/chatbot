@@ -106,8 +106,11 @@ export default function ChatSessionPage() {
       console.log('[SESSION] Loading own session from [sessionId] route:', sessionId);
       
       // This route should ONLY handle own chats
-      // If user_chat_ format appears here, redirect to correct route
-      if (sessionId.startsWith('user_chat_')) {
+      // If conversation_id format (24 hex chars) or user_chat_ format appears here, redirect to correct route
+      const isConversationId = /^[0-9a-fA-F]{24}$/.test(sessionId);
+      const isLegacyOthersChat = sessionId.startsWith('user_chat_');
+      
+      if (isConversationId || isLegacyOthersChat) {
         console.log('[SESSION] Others chat detected, redirecting to /chat/others/', sessionId);
         setIsLoadingSession(false);
         router.replace(`/chat/others/${sessionId}`);
@@ -225,6 +228,8 @@ export default function ChatSessionPage() {
   }, [isAuthenticated, sessionId, router, currentSession]);
 
   const handleNewChat = () => {
+    // REQUIRED: Always navigate to /chat/new
+    // Don't check current path - always navigate
     router.push('/chat/new');
   };
 

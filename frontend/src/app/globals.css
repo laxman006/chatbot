@@ -1982,6 +1982,14 @@ header img {
   font-weight: 500;
 }
 
+.history-item-conversation-id {
+  font-size: 9px;
+  color: #9ca3af;
+  font-family: monospace;
+  margin-top: 2px;
+  opacity: 0.7;
+}
+
 .history-item-user {
   font-size: 10px;
   color: #6b7280;

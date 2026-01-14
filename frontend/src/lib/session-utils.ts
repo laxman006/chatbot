@@ -303,10 +303,65 @@ export async function loadOthersSession(
     
     console.log('[SESSION] Attempting to load others session:', otherSessionId);
     
-    // Check if this is a user_chat_ format (legacy others chat)
-    if (otherSessionId.startsWith('user_chat_')) {
+    // Check if this is a conversation_id format (MongoDB ObjectId - 24 hex characters)
+    // MongoDB ObjectIds are 24 hex characters, so check if it matches that pattern
+    const isConversationId = /^[0-9a-fA-F]{24}$/.test(otherSessionId);
+    
+    if (isConversationId) {
+      // New format: conversation_id (MongoDB _id)
+      console.log('[SESSION] Loading others session with conversation_id:', otherSessionId);
+      
+      // ✅ Session-based auth - session_id cookie sent automatically via proxy
+      const response = await apiFetch(`/chat/sessions/by-conversation/${otherSessionId}`, {
+        method: 'GET'
+      });
+      
+      // ✅ NEW: Handle 401 - session expired, redirect to login
+      if (response.status === 401) {
+        console.warn('[SESSION] Session expired, redirecting to login');
+        localStorage.removeItem('user');
+        window.location.href = '/login?error=session_expired';
+        return null;
+      }
+      
+      if (response.status === 403) {
+        console.error('[SESSION] Access denied (403) - user does not have permission to view this chat');
+        console.error('[SESSION] This chat may be from another user that you no longer have access to');
+        return null;
+      }
+      
+      if (response.status === 404) {
+        console.error('[SESSION] Chat not found (404) - this chat may have been deleted');
+        return null;
+      }
+      
+      if (!response.ok) {
+        console.error('[SESSION] Failed to load other user session: HTTP', response.status);
+        const errorText = await response.text();
+        console.error('[SESSION] Error details:', errorText);
+        return null;
+      }
+      
+      const data = await response.json();
+      
+      if (data.error) {
+        console.error('[SESSION] Backend error:', data.error);
+        return null;
+      }
+      
+      console.log('[SESSION] Successfully loaded others session:', data.title);
+      
+      return {
+        id: otherSessionId, // Use conversation_id as session id
+        title: data.title,
+        timestamp: Date.now(), // Use current timestamp
+        createdAt: Date.now(),
+        messages: data.messages || []
+      };
+    } else if (otherSessionId.startsWith('user_chat_')) {
+      // Legacy format: user_chat_{user_id} (backward compatibility)
       const userId = otherSessionId.replace('user_chat_', '');
-      console.log('[SESSION] Loading others session with userId:', userId);
+      console.log('[SESSION] Loading others session with userId (legacy format):', userId);
       
       // ✅ Session-based auth - session_id cookie sent automatically via proxy
       const response = await apiFetch(`/chat/sessions/user/${userId}?include_messages=true`, {
@@ -360,9 +415,9 @@ export async function loadOthersSession(
         messages: mostRecentSession.messages || []
       };
     } else {
-      // Not a user_chat_ format - might be a regular session ID used incorrectly
+      // Invalid format
       console.error('[SESSION] Invalid others session format:', otherSessionId);
-      console.error('[SESSION] Expected format: user_chat_* for others sessions');
+      console.error('[SESSION] Expected format: MongoDB ObjectId (24 hex chars) or user_chat_* for legacy');
       return null;
     }
   } catch (error) {

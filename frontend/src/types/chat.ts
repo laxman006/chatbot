@@ -32,6 +32,7 @@ export interface OtherUserChat {
   title: string;
   user_email?: string;
   created_at?: string;
+  conversation_id?: string; // MongoDB _id as conversation identifier
 }
 
 export interface SuggestedQuestion {
