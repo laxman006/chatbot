@@ -2350,10 +2350,18 @@ export function initializeChatApp(options: InitOptions = {}) {
       }
       
       if (!response.ok) {
+        const errorText = await response.text().catch(() => 'Unknown error');
+        console.error(`[CHAT] HTTP error! status: ${response.status}, body: ${errorText}`);
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const reader = response.body!.getReader();
+      // Check if response body exists before getting reader
+      if (!response.body) {
+        console.error("[CHAT] Response body is null - connection may have been closed");
+        throw new Error("Connection closed: No response body received");
+      }
+
+      const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
       let fullResponse = "";
