@@ -152,8 +152,8 @@ function initializeLoginPage(onShowOnboarding?: (email: string, name: string) =>
       // Clear any stored session expiration error
       sessionStorage.removeItem('session_expired');
       sessionStorage.removeItem('manual_logout');
-      // ✅ Use router instead of window.location.href to avoid full page reload
-      router.replace('/');
+      // Redirect to home page
+      window.location.href = '/';
     } else {
       // Session expired or invalid - stay on login page
       console.log('[AUTH] No valid session');
