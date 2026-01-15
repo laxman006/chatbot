@@ -53,6 +53,8 @@ services:
       dockerfile: Dockerfile.prod.light
     image: slack2teams-backend-ai:latest
     container_name: slack2teams-backend-ai
+    env_file:
+      - .env.ai
     environment:
       # Production environment variables
       OPENAI_API_KEY: "${OPENAI_API_KEY}"
