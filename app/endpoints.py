@@ -3323,16 +3323,23 @@ async def get_chat_session(
     include_messages: bool = False,
     auth_user: dict = Depends(require_auth)
 ):
-    """Get a specific chat session by ID."""
+    """Get a specific chat session by ID (only if it belongs to the authenticated user)."""
     try:
-        session = await get_session_by_id(session_id, include_messages)
+        session = await get_session_by_id(
+            session_id=session_id,
+            user_id=auth_user["user_id"],
+            include_messages=include_messages
+        )
+        
         if not session:
+            # ✅ Use 404 to avoid leaking session existence
             raise HTTPException(status_code=404, detail="Session not found")
+        
         return session
     except HTTPException:
         raise
     except Exception as e:
-        return {"error": str(e)}
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/chat/sessions/messages/{user_id}")
 async def get_user_chat_messages(
@@ -3537,6 +3544,7 @@ async def share_chat_session(
         # Handle user_chat_* format (others' chats - virtual view)
         actual_session_id = session_id
         is_others_chat = False
+        target_user_id = None  # Initialize for potential use
         
         if session_id.startswith("user_chat_"):
             # Extract user_id from user_chat_{user_id} format
@@ -3560,9 +3568,22 @@ async def share_chat_session(
             print(f"[SHARE] Using most recent session from user {target_user_id}: {actual_session_id}")
         
         # Get session to verify it exists
-        session = await get_session_by_id(actual_session_id, include_messages=True)
+        # ✅ For regular sessions, verify ownership at query level
+        # ✅ For others' chats (user_chat_*), we need to get the owner's session
+        if is_others_chat:
+            # For others' chats, use the target_user_id we extracted
+            owner_user_id = target_user_id
+        else:
+            # For regular sessions, use the authenticated user's ID
+            owner_user_id = auth_user["user_id"]
+        
+        session = await get_session_by_id(
+            session_id=actual_session_id,
+            user_id=owner_user_id,
+            include_messages=True
+        )
         if not session:
-            print(f"[SHARE] Session {actual_session_id} not found")
+            print(f"[SHARE] Session {actual_session_id} not found for user {owner_user_id}")
             raise HTTPException(
                 status_code=404, 
                 detail=f"Session not found. Make sure the chat is saved before sharing."
@@ -3574,13 +3595,7 @@ async def share_chat_session(
         if message_count == 0:
             print(f"[SHARE] ⚠️ WARNING: Sharing a chat with no messages!")
         
-        # Verify user owns this session (skip check for others' chats - they're sharing the original owner's chat)
-        if not is_others_chat and session.get("user_id") != auth_user["user_id"]:
-            print(f"[SHARE] User {auth_user['email']} tried to share chat owned by {session.get('user_id')}")
-            raise HTTPException(
-                status_code=403,
-                detail="You can only share chats in your account"
-            )
+        # ✅ Ownership already verified at query level - no need for additional check
         
         # Generate unique share token
         share_token = str(uuid.uuid4())
@@ -3642,7 +3657,18 @@ async def get_shared_chat_session(
         # ============================================================
         
         # Get the original session with messages
-        original_session = await get_session_by_id(shared_chat["session_id"], include_messages=True)
+        # ✅ First get the owner's user_id from the session, then fetch with ownership check
+        from app.mongodb_memory import get_session_owner_id
+        owner_user_id = await get_session_owner_id(shared_chat["session_id"])
+        
+        if not owner_user_id:
+            raise HTTPException(status_code=404, detail="Original session not found")
+        
+        original_session = await get_session_by_id(
+            session_id=shared_chat["session_id"],
+            user_id=owner_user_id,  # ✅ owner of shared chat
+            include_messages=True
+        )
         if not original_session:
             raise HTTPException(status_code=404, detail="Original session not found")
         

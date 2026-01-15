@@ -38,6 +38,7 @@ export default function ChatSessionPage() {
   });
   const [currentSession, setCurrentSession] = useState<ChatSession | null>(null);
   const [isReadOnly, setIsReadOnly] = useState<boolean>(false);
+  const [errorMessage, setErrorMessage] = useState<string>('');
   const authCheckRef = useRef<boolean>(false);
 
   // Save sidebar state to localStorage whenever it changes
@@ -185,6 +186,11 @@ export default function ChatSessionPage() {
           } else {
             const errorText = await response.text();
             console.log('[SESSION] Session not found on backend:', response.status, errorText);
+            if (response.status === 404) {
+              setErrorMessage('This chat is private or not shared.');
+              setIsLoadingSession(false);
+              return;
+            }
             setIsLoadingSession(false);
             router.push('/chat/new');
           }
@@ -309,6 +315,44 @@ export default function ChatSessionPage() {
             100% { transform: rotate(360deg); }
           }
         `}</style>
+      </div>
+    );
+  }
+
+  if (errorMessage) {
+    return (
+      <div style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: '100vh',
+        background: 'white',
+        fontFamily: 'Arial, sans-serif',
+        padding: '20px'
+      }}>
+        <div className="login-container">
+          <div
+            style={{
+              background: '#fee',
+              color: '#c33',
+              padding: '15px',
+              borderRadius: '10px',
+              marginTop: '20px',
+              border: '1px solid #fcc',
+              fontSize: '14px'
+            }}
+          >
+            {errorMessage}
+          </div>
+          <button
+            className="login-btn"
+            style={{ marginTop: '20px' }}
+            onClick={() => router.push('/chat/new')}
+          >
+            Go to Home
+          </button>
+        </div>
       </div>
     );
   }

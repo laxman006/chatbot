@@ -568,36 +568,70 @@ class MongoDBMemoryManager:
             logger.error(f"Error getting user sessions: {e}")
             return []
     
-    async def get_session_by_id(self, session_id: str, include_messages: bool = False) -> Optional[Dict]:
-        """Get a specific session by ID."""
+    async def get_session_by_id(self, session_id: str, user_id: str, include_messages: bool = False) -> Optional[Dict]:
+        """Get a specific session by ID (only if it belongs to this user).
+        
+        ✅ Ownership enforced at DB query level - MongoDB will ONLY return a session if:
+        - session_id matches
+        - AND it belongs to the logged-in user_id
+        """
         await self.connect()
         
         try:
             sessions_collection = self.database["chat_sessions"]
-            doc = await sessions_collection.find_one({"session_id": session_id})
+            
+            # ✅ Ownership enforced at DB query level
+            doc = await sessions_collection.find_one({
+                "session_id": session_id,
+                "user_id": user_id
+            })
+            
+            if not doc:
+                return None
+            
+            session = {
+                "session_id": doc["session_id"],
+                "user_id": doc["user_id"],
+                "user_email": doc.get("user_email", ""),
+                "user_name": doc.get("user_name", ""),
+                "title": doc.get("title", ""),
+                "created_at": int(doc["created_at"].timestamp() * 1000),
+                "updated_at": int(doc["updated_at"].timestamp() * 1000),
+                "message_count": doc.get("message_count", 0)
+            }
+            
+            # Include messages if requested
+            if include_messages:
+                session["messages"] = doc.get("messages", [])
+            
+            return session
+            
+        except Exception as e:
+            logger.error(f"Error getting session {session_id} for user {user_id}: {e}")
+            return None
+    
+    async def get_session_owner_id(self, session_id: str) -> Optional[str]:
+        """Get the user_id (owner) of a session by session_id only.
+        
+        This is used for internal operations like shared chats where we need
+        to get the owner's user_id before enforcing ownership.
+        """
+        await self.connect()
+        
+        try:
+            sessions_collection = self.database["chat_sessions"]
+            doc = await sessions_collection.find_one(
+                {"session_id": session_id},
+                {"user_id": 1}  # Only fetch user_id field
+            )
             
             if doc:
-                session = {
-                    "session_id": doc["session_id"],
-                    "user_id": doc["user_id"],
-                    "user_email": doc.get("user_email", ""),
-                    "user_name": doc.get("user_name", ""),
-                    "title": doc["title"],
-                    "created_at": int(doc["created_at"].timestamp() * 1000),
-                    "updated_at": int(doc["updated_at"].timestamp() * 1000),
-                    "message_count": doc.get("message_count", 0)
-                }
-                
-                # Include messages if requested
-                if include_messages and "messages" in doc:
-                    session["messages"] = doc["messages"]
-                
-                return session
+                return doc.get("user_id")
             
             return None
             
         except Exception as e:
-            logger.error(f"Error getting session {session_id}: {e}")
+            logger.error(f"Error getting session owner for {session_id}: {e}")
             return None
     
     async def create_shared_chat(self, session_id: str, user_email: str, share_token: str) -> Dict:
@@ -1279,9 +1313,13 @@ async def get_user_sessions(user_id: str, limit: int = 50, include_messages: boo
     """Get sessions for a specific user."""
     return await mongodb_memory.get_user_sessions(user_id, limit, include_messages)
 
-async def get_session_by_id(session_id: str, include_messages: bool = False) -> Optional[Dict]:
-    """Get a specific session by ID."""
-    return await mongodb_memory.get_session_by_id(session_id, include_messages)
+async def get_session_owner_id(session_id: str) -> Optional[str]:
+    """Get the user_id (owner) of a session by session_id only."""
+    return await mongodb_memory.get_session_owner_id(session_id)
+
+async def get_session_by_id(session_id: str, user_id: str, include_messages: bool = False) -> Optional[Dict]:
+    """Get a specific session by ID (only if it belongs to this user)."""
+    return await mongodb_memory.get_session_by_id(session_id, user_id, include_messages)
 
 async def create_shared_chat(session_id: str, user_email: str, share_token: str) -> Dict:
     """Create a shareable link for a chat session."""
