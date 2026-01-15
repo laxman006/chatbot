@@ -92,6 +92,22 @@ export default function NewChatPage() {
   // Initialize chat app ONLY after authentication is confirmed
   useEffect(() => {
     if (isAuthenticated) {
+      // Clear any stale chat state when mounting /chat/new
+      // This ensures clean state even if user navigates here from another route
+      if (typeof window !== 'undefined') {
+        const messagesDiv = document.getElementById('messages');
+        if (messagesDiv) {
+          messagesDiv.innerHTML = '';
+        }
+        const emptyState = document.getElementById('empty-state');
+        const inputSection = document.querySelector('.chatgpt-input-section') as HTMLElement;
+        if (emptyState && inputSection && messagesDiv) {
+          emptyState.style.display = 'flex';
+          messagesDiv.style.display = 'none';
+          inputSection.classList.remove('show');
+        }
+      }
+
       // Wait for marked.js to load
       const checkMarked = setInterval(() => {
         if (typeof window.marked !== 'undefined') {
@@ -110,22 +126,10 @@ export default function NewChatPage() {
   }, [isAuthenticated, router]);
 
   const handleNewChat = () => {
-    // Already on new chat page - just clear the chat interface
-    // The chat initialization will handle clearing messages
-    if (typeof window !== 'undefined') {
-      const messagesDiv = document.getElementById('messages');
-      if (messagesDiv) {
-        messagesDiv.innerHTML = '';
-      }
-      // Trigger updateEmptyState through the chat initialization
-      const emptyState = document.getElementById('empty-state');
-      const inputSection = document.querySelector('.chatgpt-input-section') as HTMLElement;
-      if (emptyState && inputSection && messagesDiv) {
-        emptyState.style.display = 'flex';
-        messagesDiv.style.display = 'none';
-        inputSection.classList.remove('show');
-      }
-    }
+    // REQUIRED: Always navigate to /chat/new to force route refresh
+    // This ensures state is cleared even if URL was changed via window.history.replaceState()
+    // Navigating to the same route forces Next.js to re-mount and clear state
+    router.push('/chat/new');
   };
 
   // Avoid rendering until after hydration to prevent mismatches

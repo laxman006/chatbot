@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   nginx:
     image: nginx:alpine
@@ -55,82 +53,16 @@ services:
       dockerfile: Dockerfile.prod.light
     image: slack2teams-backend-ai:latest
     container_name: slack2teams-backend-ai
+    env_file:
+      - .env.ai
     environment:
-      # Production environment variables
-      OPENAI_API_KEY: "${OPENAI_API_KEY}"
-      MICROSOFT_CLIENT_ID: "${MICROSOFT_CLIENT_ID}"
-      MICROSOFT_CLIENT_SECRET: "${MICROSOFT_CLIENT_SECRET}"
-      MICROSOFT_TENANT: "${MICROSOFT_TENANT}"
-      LANGFUSE_PUBLIC_KEY: "${LANGFUSE_PUBLIC_KEY}"
-      LANGFUSE_SECRET_KEY: "${LANGFUSE_SECRET_KEY}"
-      LANGFUSE_HOST: "${LANGFUSE_HOST}"
-      # MongoDB Configuration
-      MONGODB_URL: "${MONGODB_URL}"
-      MONGODB_DATABASE: "${MONGODB_DATABASE}"
-      MONGODB_CHAT_COLLECTION: "${MONGODB_CHAT_COLLECTION}"
-      MONGODB_VECTORSTORE_COLLECTION: "${MONGODB_VECTORSTORE_COLLECTION}"
-      # Vectorstore Configuration
-      VECTORSTORE_BACKEND: "${VECTORSTORE_BACKEND}"
-      INITIALIZE_VECTORSTORE: "${INITIALIZE_VECTORSTORE}"
-      # Data Sources
-      ENABLE_WEB_SOURCE: "${ENABLE_WEB_SOURCE}"
-      ENABLE_PDF_SOURCE: "${ENABLE_PDF_SOURCE}"
-      ENABLE_EXCEL_SOURCE: "${ENABLE_EXCEL_SOURCE}"
-      ENABLE_DOC_SOURCE: "${ENABLE_DOC_SOURCE}"
-      ENABLE_SHAREPOINT_SOURCE: "${ENABLE_SHAREPOINT_SOURCE}"
-      ENABLE_OUTLOOK_SOURCE: "${ENABLE_OUTLOOK_SOURCE}"
-      # Web/Blog Configuration
-      WEB_SOURCE_URL: "${WEB_SOURCE_URL}"
-      WEB_START_PAGE: "${WEB_START_PAGE}"
-      WEB_MAX_PAGES: "${WEB_MAX_PAGES}"
-      # SharePoint Configuration
-      SHAREPOINT_SITE_URL: "${SHAREPOINT_SITE_URL}"
-      SHAREPOINT_START_PAGE: "${SHAREPOINT_START_PAGE}"
-      SHAREPOINT_MAX_DEPTH: "${SHAREPOINT_MAX_DEPTH}"
-      SHAREPOINT_EXCLUDE_FILES: "${SHAREPOINT_EXCLUDE_FILES}"
-      # Outlook Configuration
-      OUTLOOK_USER_EMAIL: "${OUTLOOK_USER_EMAIL}"
-      OUTLOOK_FOLDER_NAME: "${OUTLOOK_FOLDER_NAME}"
-      OUTLOOK_MAX_EMAILS: "${OUTLOOK_MAX_EMAILS}"
-      OUTLOOK_DATE_FILTER: "${OUTLOOK_DATE_FILTER}"
-      # Chunking Configuration
-      CHUNK_TARGET_TOKENS: "${CHUNK_TARGET_TOKENS}"
-      CHUNK_OVERLAP_TOKENS: "${CHUNK_OVERLAP_TOKENS}"
-      CHUNK_MIN_TOKENS: "${CHUNK_MIN_TOKENS}"
-      # Deduplication
-      ENABLE_DEDUPLICATION: "${ENABLE_DEDUPLICATION}"
-      DEDUP_THRESHOLD: "${DEDUP_THRESHOLD}"
-      # Unstructured and OCR
-      ENABLE_UNSTRUCTURED: "${ENABLE_UNSTRUCTURED}"
-      ENABLE_OCR: "${ENABLE_OCR}"
-      OCR_LANGUAGE: "${OCR_LANGUAGE}"
-      # Graph Storage
-      GRAPH_DB_PATH: "${GRAPH_DB_PATH}"
-      ENABLE_GRAPH_STORAGE: "${ENABLE_GRAPH_STORAGE}"
-      # Jira Configuration
-      JIRA_SERVER: "${JIRA_SERVER}"
-      JIRA_EMAIL: "${JIRA_EMAIL}"
-      JIRA_API_TOKEN: "${JIRA_API_TOKEN}"
-      JIRA_PROJECT_KEYS: "${JIRA_PROJECT_KEYS}"
-      JIRA_DATE_FILTER: "${JIRA_DATE_FILTER}"
-      JIRA_MAX_ISSUES: "${JIRA_MAX_ISSUES}"
-      JIRA_VECTORSTORE_PATH: "${JIRA_VECTORSTORE_PATH}"
-      ENABLE_JIRA_VECTORSTORE: "${ENABLE_JIRA_VECTORSTORE}"
-      INITIALIZE_JIRA_VECTORSTORE: "${INITIALIZE_JIRA_VECTORSTORE}"
-      JIRA_CHUNK_TARGET_TOKENS: "${JIRA_CHUNK_TARGET_TOKENS}"
-      JIRA_CHUNK_OVERLAP_TOKENS: "${JIRA_CHUNK_OVERLAP_TOKENS}"
-      JIRA_CHUNK_MIN_TOKENS: "${JIRA_CHUNK_MIN_TOKENS}"
-      ENABLE_JIRA_SOURCE: "${ENABLE_JIRA_SOURCE}"
-      # Reranker Configuration
-      RERANKER_SHADOW: "${RERANKER_SHADOW}"
-      RERANKER_ENABLED: "${RERANKER_ENABLED}"
-      VERIFIER_ENABLED: "${VERIFIER_ENABLED}"
-      # File paths
+      # File paths (hardcoded, not from .env.ai)
       JSON_MEMORY_FILE: "/app/data/chat_history.json"
       CHROMA_DB_PATH: "/app/data/chroma_db"
-      # Production settings
+      # Production settings (hardcoded, not from .env.ai)
       PYTHONUNBUFFERED: "1"
       ENVIRONMENT: "production"
+      # Note: All other environment variables are loaded from .env.ai via env_file directive above
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs

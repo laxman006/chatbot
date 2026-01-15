@@ -11,7 +11,15 @@ import { getCurrentUser, checkSession } from '../../../../lib/session-utils';
 export default function OthersSessionChatPage() {
   const router = useRouter();
   const params = useParams();
-  const sessionId = params.sessionId as string;
+  // Decode the sessionId in case it's URL-encoded
+  // Use try-catch to handle cases where it's already decoded
+  let sessionId: string;
+  try {
+    sessionId = decodeURIComponent(params.sessionId as string);
+  } catch (e) {
+    // If decoding fails, use the original value
+    sessionId = params.sessionId as string;
+  }
   
   // Hydration guard to avoid SSR/client HTML mismatch
   const [hydrated, setHydrated] = useState(false);
@@ -114,6 +122,7 @@ export default function OthersSessionChatPage() {
   }
 
   const handleNewChat = () => {
+    // REQUIRED: Always navigate to /chat/new
     router.push('/chat/new');
   };
 
