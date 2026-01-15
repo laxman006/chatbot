@@ -2924,7 +2924,12 @@ async def get_all_chat_sessions(
                 continue
             
             # Get MongoDB document _id as conversation_id
-            mongo_id = str(user_doc.get("_id", ""))
+            mongo_id_obj = user_doc.get("_id")
+            if not mongo_id_obj:
+                continue  # Skip if no _id
+            
+            # Convert ObjectId to string (24 hex characters)
+            mongo_id = str(mongo_id_obj)
             
             # Get first user message as title
             first_message = next((msg for msg in messages if msg.get("role") == "user"), None)
@@ -3033,23 +3038,33 @@ async def get_user_by_conversation_id(
     """Get user_id and messages from MongoDB conversation_id (_id)."""
     try:
         from bson import ObjectId
+        from bson.errors import InvalidId
         from app.mongodb_memory import mongodb_memory
         
         await mongodb_memory.connect()
         
+        # Log the incoming conversation_id for debugging
+        print(f"[CONVERSATION] Loading conversation_id: {conversation_id}")
+        
         # Find user document by MongoDB _id
         try:
             mongo_object_id = ObjectId(conversation_id)
-        except Exception:
-            raise HTTPException(status_code=400, detail="Invalid conversation ID format")
+        except (InvalidId, ValueError, TypeError) as e:
+            print(f"[CONVERSATION] Invalid conversation_id format: {conversation_id}, error: {e}")
+            raise HTTPException(status_code=400, detail=f"Invalid conversation ID format: {conversation_id}")
         
         user_doc = await mongodb_memory.collection.find_one({"_id": mongo_object_id})
         
         if not user_doc:
+            print(f"[CONVERSATION] Conversation not found: {conversation_id}")
             raise HTTPException(status_code=404, detail="Conversation not found")
         
         user_id = user_doc.get("user_id")
         messages = user_doc.get("messages", [])
+        
+        if not user_id:
+            print(f"[CONVERSATION] No user_id found for conversation: {conversation_id}")
+            raise HTTPException(status_code=404, detail="User not found for this conversation")
         
         # Get title from first user message
         first_message = next((msg for msg in messages if msg.get("role") == "user"), None)
@@ -3063,6 +3078,8 @@ async def get_user_by_conversation_id(
                 "content": msg.get("content", "")
             })
         
+        print(f"[CONVERSATION] Successfully loaded conversation: {conversation_id}, user: {user_id}, messages: {len(formatted_messages)}")
+        
         return {
             "messages": formatted_messages,
             "title": title,
@@ -3074,7 +3091,10 @@ async def get_user_by_conversation_id(
     except HTTPException:
         raise
     except Exception as e:
-        return {"error": str(e)}
+        print(f"[CONVERSATION] Error loading conversation {conversation_id}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 # ---------------- User Profile Endpoints ----------------
 

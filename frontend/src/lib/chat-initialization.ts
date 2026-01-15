@@ -733,7 +733,8 @@ export function initializeChatApp(options: InitOptions = {}) {
       if (isConversationId) {
         // New format: conversation_id (MongoDB _id)
         console.log('[SESSION] Loading others session with conversation_id:', otherSessionId);
-        response = await apiFetch(`/chat/sessions/by-conversation/${otherSessionId}`, {
+        // Use encodeURIComponent to handle URL encoding properly
+        response = await apiFetch(`/chat/sessions/by-conversation/${encodeURIComponent(otherSessionId)}`, {
           method: 'GET'
         });
       } else if (otherSessionId.startsWith('user_chat_')) {

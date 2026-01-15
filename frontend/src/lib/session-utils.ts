@@ -312,7 +312,8 @@ export async function loadOthersSession(
       console.log('[SESSION] Loading others session with conversation_id:', otherSessionId);
       
       // ✅ Session-based auth - session_id cookie sent automatically via proxy
-      const response = await apiFetch(`/chat/sessions/by-conversation/${otherSessionId}`, {
+      // Use encodeURIComponent to handle URL encoding properly
+      const response = await apiFetch(`/chat/sessions/by-conversation/${encodeURIComponent(otherSessionId)}`, {
         method: 'GET'
       });
       
