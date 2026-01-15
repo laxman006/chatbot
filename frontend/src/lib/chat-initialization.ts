@@ -4211,8 +4211,19 @@ export function initializeChatApp(options: InitOptions = {}) {
   // ============================================================================
   
   function setupButtonEventDelegation() {
-    // Use capture phase and handle both click and touchstart for better mobile support
+    let lastTouchTime = 0;
+    // Use capture phase and handle both click and touch events for better mobile support
     const handleButtonAction = (e: Event) => {
+      const isTouchEvent =
+        e.type === 'touchend' ||
+        (e.type === 'pointerup' && (e as PointerEvent).pointerType === 'touch');
+      if (isTouchEvent) {
+        lastTouchTime = Date.now();
+      } else if (e.type === 'click' && Date.now() - lastTouchTime < 500) {
+        // Skip synthetic click right after touch to avoid double handling
+        return;
+      }
+
       const target = e.target as HTMLElement;
       // Find the button element (might be clicking on an icon inside the button)
       const button = target.closest('[data-action]') as HTMLElement;
@@ -4222,7 +4233,9 @@ export function initializeChatApp(options: InitOptions = {}) {
       if (!action) return;
       
       // Prevent default and stop propagation to avoid double-firing
-      e.preventDefault();
+      if (e.cancelable) {
+        e.preventDefault();
+      }
       e.stopPropagation();
       
       // Handle different button actions
@@ -4263,10 +4276,11 @@ export function initializeChatApp(options: InitOptions = {}) {
       }
     };
     
-    // Add listeners for both click and touchstart events for better mobile support
+    // Add listeners for click and touch/pointer events for better mobile support
     // Use capture phase to ensure we catch events before they bubble
     document.addEventListener('click', handleButtonAction, true);
-    document.addEventListener('touchend', handleButtonAction, true);
+    document.addEventListener('pointerup', handleButtonAction, { capture: true, passive: false });
+    document.addEventListener('touchend', handleButtonAction, { capture: true, passive: false });
   }
   
   // Set up event delegation immediately

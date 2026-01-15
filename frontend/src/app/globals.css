@@ -1428,6 +1428,30 @@ header img {
   padding: 6px;
 }
 
+.mobile-sidebar-toggle-inside {
+  display: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: transparent;
+  border: none;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.2s ease;
+  color: #374151;
+  flex-shrink: 0;
+  padding: 6px;
+}
+
+.mobile-sidebar-toggle-inside:hover {
+  background: #ececf1;
+}
+
+.mobile-sidebar-toggle-inside:active {
+  transform: scale(0.95);
+}
+
 .sidebar-toggle-btn-new:hover {
   background: #ececf1;
 }
@@ -3039,6 +3063,11 @@ header img {
   /* Hide desktop toggle button inside sidebar on mobile */
   .chatgpt-sidebar .sidebar-top-row .sidebar-toggle-btn-new {
     display: none !important;
+  }
+
+  /* Show mobile toggle button inside sidebar when open */
+  .chatgpt-sidebar .sidebar-top-row .mobile-sidebar-toggle-inside {
+    display: flex !important;
   }
   
   /* Ensure all buttons are clickable on mobile */
