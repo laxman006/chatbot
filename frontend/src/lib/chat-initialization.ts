@@ -167,6 +167,7 @@ export function initializeChatApp(options: InitOptions = {}) {
   // Type for API response from /chat/sessions/all endpoint
   interface OtherUserChat {
     session_id: string;
+    conversation_id?: string;
     title: string;
     user_email?: string;
     created_at?: string;
