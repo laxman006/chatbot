@@ -3279,6 +3279,11 @@ header img {
     height: 36px !important;
     min-width: 36px !important;
     min-height: 36px !important;
+    /* ✅ MOBILE FIX: Ensure button is clickable on mobile */
+    touch-action: manipulation !important;
+    -webkit-tap-highlight-color: rgba(1, 41, 172, 0.2) !important;
+    min-height: 44px !important;
+    min-width: 44px !important;
   }
   
   .chatgpt-send-btn svg {
@@ -3291,6 +3296,11 @@ header img {
     height: 36px !important;
     min-width: 36px !important;
     min-height: 36px !important;
+    /* ✅ MOBILE FIX: Ensure button is clickable on mobile */
+    touch-action: manipulation !important;
+    -webkit-tap-highlight-color: rgba(1, 41, 172, 0.2) !important;
+    min-height: 44px !important;
+    min-width: 44px !important;
   }
   
   .empty-state-input .chatgpt-send-btn svg {

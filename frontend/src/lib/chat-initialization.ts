@@ -3933,8 +3933,36 @@ export function initializeChatApp(options: InitOptions = {}) {
   }
 
   // Event listeners for regular input (bottom)
+  // ✅ MOBILE FIX: Add multiple event types for better mobile support
   if (sendBtn) {
+    // Handle click events (desktop and mobile)
     sendBtn.addEventListener("click", sendMessage);
+    
+    // ✅ MOBILE FIX: Add touch events for better mobile reliability
+    let touchStartTime = 0;
+    let touchStartY = 0;
+    
+    sendBtn.addEventListener("touchstart", (e) => {
+      touchStartTime = Date.now();
+      // Store Y position to detect scrolling
+      touchStartY = (e.touches[0] || e.changedTouches[0]).clientY;
+      // Don't preventDefault here - allow scrolling if user drags
+    }, { passive: true });
+    
+    sendBtn.addEventListener("touchend", (e) => {
+      const touchEndY = (e.changedTouches[0]).clientY;
+      const touchDuration = Date.now() - touchStartTime;
+      const touchDistance = Math.abs(touchEndY - touchStartY);
+      
+      // Only trigger if:
+      // 1. Quick tap (< 500ms)
+      // 2. Minimal movement (< 10px) - not a scroll
+      if (touchDuration < 500 && touchDistance < 10) {
+        e.preventDefault();
+        e.stopPropagation();
+        sendMessage();
+      }
+    }, { passive: false });
   }
   
   if (input) {
@@ -3993,8 +4021,9 @@ export function initializeChatApp(options: InitOptions = {}) {
   }
 
   // Event listeners for empty state input (center)
+  // ✅ MOBILE FIX: Add multiple event types for better mobile support
   if (sendBtnEmptyState) {
-    sendBtnEmptyState.addEventListener("click", () => {
+    const handleEmptyStateSend = () => {
       // ✅ PHASE-1: Check per-session state
       if (!sessionId || isSessionGenerating(sessionId)) return;
       
@@ -4026,7 +4055,36 @@ export function initializeChatApp(options: InitOptions = {}) {
           sendMessageText(question);
         }
       }
-    });
+    };
+    
+    // Handle click events (desktop and mobile)
+    sendBtnEmptyState.addEventListener("click", handleEmptyStateSend);
+    
+    // ✅ MOBILE FIX: Add touch events for better mobile reliability
+    let emptyStateTouchStartTime = 0;
+    let emptyStateTouchStartY = 0;
+    
+    sendBtnEmptyState.addEventListener("touchstart", (e) => {
+      emptyStateTouchStartTime = Date.now();
+      // Store Y position to detect scrolling
+      emptyStateTouchStartY = (e.touches[0] || e.changedTouches[0]).clientY;
+      // Don't preventDefault here - allow scrolling if user drags
+    }, { passive: true });
+    
+    sendBtnEmptyState.addEventListener("touchend", (e) => {
+      const touchEndY = (e.changedTouches[0]).clientY;
+      const touchDuration = Date.now() - emptyStateTouchStartTime;
+      const touchDistance = Math.abs(touchEndY - emptyStateTouchStartY);
+      
+      // Only trigger if:
+      // 1. Quick tap (< 500ms)
+      // 2. Minimal movement (< 10px) - not a scroll
+      if (touchDuration < 500 && touchDistance < 10) {
+        e.preventDefault();
+        e.stopPropagation();
+        handleEmptyStateSend();
+      }
+    }, { passive: false });
   }
   
   if (inputEmptyState) {
