@@ -2262,10 +2262,23 @@ export function initializeChatApp(options: InitOptions = {}) {
   }
 
   async function sendMessageText(question: string) {
-    if (!question) return;
+    if (!question) {
+      console.warn('[SEND] No question provided');
+      return;
+    }
     
     // ✅ PHASE-1: Check per-session state instead of global
-    if (!sessionId || isSessionGenerating(sessionId)) return;
+    if (!sessionId) {
+      console.error('[SEND] No sessionId available');
+      return;
+    }
+    
+    if (isSessionGenerating(sessionId)) {
+      console.warn('[SEND] Session is already generating, skipping');
+      return;
+    }
+    
+    console.log('[SEND] Starting message send for session:', sessionId);
     
     // ✅ PHASE 2.5.4: Removed AbortController - streams complete independently
     // This allows background streams to finish even when navigating to /chat/new
@@ -2282,7 +2295,19 @@ export function initializeChatApp(options: InitOptions = {}) {
        ================================ */
     botDiv.dataset.generating = 'true';
     botDiv.dataset.sessionId = sessionId;
+    // ✅ FIX: Use type assertion and setAttribute to avoid TypeScript errors
+    (botDiv.dataset as any).generatingStartTime = Date.now().toString();
+    botDiv.setAttribute('data-generating-start-time', Date.now().toString());
     /* ================================ */
+    
+    // ✅ FIX: Ensure botDiv is visible and scrolled into view
+    botDiv.style.display = 'block';
+    botDiv.style.visibility = 'visible';
+    console.log('[SEND] Bot div created, starting stream...', {
+      sessionId,
+      botDivVisible: botDiv.offsetParent !== null,
+      botDivInDOM: messagesDiv!.contains(botDiv)
+    });
     
     // Status update function - simplified for better performance
     let isStreamingStatus = false;
@@ -2688,21 +2713,77 @@ export function initializeChatApp(options: InitOptions = {}) {
   }
 
   function askRecommendedQuestion(button: HTMLElement) {
-    // ✅ PHASE-1: Check per-session state
-    if (!sessionId || isSessionGenerating(sessionId)) return;
-    
     const question = button.getAttribute('data-question');
-    if (question) {
-      // Remove ALL previous recommended questions from the DOM
-      const allRecommendations = messagesDiv!.querySelectorAll('.recommended-questions');
-      allRecommendations.forEach(rec => rec.remove());
-      
-      // Add user message to chat FIRST (so it displays immediately)
-      addMessage(question, "user");
-      
-      // Then send the question to get bot response
-      sendMessageText(question);
+    if (!question) {
+      console.warn('[RECOMMENDED] No question found on button');
+      return;
     }
+    
+    // ✅ FIX: Ensure sessionId exists
+    if (!sessionId) {
+      console.error('[RECOMMENDED] No sessionId available');
+      return;
+    }
+    
+    // ✅ FIX: Clear any stale generating state before checking
+    // This prevents blocking if a previous response finished but flag wasn't cleared
+    const currentGenerating = isSessionGenerating(sessionId);
+    if (currentGenerating) {
+      console.log('[RECOMMENDED] Session is currently generating, waiting...');
+      // Force clear if it's been generating for too long (might be stuck)
+      const botMessages = messagesDiv!.querySelectorAll('.message.bot');
+      const lastBotMessage = botMessages[botMessages.length - 1] as HTMLElement | null;
+      if (lastBotMessage && lastBotMessage.dataset.generating === 'true') {
+        // Check if it's been generating for more than 30 seconds (likely stuck)
+        // ✅ FIX: Use type assertion and getAttribute fallback to avoid TypeScript errors
+        const generatingTime = parseInt(
+          (lastBotMessage.dataset as any).generatingStartTime || 
+          lastBotMessage.getAttribute('data-generating-start-time') || 
+          '0', 
+          10
+        );
+        if (generatingTime && Date.now() - generatingTime > 30000) {
+          console.warn('[RECOMMENDED] Clearing stuck generating state');
+          setSessionGenerating(sessionId, false);
+          lastBotMessage.dataset.generating = 'false';
+        } else {
+          console.log('[RECOMMENDED] Previous response still generating, please wait');
+          return;
+        }
+      } else {
+        // State mismatch - DOM shows not generating but flag says generating
+        // This can happen legitimately when:
+        // 1. Response just finished (DOM updated to generating='false')
+        // 2. But setSessionGenerating(false) hasn't been called yet (race condition)
+        // 3. Or user clicks recommended question very quickly after response completes
+        // 
+        // Silently fix the mismatch - this is expected behavior, not an error
+        setSessionGenerating(sessionId, false);
+      }
+    }
+    
+    console.log('[RECOMMENDED] Processing recommended question:', question);
+    
+    // Remove ALL previous recommended questions from the DOM
+    const allRecommendations = messagesDiv!.querySelectorAll('.recommended-questions');
+    allRecommendations.forEach(rec => rec.remove());
+    
+    // Add user message to chat FIRST (so it displays immediately)
+    addMessage(question, "user");
+    
+    // Clear input fields
+    if (input) {
+      input.value = "";
+      input.style.height = '24px';
+    }
+    if (inputEmptyState) {
+      inputEmptyState.value = "";
+      inputEmptyState.style.height = '24px';
+    }
+    
+    // Then send the question to get bot response
+    console.log('[RECOMMENDED] Sending question to backend...');
+    sendMessageText(question);
   }
 
   async function submitFeedback(button: HTMLElement, rating: string) {
@@ -4269,8 +4350,11 @@ export function initializeChatApp(options: InitOptions = {}) {
           break;
         case 'ask-recommended-question':
           const question = button.getAttribute('data-question');
+          console.log('[EVENT] Recommended question clicked:', question);
           if (question) {
             askRecommendedQuestion(button);
+          } else {
+            console.warn('[EVENT] No question attribute found on recommended question button');
           }
           break;
       }
