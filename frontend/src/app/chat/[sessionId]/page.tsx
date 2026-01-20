@@ -396,7 +396,7 @@ export default function ChatSessionPage() {
         onLoadSession={handleLoadSession}
         activeSessionId={sessionId}
       />
-      <ChatInterface sessionId={sessionId} />
+      <ChatInterface key={sessionId} sessionId={sessionId} />
     </div>
   );
 }

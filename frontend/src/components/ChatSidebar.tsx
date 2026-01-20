@@ -218,7 +218,7 @@ export default function ChatSidebar({
 
   // Handle delete confirmation clicks globally
   useEffect(() => {
-    const handleGlobalClick = (e: MouseEvent) => {
+    const handleGlobalClick = async (e: MouseEvent) => {
       const target = e.target as HTMLElement;
 
       // Handle Yes button
@@ -249,7 +249,8 @@ export default function ChatSidebar({
             });
           }
 
-          deleteSessionUtil(sid);
+          // ✅ Await backend deletion
+          await deleteSessionUtil(sid);
 
           // Remove delete-active class from all items
           document.querySelectorAll('.history-item').forEach(item => {

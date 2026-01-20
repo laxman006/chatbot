@@ -124,6 +124,12 @@ class MongoDBMemoryManager:
             await faq_events_collection.create_index([("user_id", 1), ("created_at", -1)])
             await faq_events_collection.create_index("question_hash")
             
+            # Create indexes for chat_messages collection (conversational memory)
+            chat_messages_collection = self.database["chat_messages"]
+            await chat_messages_collection.create_index("session_id")
+            await chat_messages_collection.create_index([("session_id", 1), ("created_at", -1)])
+            await chat_messages_collection.create_index("created_at")
+            
             logger.info("MongoDB indexes created successfully")
         except Exception as e:
             logger.warning(f"Could not create indexes: {e}")
@@ -514,8 +520,10 @@ class MongoDBMemoryManager:
         try:
             sessions_collection = self.database["chat_sessions"]
             
-            # Get recent sessions sorted by created_at
-            cursor = sessions_collection.find({}).sort("created_at", -1).limit(limit)
+            # Get recent sessions sorted by created_at (exclude deleted)
+            cursor = sessions_collection.find({
+                "is_deleted": {"$ne": True}  # ✅ Exclude deleted sessions
+            }).sort("created_at", -1).limit(limit)
             sessions = []
             
             async for doc in cursor:
@@ -543,7 +551,10 @@ class MongoDBMemoryManager:
         try:
             sessions_collection = self.database["chat_sessions"]
             
-            cursor = sessions_collection.find({"user_id": user_id}).sort("updated_at", -1).limit(limit)
+            cursor = sessions_collection.find({
+                "user_id": user_id,
+                "is_deleted": {"$ne": True}  # ✅ Exclude deleted sessions
+            }).sort("updated_at", -1).limit(limit)
             sessions = []
             
             async for doc in cursor:
@@ -583,7 +594,8 @@ class MongoDBMemoryManager:
             # ✅ Ownership enforced at DB query level
             doc = await sessions_collection.find_one({
                 "session_id": session_id,
-                "user_id": user_id
+                "user_id": user_id,
+                "is_deleted": {"$ne": True}  # ✅ Don't return deleted sessions
             })
             
             if not doc:
@@ -633,6 +645,30 @@ class MongoDBMemoryManager:
         except Exception as e:
             logger.error(f"Error getting session owner for {session_id}: {e}")
             return None
+    
+    async def delete_session(self, session_id: str, user_id: str) -> bool:
+        """Delete a chat session (soft delete - marks as deleted but keeps data)."""
+        await self.connect()
+        
+        try:
+            sessions_collection = self.database["chat_sessions"]
+            
+            # Soft delete: mark as deleted instead of removing
+            result = await sessions_collection.update_one(
+                {"session_id": session_id, "user_id": user_id},
+                {"$set": {"is_deleted": True, "deleted_at": datetime.utcnow()}}
+            )
+            
+            if result.matched_count > 0:
+                logger.info(f"Soft deleted session {session_id} for user {user_id}")
+                return True
+            else:
+                logger.warning(f"Session {session_id} not found or doesn't belong to user {user_id}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error deleting session {session_id}: {e}")
+            raise e
     
     async def create_shared_chat(self, session_id: str, user_email: str, share_token: str) -> Dict:
         """Create a shareable link for a chat session."""
@@ -1262,6 +1298,83 @@ class MongoDBMemoryManager:
         except Exception as e:
             logger.error(f"Error getting user profile for {user_id}: {e}")
             return None
+    
+    async def save_message(self, session_id: str, role: str, content: str):
+        """
+        Save a message to the chat_messages collection.
+        
+        Args:
+            session_id: Session identifier
+            role: Message role ("user" or "assistant")
+            content: Message content
+        """
+        await self.connect()
+        
+        try:
+            chat_messages_collection = self.database["chat_messages"]
+            
+            message_doc = {
+                "session_id": session_id,
+                "role": role,
+                "content": content,
+                "created_at": datetime.utcnow()
+            }
+            
+            await chat_messages_collection.insert_one(message_doc)
+            logger.debug(f"Saved {role} message for session {session_id[:8]}...")
+            
+        except Exception as e:
+            logger.error(f"Error saving message for session {session_id}: {e}")
+    
+    async def get_last_messages(self, session_id: str, limit: int = 8) -> List[Dict[str, str]]:
+        """
+        Get the last N messages for a session, ordered from oldest to newest.
+        
+        Args:
+            session_id: Session identifier
+            limit: Maximum number of messages to retrieve (default: 8)
+            
+        Returns:
+            List of message dictionaries with "role" and "content" keys, ordered chronologically
+        """
+        await self.connect()
+        
+        try:
+            chat_messages_collection = self.database["chat_messages"]
+            
+            # Find messages for this session, sort by created_at descending, limit to last N
+            # ✅ Don't fetch created_at since we don't need it for LLM
+            cursor = chat_messages_collection.find(
+                {"session_id": session_id},
+                {"_id": 0, "role": 1, "content": 1}
+            ).sort("created_at", -1).limit(limit)
+            
+            messages = await cursor.to_list(length=limit)
+            
+            # Reverse to get chronological order (oldest → newest)
+            messages = list(reversed(messages))
+            
+            # ✅ Add history cap to prevent token overflow (max 1500 chars per message)
+            MAX_CHARS_PER_MESSAGE = 1500
+            capped_messages = []
+            for msg in messages:
+                content = msg["content"]
+                if len(content) > MAX_CHARS_PER_MESSAGE:
+                    content = content[:MAX_CHARS_PER_MESSAGE] + "... [truncated]"
+                capped_messages.append({"role": msg["role"], "content": content})
+            
+            # ✅ DEBUG: Log history retrieval
+            logger.info(f"[MEMORY] Retrieved {len(capped_messages)} messages for session {session_id[:8]}...")
+            if capped_messages:
+                # Extract preview outside f-string to avoid syntax error
+                history_preview = [f"{msg['role']}: {msg['content'][:50]}..." for msg in capped_messages[:3]]
+                logger.debug(f"[MEMORY] History preview: {history_preview}")
+            
+            return capped_messages
+            
+        except Exception as e:
+            logger.error(f"Error getting last messages for session {session_id}: {e}")
+            return []
 
 # Global instance
 mongodb_memory = MongoDBMemoryManager()
@@ -1321,6 +1434,10 @@ async def get_session_by_id(session_id: str, user_id: str, include_messages: boo
     """Get a specific session by ID (only if it belongs to this user)."""
     return await mongodb_memory.get_session_by_id(session_id, user_id, include_messages)
 
+async def delete_session(session_id: str, user_id: str) -> bool:
+    """Delete a chat session (soft delete)."""
+    return await mongodb_memory.delete_session(session_id, user_id)
+
 async def create_shared_chat(session_id: str, user_email: str, share_token: str) -> Dict:
     """Create a shareable link for a chat session."""
     return await mongodb_memory.create_shared_chat(session_id, user_email, share_token)
@@ -1375,3 +1492,12 @@ async def get_user_profile(user_id: str) -> Optional[Dict]:
 async def migrate_existing_data_to_user_activity():
     """Migration helper: Backfill user_activity collection from existing chat_sessions."""
     return await mongodb_memory.migrate_existing_data_to_user_activity()
+
+# Conversational memory functions
+async def save_message(session_id: str, role: str, content: str):
+    """Save a message to the chat_messages collection."""
+    await mongodb_memory.save_message(session_id, role, content)
+
+async def get_last_messages(session_id: str, limit: int = 8) -> List[Dict[str, str]]:
+    """Get the last N messages for a session, ordered from oldest to newest."""
+    return await mongodb_memory.get_last_messages(session_id, limit)

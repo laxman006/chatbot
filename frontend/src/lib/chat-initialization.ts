@@ -179,6 +179,10 @@ export function initializeChatApp(options: InitOptions = {}) {
     return `cf.conversation.${date}.${randomId}`;
   }
   
+  // ✅ FIX: Declare isReadOnlyMode BEFORE it's used in updateEmptyState()
+  // Track if we're in read-only mode (viewing others' chats)
+  let isReadOnlyMode = false;
+  
   // Initialize or create session (only auto-create if not provided explicitly)
   // Don't navigate immediately - wait for first message
   if (!initialSessionId) {
@@ -187,10 +191,12 @@ export function initializeChatApp(options: InitOptions = {}) {
     localStorage.setItem(getUserStorageKey('chatbot_session_id'), sessionId);
     console.log('[SESSION] Created new session (will navigate after first message):', sessionId);
     
-    // Clear any existing messages to start fresh
+    // ✅ ALWAYS clear messages for new chat (defense in depth)
     if (messagesDiv) {
       messagesDiv.innerHTML = '';
     }
+    // ✅ Also update empty state immediately to ensure UI is clean
+    updateEmptyState();
   } else {
     // We're on /chat/[sessionId] route - use the provided session ID
     sessionId = initialSessionId;
@@ -203,9 +209,6 @@ export function initializeChatApp(options: InitOptions = {}) {
   
   // Track if this is a brand new session that needs URL navigation after first message
   let isNewSessionPendingNavigation = !initialSessionId && sessionId;
-  
-  // Track if we're in read-only mode (viewing others' chats)
-  let isReadOnlyMode = false;
   
   // Load all sessions from localStorage (filter out empty sessions)
   function getAllSessions(): ChatSession[] {
@@ -1816,7 +1819,7 @@ export function initializeChatApp(options: InitOptions = {}) {
   }
   
   // Delete a session (soft delete - moves to deleted collection)
-  function deleteSession(sid: string) {
+  async function deleteSession(sid: string) {
     // No confirm dialog - Yes/No buttons in dropdown handle confirmation
     
     let sessions = getAllSessions();
@@ -1840,6 +1843,27 @@ export function initializeChatApp(options: InitOptions = {}) {
     // Remove from active sessions
     sessions = sessions.filter(s => s.id !== sid);
     saveAllSessions(sessions);
+    
+    // ✅ NEW: Delete from backend
+    try {
+      const response = await apiFetch(`/chat/sessions/${sid}`, {
+        method: 'DELETE'
+      });
+      
+      if (response.ok) {
+        console.log('[DELETE] Successfully deleted session from backend:', sid);
+      } else if (response.status === 404) {
+        console.warn('[DELETE] Session not found in backend (may have been already deleted):', sid);
+      } else {
+        console.error('[DELETE] Failed to delete session from backend:', response.status);
+        // Session is still deleted locally, but backend deletion failed
+        // This is okay - it will be cleaned up on next sync
+      }
+    } catch (error) {
+      console.error('[DELETE] Error deleting session from backend:', error);
+      // Session is still deleted locally, but backend deletion failed
+      // This is okay - it will be cleaned up on next sync
+    }
     
     // If deleted current session, clear the chat area immediately (like ChatGPT)
     if (sid === sessionId) {
@@ -2543,37 +2567,26 @@ export function initializeChatApp(options: InitOptions = {}) {
                 saveCurrentSession();
                 
                 // If this was a new session from /chat/new, update URL to session-specific path
-                // ✅ CORRECT FIX: Use router.replace() to keep Next.js router in sync
-                // This ensures URL, router state, and app state stay synchronized
-                if (router && sessionId && isNewSessionPendingNavigation) {
+                // ✅ ZERO REFRESH FIX: Use window.history.replaceState() to update URL silently
+                // This avoids Next.js router navigation which causes remount/loading
+                // UI stays mounted, zero loading feel, URL updates correctly
+                if (sessionId && isNewSessionPendingNavigation) {
                   const currentPath = window.location.pathname;
                   const targetPath = `/chat/${sessionId}`;
                   
-                  // ✅ Only update URL if:
-                  // 1. We're not already on the target path
-                  // 2. Streaming is completely done (we're in the 'done' event handler)
-                  // 3. We're actually on /chat/new route
-                  if (currentPath !== targetPath && currentPath === '/chat/new') {
-                    console.log('[SESSION] First message complete, navigating to /chat/' + sessionId);
-                    isNewSessionPendingNavigation = false; // Clear flag
+                  // ✅ Only update URL if we're on /chat/new and path differs
+                  if (currentPath === '/chat/new' && currentPath !== targetPath) {
+                    console.log('[SESSION] Updating URL silently to:', targetPath);
+                    isNewSessionPendingNavigation = false;
                     
-                    // ✅ CORRECT FIX: Use router.replace() instead of window.history.replaceState()
-                    // This keeps Next.js router in sync with browser URL
-                    // Delay slightly to ensure streaming is completely finished
-                    setTimeout(() => {
-                      if (typeof window !== 'undefined' && !isSessionGenerating(sessionId!)) {
-                        try {
-                          // Use Next.js router to update URL and route state
-                          router.replace(targetPath);
-                          console.log('[SESSION] ✓ Navigated to:', targetPath);
-                        } catch (e) {
-                          console.error('[SESSION] Failed to navigate:', e);
-                        }
-                      }
-                    }, 500); // Delay to ensure streaming is completely done
+                    // ✅ Silent URL update without Next.js navigation
+                    // This prevents remount/loading while keeping URL in sync
+                    if (typeof window !== 'undefined') {
+                      window.history.replaceState(null, '', targetPath);
+                      console.log('[SESSION] ✓ URL updated without refresh');
+                    }
                   } else {
                     // Already on correct path or not on /chat/new, just clear the flag
-                    console.log('[SESSION] Skipping URL update - current path:', currentPath, 'target:', targetPath);
                     isNewSessionPendingNavigation = false;
                   }
                 }
@@ -4306,7 +4319,7 @@ export function initializeChatApp(options: InitOptions = {}) {
   // ============================================================================
   
   // Handle Yes/No button clicks for delete confirmation (dropdown appended to body)
-  document.body.addEventListener('click', (e) => {
+  document.body.addEventListener('click', async (e) => {
     const target = e.target as HTMLElement;
     
     // Check if clicked on YES button
@@ -4316,7 +4329,8 @@ export function initializeChatApp(options: InitOptions = {}) {
       e.preventDefault();
       const sid = yesBtn.dataset.sessionId;
       console.log('[DELETE] YES clicked - deleting session:', sid);
-      deleteSession(sid!);
+      // ✅ Await backend deletion
+      await deleteSession(sid!);
       // Remove dropdown
       document.querySelectorAll('.history-item-dropdown').forEach(d => d.remove());
       return;

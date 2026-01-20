@@ -211,7 +211,7 @@ export default function NewChatPage() {
           onNewChat={handleNewChat}
           activeSessionId={undefined}
         />
-        <ChatInterface sessionId={undefined} />
+        <ChatInterface key="new" sessionId={undefined} />
       </div>
     </>
   );

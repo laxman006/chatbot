@@ -159,7 +159,7 @@ export default function OthersSessionChatPage() {
         onNewChat={handleNewChat}
         activeSessionId={sessionId}
       />
-      <ChatInterface sessionId={sessionId} />
+      <ChatInterface key={`others-${sessionId}`} sessionId={sessionId} />
     </div>
   );
 }

@@ -34,7 +34,8 @@ from app.mongodb_memory import (
     add_to_conversation, get_conversation_context, get_user_chat_history, 
     clear_user_chat_history, save_session, get_all_sessions, get_user_sessions, 
     get_session_by_id, create_shared_chat, get_shared_chat,
-    update_user_profile, get_user_profile, get_user_statistics, get_rankers_by_date
+    update_user_profile, get_user_profile, get_user_statistics, get_rankers_by_date,
+    save_message, get_last_messages
 )
 from app.helpers import strip_markdown, preserve_markdown
 from app.langfuse_integration import langfuse_tracker
@@ -50,6 +51,7 @@ from config import (
     PRIMARY_KB_TIER, TRANSCRIPT_KB_TIER
 )
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_core.documents import Document
 import time
 from query_expander import QueryExpander
@@ -873,6 +875,75 @@ def is_conversational_query(question: str) -> bool:
         return True
     
     return False
+
+def is_memory_only_question(question: str) -> bool:
+    """
+    Check if a question should be answered from memory only (skip RAG retrieval).
+    Examples: "What did I just ask?", "Summarize our discussion", etc.
+    """
+    q = question.lower().strip()
+    triggers = [
+        "what did i just ask",
+        "what did i ask",
+        "summarize",
+        "recap",
+        "repeat",
+        "what were we talking about",
+        "what did you say",
+    ]
+    return any(t in q for t in triggers)
+
+async def rewrite_query_with_context(question: str, conversation_history: list, llm) -> str:
+    """
+    Rewrite user question into a standalone query using conversation history.
+    Example: "What are its features?" → "What are CloudFuze Manage's features?"
+    
+    Args:
+        question: The user's current question
+        conversation_history: List of previous messages with "role" and "content" keys
+        llm: LLM instance for rewriting
+        
+    Returns:
+        Rewritten query that is standalone and explicit
+    """
+    if not conversation_history:
+        return question
+
+    # Get last 4 messages for context (enough to understand current topic)
+    recent = conversation_history[-4:] if len(conversation_history) > 4 else conversation_history
+
+    # Build messages using LangChain message objects
+    messages = [
+        SystemMessage(content=(
+            "You are a query rewriter for a CloudFuze chatbot.\n"
+            "Rewrite the user's latest question into a standalone, explicit query for document retrieval.\n"
+            "Rules:\n"
+            "1) Replace pronouns (it, its, this, that, they) with the correct entity name from history.\n"
+            "2) Expand short questions like 'features?' into a complete question.\n"
+            "3) Output ONLY the rewritten query. No explanation."
+        ))
+    ]
+
+    # Add conversation history as context
+    for msg in recent:
+        if msg["role"] == "user":
+            messages.append(HumanMessage(content=msg["content"]))
+        elif msg["role"] == "assistant":
+            messages.append(AIMessage(content=msg["content"]))
+
+    # Add current question
+    messages.append(HumanMessage(content=f"User question: {question}"))
+
+    try:
+        rewritten = llm.invoke(messages).content.strip()
+        if rewritten:
+            logger.info(f"[REWRITE] Original: '{question}' → Rewritten: '{rewritten}'")
+            return rewritten
+    except Exception as e:
+        logger.warning(f"[REWRITE] Failed to rewrite query: {e}")
+
+    # Fallback to original question on error
+    return question
 
 def extract_migration_direction(text: str) -> dict:
     """
@@ -1765,6 +1836,18 @@ async def chat(request: Request, auth_user: dict = Depends(require_auth)):
     # Use user_id if provided, otherwise fall back to session_id for backward compatibility
     conversation_id = user_id if user_id else session_id
 
+    # ✅ CONVERSATIONAL MEMORY: Get last 8 messages for context
+    conversation_history = await get_last_messages(session_id, limit=8)
+    logger.info(f"[MEMORY] Endpoint /chat: Retrieved {len(conversation_history)} messages for session {session_id[:8]}...")
+    if conversation_history:
+        logger.debug(f"[MEMORY] History roles: {[msg['role'] for msg in conversation_history]}")
+    
+    # ✅ CONVERSATIONAL MEMORY: System prompt that handles context relevance
+    CONVERSATIONAL_SYSTEM_PROMPT = """You are a helpful CloudFuze AI assistant.
+Use the chat history only if it is relevant to the user's latest question.
+If the user asks something unrelated, ignore the old context and answer fresh.
+Answer clearly and correctly based on the provided context and knowledge base."""
+
     # FIRST: Check if we have a corrected response for this question
     corrected_answer = find_similar_corrected_response(question)
     
@@ -1778,26 +1861,76 @@ async def chat(request: Request, auth_user: dict = Depends(require_auth)):
         
         llm = get_llm(temperature=0.7)
         
-        # CloudFuze-focused conversational prompt
-        conversational_prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are a CloudFuze AI assistant specializing in cloud migration services. For greetings like 'hi', 'hello', 'thanks', 'bye', respond warmly and professionally. For ANY other topics unrelated to CloudFuze, cloud migration, or enterprise services, politely redirect by saying: 'I don't have information about that topic, but I can help you with CloudFuze's migration services or products. What would you like to know?'"),
-            ("human", "{question}")
-        ])
+        # ✅ CONVERSATIONAL MEMORY: Build messages with history
+        # Use SystemMessage for system prompt and message objects for history to avoid template parsing issues
+        messages = [SystemMessage(content=CONVERSATIONAL_SYSTEM_PROMPT)]
         
-        enhanced_query = question  # Use current question only
+        # Add conversation history if available (use message objects to avoid template variable conflicts)
+        if conversation_history:
+            logger.debug(f"[MEMORY] Adding {len(conversation_history)} history messages to LLM prompt")
+            for msg in conversation_history:
+                if msg["role"] == "user":
+                    messages.append(HumanMessage(content=msg["content"]))
+                elif msg["role"] == "assistant":
+                    messages.append(AIMessage(content=msg["content"]))
+        else:
+            logger.debug(f"[MEMORY] No conversation history found for session {session_id[:8]}...")
         
-        chain = conversational_prompt | llm
-        result = chain.invoke({"question": enhanced_query})
+        # Add current question
+        messages.append(HumanMessage(content=question))
+        logger.debug(f"[MEMORY] Total messages sent to LLM: {len(messages)} (1 system + {len(conversation_history)} history + 1 current)")
+        
+        # Invoke LLM directly with messages (no template chain needed)
+        result = llm.invoke(messages)
         answer = result.content
     else:
         # Handle informational queries with document retrieval
-        # Don't use conversation context - treat each question independently
-        # conversation_context = await get_conversation_context(conversation_id)
-        enhanced_query = question  # Use current question only
+        
+        # ✅ MEMORY-ONLY QUESTION → skip retrieval completely
+        if conversation_history and is_memory_only_question(question):
+            logger.info(f"[MEMORY-ONLY] Skipping RAG for: '{question}'")
+            
+            llm = get_llm(temperature=0.7)
+            
+            messages = [SystemMessage(content=CONVERSATIONAL_SYSTEM_PROMPT)]
+            
+            # Add conversation history
+            for msg in conversation_history:
+                if msg["role"] == "user":
+                    messages.append(HumanMessage(content=msg["content"]))
+                elif msg["role"] == "assistant":
+                    messages.append(AIMessage(content=msg["content"]))
+            
+            # Add current question
+            messages.append(HumanMessage(content=question))
+            
+            # Invoke LLM
+            result = llm.invoke(messages)
+            answer = result.content
+            
+            # Save user + assistant messages
+            try:
+                await save_message(session_id, "user", question)
+                await save_message(session_id, "assistant", answer)
+            except Exception as e:
+                logger.warning(f"[MEMORY-ONLY] Failed saving messages: {e}")
+            
+            return {"answer": answer}
+        
+        # ✅ QUERY REWRITING: Convert follow-up to standalone query for retrieval
+        rewriter_llm = get_llm(temperature=0.1)
+        if conversation_history:
+            enhanced_query = await rewrite_query_with_context(question, conversation_history, rewriter_llm)
+        else:
+            enhanced_query = question
+        
+        # Log rewrite if it changed
+        if enhanced_query != question:
+            logger.info(f"[REWRITE] Non-stream - Original: '{question}' → Rewritten: '{enhanced_query}'")
         
         # ============ INTENT CLASSIFICATION ============
-        # Classify user intent to enable branch-specific retrieval
-        intent_result = classify_intent(question)
+        # ✅ Use rewritten query for better intent classification
+        intent_result = classify_intent(enhanced_query)
         intent = intent_result["intent"]
         intent_confidence = intent_result["confidence"]
         intent_method = intent_result.get("method", "unknown")
@@ -1935,25 +2068,41 @@ IMPORTANT - TRANSCRIPT SOURCES DETECTED:
 - Transcripts are contextual and may contain discussions, not official commitments"""
                     enhanced_system_prompt = SYSTEM_PROMPT + guardrail_instruction
                 
-                # Standard prompt
-                human_template = "Context: {context}\n\nQuestion: {question}"
-                prompt_vars = {
-                    "context": context,
-                    "question": enhanced_query
-                }
+                # ✅ CONVERSATIONAL MEMORY: Build messages with history
+                # Use SystemMessage for system prompt and message objects for history to avoid template parsing issues
+                messages = [SystemMessage(content=enhanced_system_prompt)]
                 
-                prompt_template = ChatPromptTemplate.from_messages([
-                    ("system", enhanced_system_prompt),
-                    ("human", human_template)
-                ])
+                # Add conversation history if available (use message objects to avoid template variable conflicts)
+                if conversation_history:
+                    logger.debug(f"[MEMORY] Adding {len(conversation_history)} history messages to RAG prompt")
+                    for msg in conversation_history:
+                        if msg["role"] == "user":
+                            messages.append(HumanMessage(content=msg["content"]))
+                        elif msg["role"] == "assistant":
+                            messages.append(AIMessage(content=msg["content"]))
+                else:
+                    logger.debug(f"[MEMORY] No conversation history found for session {session_id[:8]}... (RAG)")
+                
+                # Standard prompt with context (format directly to avoid template variable conflicts)
+                # ✅ Improved structure for better context respect and reduced hallucination
+                messages.append(HumanMessage(content=f"""Use the following context to answer.
+
+<context>
+{context}
+</context>
+
+User Question:
+{enhanced_query}
+""".strip()))
+                logger.debug(f"[MEMORY] Total messages sent to LLM (RAG): {len(messages)} (1 system + {len(conversation_history)} history + 1 current with context)")
                 
                 llm = get_llm(
                     temperature=0.1,  # Low temperature for consistent responses
                     max_tokens=1500
                 )
                 
-                chain = prompt_template | llm
-                result = chain.invoke(prompt_vars)
+                # Invoke LLM directly with messages (no template chain needed)
+                result = llm.invoke(messages)
                 
                 answer = result.content
                 
@@ -1969,7 +2118,14 @@ IMPORTANT - TRANSCRIPT SOURCES DETECTED:
     except Exception as e:
         logger.debug(f"Failed to track message event: {e}")
 
-    # Add both user question and bot response to conversation AFTER processing
+    # ✅ CONVERSATIONAL MEMORY: Save messages to chat_messages collection
+    try:
+        await save_message(session_id, "user", question)
+        await save_message(session_id, "assistant", answer)
+    except Exception as e:
+        logger.warning(f"Failed to save messages to chat_messages: {e}")
+
+    # Add both user question and bot response to conversation AFTER processing (legacy)
     await add_to_conversation(conversation_id, "user", question)
     await add_to_conversation(conversation_id, "assistant", answer)
 
@@ -2024,6 +2180,15 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
     # ✅ IDENTITY RULE: conversation_id = user_id (always email, never session_id)
     conversation_id = user_id
 
+    # ✅ CONVERSATIONAL MEMORY: Get last 8 messages for context
+    conversation_history = await get_last_messages(session_id, limit=8)
+    
+    # ✅ CONVERSATIONAL MEMORY: System prompt that handles context relevance
+    CONVERSATIONAL_SYSTEM_PROMPT = """You are a helpful CloudFuze AI assistant.
+Use the chat history only if it is relevant to the user's latest question.
+If the user asks something unrelated, ignore the old context and answer fresh.
+Answer clearly and correctly based on the provided context and knowledge base."""
+
     async def generate_stream():
         try:
             # FIRST: Check if we have a corrected response for this question
@@ -2040,7 +2205,14 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
                     if i % 5 == 0:  # Add slight delay every 5 characters
                         await asyncio.sleep(0.01)
                 
-                # Add to conversation
+                # ✅ CONVERSATIONAL MEMORY: Save messages to chat_messages collection
+                try:
+                    await save_message(session_id, "user", question)
+                    await save_message(session_id, "assistant", full_response)
+                except Exception as e:
+                    logger.warning(f"Failed to save messages to chat_messages: {e}")
+                
+                # Add to conversation (legacy)
                 await add_to_conversation(conversation_id, "user", question)
                 await add_to_conversation(conversation_id, "assistant", full_response)
                 
@@ -2094,13 +2266,111 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
                 yield f"data: {json.dumps({'type': 'done', 'full_response': full_response, 'trace_id': trace_id, 'recommended_questions': recommended_questions})}\n\n"
                 return
             
-            # Don't use conversation context - treat each question independently
-            # conversation_context = await get_conversation_context(conversation_id)
-            # enhanced_query = f"{conversation_context}\n\nUser: {question}" if conversation_context else question
-            enhanced_query = question  # Use current question only
+            # ✅ MEMORY-ONLY QUESTION → do NOT run retrieval
+            if conversation_history and is_memory_only_question(question):
+                logger.info(f"[MEMORY-ONLY] Skipping RAG for: '{question}'")
+                
+                yield f"data: {json.dumps({'type': 'thinking_complete'})}\n\n"
+                
+                llm = get_llm(
+                    streaming=True, 
+                    temperature=0.7,
+                    max_tokens=500
+                )
+                
+                messages = [SystemMessage(content=CONVERSATIONAL_SYSTEM_PROMPT)]
+                
+                # Add conversation history
+                for msg in conversation_history:
+                    if msg["role"] == "user":
+                        messages.append(HumanMessage(content=msg["content"]))
+                    elif msg["role"] == "assistant":
+                        messages.append(AIMessage(content=msg["content"]))
+                
+                # Add current question
+                messages.append(HumanMessage(content=question))
+                
+                # Stream the response
+                full_response = ""
+                async for chunk in llm.astream(messages):
+                    if hasattr(chunk, "content") and chunk.content:
+                        token = chunk.content
+                        full_response += token
+                        yield f"data: {json.dumps({'token': token, 'type': 'token'})}\n\n"
+                        await asyncio.sleep(0.01)
+                
+                # Save messages
+                try:
+                    await save_message(session_id, "user", question)
+                    await save_message(session_id, "assistant", full_response)
+                except Exception as e:
+                    logger.warning(f"[MEMORY-ONLY] Failed to save messages: {e}")
+                
+                # Add to conversation (legacy)
+                await add_to_conversation(conversation_id, "user", question)
+                await add_to_conversation(conversation_id, "assistant", full_response)
+                
+                # Log to Langfuse
+                trace_id = None
+                try:
+                    trace_id = langfuse_tracker.create_trace(
+                        user_id=conversation_id,
+                        question=question,
+                        answer=full_response,
+                        session_id=session_id,
+                        user_name=user_name,
+                        user_email=user_email,
+                        metadata={
+                            "user_id": user_id or "anonymous",
+                            "session_id": session_id,
+                            "user_name": user_name,
+                            "user_email": user_email,
+                            "request": {
+                                "endpoint": "/chat/stream",
+                                "timestamp": datetime.now().isoformat()
+                            },
+                            "query": {
+                                "is_conversational": True,
+                                "is_memory_only": True
+                            },
+                            "generation": {
+                                "model": "gpt-4o-mini",
+                                "streaming": True
+                            }
+                        }
+                    )
+                except Exception as e:
+                    print(f"Langfuse logging failed: {e}")
+                
+                # Generate recommended questions
+                recommended_questions = []
+                try:
+                    from app.llm import generate_recommended_questions_from_docs
+                    recommended_questions = generate_recommended_questions_from_docs(
+                        user_question=question,
+                        retrieved_docs=[],
+                        bot_response=full_response
+                    )
+                except Exception as e:
+                    print(f"[WARNING] Failed to generate recommendations: {e}")
+                
+                yield f"data: {json.dumps({'type': 'done', 'full_response': full_response, 'trace_id': trace_id, 'recommended_questions': recommended_questions})}\n\n"
+                return
+            
+            # ✅ QUERY REWRITING: rewrite before retrieval
+            rewriter_llm = get_llm(temperature=0.1)
+            if conversation_history:
+                enhanced_query = await rewrite_query_with_context(question, conversation_history, rewriter_llm)
+            else:
+                enhanced_query = question
+            
             conversation_context = None  # Set to None for metadata logging
             
-            # Check if this is a conversational query
+            # Log rewrite if it changed
+            if enhanced_query != question:
+                logger.info(f"[REWRITE] Streaming - Original: '{question}' → Rewritten: '{enhanced_query}'")
+            
+            # Check if this is a conversational query (use original question for this check)
             is_conv = is_conversational_query(question)
             
             if is_conv:
@@ -2115,15 +2385,27 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
                     max_tokens=500
                 )
                 
-                # CloudFuze-focused conversational prompt
-                conversational_prompt = ChatPromptTemplate.from_messages([
-                    ("system", "You are a CloudFuze AI assistant specializing in cloud migration services. For greetings like 'hi', 'hello', 'thanks', 'bye', respond warmly and professionally. For ANY other topics unrelated to CloudFuze, cloud migration, or enterprise services, politely redirect by saying: 'I don't have information about that topic, but I can help you with CloudFuze's migration services or products. What would you like to know?'"),
-                    ("human", "{question}")
-                ])
+                # ✅ CONVERSATIONAL MEMORY: Build messages with history
+                # Use SystemMessage for system prompt and message objects for history to avoid template parsing issues
+                messages = [SystemMessage(content=CONVERSATIONAL_SYSTEM_PROMPT)]
+                
+                # Add conversation history if available (use message objects to avoid template variable conflicts)
+                if conversation_history:
+                    logger.debug(f"[MEMORY] Adding {len(conversation_history)} history messages to LLM prompt (streaming)")
+                    for msg in conversation_history:
+                        if msg["role"] == "user":
+                            messages.append(HumanMessage(content=msg["content"]))
+                        elif msg["role"] == "assistant":
+                            messages.append(AIMessage(content=msg["content"]))
+                else:
+                    logger.debug(f"[MEMORY] No conversation history found for session {session_id[:8]}... (streaming)")
+                
+                # Add current question
+                messages.append(HumanMessage(content=question))
+                logger.debug(f"[MEMORY] Total messages sent to LLM (streaming): {len(messages)} (1 system + {len(conversation_history)} history + 1 current)")
                 
                 # Stream the response
                 full_response = ""
-                messages = conversational_prompt.format_messages(question=enhanced_query)
                 async for chunk in llm.astream(messages):
                     if hasattr(chunk, 'content'):
                         token = chunk.content
@@ -2131,7 +2413,14 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
                         yield f"data: {json.dumps({'token': token, 'type': 'token'})}\n\n"
                         await asyncio.sleep(0.01)
                 
-                # Add to conversation
+                # ✅ CONVERSATIONAL MEMORY: Save messages to chat_messages collection
+                try:
+                    await save_message(session_id, "user", question)
+                    await save_message(session_id, "assistant", full_response)
+                except Exception as e:
+                    logger.warning(f"Failed to save messages to chat_messages: {e}")
+                
+                # Add to conversation (legacy)
                 await add_to_conversation(conversation_id, "user", question)
                 await add_to_conversation(conversation_id, "assistant", full_response)
                 
@@ -2850,21 +3139,40 @@ RETRIEVAL CONFIDENCE: HIGH
                 
                 enhanced_system_prompt = enhanced_system_prompt + confidence_instruction
             
+            # ✅ CONVERSATIONAL MEMORY: Build messages with history
+            # Use SystemMessage for system prompt and message objects for history to avoid template parsing issues
+            memory_messages = [SystemMessage(content=enhanced_system_prompt)]
+            
+            # Add conversation history if available (use message objects to avoid template variable conflicts)
+            if conversation_history:
+                logger.debug(f"[MEMORY] Adding {len(conversation_history)} history messages to RAG prompt (streaming)")
+                for msg in conversation_history:
+                    if msg["role"] == "user":
+                        memory_messages.append(HumanMessage(content=msg["content"]))
+                    elif msg["role"] == "assistant":
+                        memory_messages.append(AIMessage(content=msg["content"]))
+            else:
+                logger.debug(f"[MEMORY] No conversation history found for session {session_id[:8]}... (RAG streaming)")
+            
             # Adapt prompt based on whether we have relevant context
             if forced_no_context:
                 # No relevant documents - explicitly tell LLM
-                prompt_template = ChatPromptTemplate.from_messages([
-                    ("system", enhanced_system_prompt + "\n\nIMPORTANT: No relevant documents were found in the knowledge base for this query."),
-                    ("human", "Question: {question}")
-                ])
-                messages = prompt_template.format_messages(question=enhanced_query)
+                memory_messages.append(HumanMessage(content=f"Question: {enhanced_query}"))
+                messages = memory_messages
             else:
                 # Normal flow with context
-                prompt_template = ChatPromptTemplate.from_messages([
-                    ("system", enhanced_system_prompt),
-                    ("human", "Context: {context}\n\nQuestion: {question}")
-                ])
-                messages = prompt_template.format_messages(context=context_text, question=enhanced_query)
+                # ✅ Improved structure for better context respect and reduced hallucination
+                memory_messages.append(HumanMessage(content=f"""Use the following context to answer.
+
+<context>
+{context_text}
+</context>
+
+User Question:
+{enhanced_query}
+""".strip()))
+                messages = memory_messages
+            logger.debug(f"[MEMORY] Total messages sent to LLM (RAG streaming): {len(messages)} (1 system + {len(conversation_history)} history + 1 current with context)")
             
             # ===== START SYNTHESIS SPAN =====
             if rag_trace:
@@ -2902,7 +3210,14 @@ RETRIEVAL CONFIDENCE: HIGH
             except Exception as e:
                 logger.debug(f"Failed to track message event: {e}")
             
-            # Add both user question and bot response to conversation AFTER processing
+            # ✅ CONVERSATIONAL MEMORY: Save messages to chat_messages collection
+            try:
+                await save_message(session_id, "user", question)
+                await save_message(session_id, "assistant", full_response)
+            except Exception as e:
+                logger.warning(f"Failed to save messages to chat_messages: {e}")
+            
+            # Add both user question and bot response to conversation AFTER processing (legacy)
             await add_to_conversation(conversation_id, "user", question)
             await add_to_conversation(conversation_id, "assistant", full_response)
             
@@ -3350,6 +3665,33 @@ async def get_chat_session(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/chat/sessions/{session_id}")
+async def delete_chat_session(
+    session_id: str,
+    auth_user: dict = Depends(require_auth)
+):
+    """Delete a chat session (soft delete - only if it belongs to the authenticated user)."""
+    try:
+        from app.mongodb_memory import delete_session
+        
+        deleted = await delete_session(
+            session_id=session_id,
+            user_id=auth_user["user_id"]
+        )
+        
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Session not found")
+        
+        return {"message": "Session deleted successfully", "session_id": session_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting session {session_id}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete session: {str(e)}"
+        )
 
 @router.get("/chat/sessions/messages/{user_id}")
 async def get_user_chat_messages(

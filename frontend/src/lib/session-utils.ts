@@ -98,7 +98,7 @@ export function saveDeletedSessions(sessions: ChatSession[]): void {
 }
 
 // Delete a session (soft delete - move to deleted_chat_sessions)
-export function deleteSession(sessionId: string): void {
+export async function deleteSession(sessionId: string): Promise<void> {
   const sessions = getAllSessions();
   const sessionIndex = sessions.findIndex(s => s.id === sessionId);
   
@@ -106,7 +106,7 @@ export function deleteSession(sessionId: string): void {
     const [deletedSession] = sessions.splice(sessionIndex, 1);
     deletedSession.deletedAt = Date.now();
     
-    // Save to deleted sessions
+    // Save to deleted sessions (local soft delete)
     const deletedSessions = getDeletedSessions();
     
     // 🔒 CRITICAL FIX: Defensive check before unshift
@@ -120,6 +120,27 @@ export function deleteSession(sessionId: string): void {
     
     // Save updated active sessions
     saveAllSessions(sessions);
+    
+    // ✅ NEW: Delete from backend
+    try {
+      const response = await apiFetch(`/chat/sessions/${sessionId}`, {
+        method: 'DELETE'
+      });
+      
+      if (response.ok) {
+        console.log('[SESSION] Successfully deleted session from backend:', sessionId);
+      } else if (response.status === 404) {
+        console.warn('[SESSION] Session not found in backend (may have been already deleted):', sessionId);
+      } else {
+        console.error('[SESSION] Failed to delete session from backend:', response.status);
+        // Session is still deleted locally, but backend deletion failed
+        // This is okay - it will be cleaned up on next sync
+      }
+    } catch (error) {
+      console.error('[SESSION] Error deleting session from backend:', error);
+      // Session is still deleted locally, but backend deletion failed
+      // This is okay - it will be cleaned up on next sync
+    }
     
     console.log('[SESSION] Soft deleted session:', sessionId);
   }
