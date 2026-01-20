@@ -20,6 +20,13 @@ interface InitOptions {
 let isAppInitialized = false;
 let currentInitializedSessionId: string | null = null;
 
+// Export function to reset initialization state
+export function resetChatInitialization() {
+  isAppInitialized = false;
+  currentInitializedSessionId = null;
+  console.log('[CHAT] Reset initialization state');
+}
+
 // ============================================================================
 // PHASE 2.5: Parallel Chat Generation (Frontend-Managed)
 // ============================================================================
@@ -49,6 +56,34 @@ export function initializeChatApp(options: InitOptions = {}) {
   
   if (isSwitchingSession) {
     console.log('[CHAT] Switching session from', currentInitializedSessionId, 'to', initialSessionId);
+    
+    // ✅ CRITICAL FIX: Clear messages IMMEDIATELY when switching to new chat
+    const messagesDivTemp = document.getElementById("messages");
+    if (messagesDivTemp && initialSessionId === null) {
+      console.log('[CHAT] Clearing messages for new chat');
+      messagesDivTemp.innerHTML = '';
+      // Also update empty state immediately
+      const emptyStateTemp = document.getElementById("empty-state");
+      const inputSectionTemp = document.querySelector(".chatgpt-input-section") as HTMLElement;
+      if (emptyStateTemp && inputSectionTemp) {
+        emptyStateTemp.style.display = 'flex';
+        messagesDivTemp.style.display = 'none';
+        inputSectionTemp.classList.remove('show');
+      }
+      
+      // ✅ CRITICAL FIX: Clear sidebar active state immediately
+      const sidebarHistory = document.getElementById('sidebar-history');
+      const othersHistory = document.getElementById('others-history');
+      if (sidebarHistory || othersHistory) {
+        const allHistoryItems = [
+          ...(sidebarHistory ? Array.from(sidebarHistory.querySelectorAll('.history-item')) : []),
+          ...(othersHistory ? Array.from(othersHistory.querySelectorAll('.history-item')) : [])
+        ];
+        allHistoryItems.forEach(item => {
+          (item as HTMLElement).classList.remove('active');
+        });
+      }
+    }
     
     // ✅ PHASE 2.5: DO NOT abort previous session's request
     // Allow multiple chats to generate in parallel
@@ -205,7 +240,9 @@ export function initializeChatApp(options: InitOptions = {}) {
   }
   
   // Track the currently active session (for UI highlighting)
-  let activeSessionId: string | null = sessionId || null;
+  // ✅ CRITICAL FIX: Set activeSessionId to null when initialSessionId is null (new chat)
+  // Even though we create a sessionId for future use, UI should show no active session
+  let activeSessionId: string | null = (initialSessionId === null) ? null : (sessionId || null);
   
   // Track if this is a brand new session that needs URL navigation after first message
   let isNewSessionPendingNavigation = !initialSessionId && sessionId;
@@ -3820,17 +3857,35 @@ export function initializeChatApp(options: InitOptions = {}) {
     // Reset read-only mode when creating new chat
     isReadOnlyMode = false;
     
-    // If router is available, ALWAYS navigate to /chat/new
+    // If router is available, check if we need to navigate
     if (router) {
-      // Save current session before navigating
+      // Save current session before clearing
       if (messagesDiv!.children.length > 0) {
         saveCurrentSession();
       }
       
-      // REQUIRED: Always force route change to /chat/new
-      // Don't check current path - always navigate
-      console.log('[NEW CHAT] Navigating to /chat/new');
-      router.push('/chat/new');
+      // ✅ CRITICAL FIX: Always force a full page refresh when navigating to /chat/new
+      // This ensures the component fully remounts and state is cleared
+      const currentPath = typeof window !== 'undefined' ? window.location.pathname : '';
+      
+      // Always reset initialization state when going to new chat
+      isAppInitialized = false;
+      currentInitializedSessionId = null;
+      
+      if (currentPath === '/chat/new') {
+        // Already on /chat/new - force refresh to ensure clean state
+        console.log('[NEW CHAT] Already on /chat/new - forcing refresh');
+        if (typeof window !== 'undefined') {
+          window.location.href = '/chat/new';
+        }
+        return;
+      }
+      
+      // Not on /chat/new - navigate with refresh
+      console.log('[NEW CHAT] Navigating to /chat/new with refresh');
+      if (typeof window !== 'undefined') {
+        window.location.href = '/chat/new';
+      }
       return;
     }
     

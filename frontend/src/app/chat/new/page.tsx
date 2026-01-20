@@ -6,6 +6,7 @@ import ChatSidebar from '@/components/ChatSidebar';
 import ChatInterface from '@/components/ChatInterface';
 import TokenMonitor from '@/components/TokenMonitor';
 import { getCurrentUser, checkSession, createNewSessionId, setCurrentSessionId } from '@/lib/session-utils';
+import { resetChatInitialization } from '@/lib/chat-initialization';
 
 export default function NewChatPage() {
   const router = useRouter();
@@ -92,21 +93,42 @@ export default function NewChatPage() {
   // Initialize chat app ONLY after authentication is confirmed
   useEffect(() => {
     if (isAuthenticated) {
-      // Clear any stale chat state when mounting /chat/new
-      // This ensures clean state even if user navigates here from another route
-      if (typeof window !== 'undefined') {
-        const messagesDiv = document.getElementById('messages');
-        if (messagesDiv) {
-          messagesDiv.innerHTML = '';
+      // ✅ CRITICAL FIX: Always clear state when this component mounts
+      // This ensures clean state even if navigating from another route
+      const clearState = () => {
+        if (typeof window !== 'undefined') {
+          const messagesDiv = document.getElementById('messages');
+          if (messagesDiv) {
+            messagesDiv.innerHTML = '';
+          }
+          const emptyState = document.getElementById('empty-state');
+          const inputSection = document.querySelector('.chatgpt-input-section') as HTMLElement;
+          if (emptyState && inputSection && messagesDiv) {
+            emptyState.style.display = 'flex';
+            messagesDiv.style.display = 'none';
+            inputSection.classList.remove('show');
+          }
+          
+          // ✅ Also clear sidebar active state
+          const sidebarHistory = document.getElementById('sidebar-history');
+          const othersHistory = document.getElementById('others-history');
+          if (sidebarHistory || othersHistory) {
+            const allHistoryItems = [
+              ...(sidebarHistory ? Array.from(sidebarHistory.querySelectorAll('.history-item')) : []),
+              ...(othersHistory ? Array.from(othersHistory.querySelectorAll('.history-item')) : [])
+            ];
+            allHistoryItems.forEach(item => {
+              (item as HTMLElement).classList.remove('active');
+            });
+          }
         }
-        const emptyState = document.getElementById('empty-state');
-        const inputSection = document.querySelector('.chatgpt-input-section') as HTMLElement;
-        if (emptyState && inputSection && messagesDiv) {
-          emptyState.style.display = 'flex';
-          messagesDiv.style.display = 'none';
-          inputSection.classList.remove('show');
-        }
-      }
+      };
+      
+      // Clear immediately
+      clearState();
+      
+      // Also clear after a short delay to catch any race conditions
+      const timeoutId = setTimeout(clearState, 100);
 
       // Wait for marked.js to load
       const checkMarked = setInterval(() => {
@@ -121,15 +143,20 @@ export default function NewChatPage() {
         }
       }, 100);
 
-      return () => clearInterval(checkMarked);
+      return () => {
+        clearInterval(checkMarked);
+        clearTimeout(timeoutId);
+      };
     }
   }, [isAuthenticated, router]);
 
   const handleNewChat = () => {
-    // REQUIRED: Always navigate to /chat/new to force route refresh
-    // This ensures state is cleared even if URL was changed via window.history.replaceState()
-    // Navigating to the same route forces Next.js to re-mount and clear state
-    router.push('/chat/new');
+    // ✅ CRITICAL FIX: Reset initialization state and force full page refresh
+    // This ensures the component fully remounts and state is cleared
+    resetChatInitialization();
+    if (typeof window !== 'undefined') {
+      window.location.href = '/chat/new';
+    }
   };
 
   // Avoid rendering until after hydration to prevent mismatches
