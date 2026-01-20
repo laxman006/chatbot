@@ -434,6 +434,34 @@ export default function ChatSidebar({
     renderSessionHistory(!hasRenderedHistoryRef.current);
   }, [renderSessionHistory]);
 
+  // ✅ NEW: Explicitly handle activeSessionId changes to clear active state
+  useEffect(() => {
+    if (hasRenderedHistoryRef.current) {
+      const sidebarHistory = document.getElementById('sidebar-history');
+      const othersHistory = document.getElementById('others-history');
+      
+      if (sidebarHistory || othersHistory) {
+        const allHistoryItems = [
+          ...(sidebarHistory ? Array.from(sidebarHistory.querySelectorAll('.history-item')) : []),
+          ...(othersHistory ? Array.from(othersHistory.querySelectorAll('.history-item')) : [])
+        ];
+        
+        allHistoryItems.forEach(item => {
+          const sessionEl = item as HTMLElement;
+          const sid = sessionEl.dataset.sessionId;
+          // Clear active state when activeSessionId is undefined (new chat)
+          if (activeSessionId === undefined || activeSessionId === null) {
+            sessionEl.classList.remove('active');
+          } else if (sid === activeSessionId) {
+            sessionEl.classList.add('active');
+          } else {
+            sessionEl.classList.remove('active');
+          }
+        });
+      }
+    }
+  }, [activeSessionId]);
+
   // Close submenu when dropdown closes
   useEffect(() => {
     const dropdown = document.getElementById('userDropdown');

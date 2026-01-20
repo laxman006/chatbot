@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef } from 'react';
+import { useRef, useEffect } from 'react';
 import { MAX_PROMPT_LENGTH } from '@/types/chat';
 import ChatHeader from './ChatHeader';
 
@@ -11,6 +11,24 @@ interface ChatInterfaceProps {
 
 export default function ChatInterface({ sessionId, onSendMessage }: ChatInterfaceProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  
+  // ✅ CRITICAL FIX: Clear messages when sessionId changes to undefined (new chat)
+  useEffect(() => {
+    if (sessionId === undefined) {
+      // This is a new chat - clear any stale messages
+      const messagesDiv = document.getElementById('messages');
+      if (messagesDiv) {
+        messagesDiv.innerHTML = '';
+      }
+      const emptyState = document.getElementById('empty-state');
+      const inputSection = document.querySelector('.chatgpt-input-section') as HTMLElement;
+      if (emptyState && inputSection && messagesDiv) {
+        emptyState.style.display = 'flex';
+        messagesDiv.style.display = 'none';
+        inputSection.classList.remove('show');
+      }
+    }
+  }, [sessionId]);
 
   return (
     <main className="chatgpt-main">
