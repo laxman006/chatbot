@@ -2201,6 +2201,16 @@ export function initializeChatApp(options: InitOptions = {}) {
   // [REST OF THE JAVASCRIPT CODE WILL CONTINUE IN NEXT MESSAGE DUE TO LENGTH]
   // For now, let me create a simplified version that makes it work
 
+  // Check if user is near bottom of messages
+  function isUserNearBottom(): boolean {
+    const messagesContainer = document.querySelector('.messages-container') as HTMLElement;
+    if (!messagesContainer) return true;
+    
+    const threshold = 150;
+    const isNearBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight < threshold;
+    return isNearBottom;
+  }
+
   // Scroll to bottom (forced - used when user clicks button)
   function scrollToBottom() {
     requestAnimationFrame(() => {
@@ -2208,36 +2218,17 @@ export function initializeChatApp(options: InitOptions = {}) {
       if (messagesContainer) {
         messagesContainer.scrollTo({
           top: messagesContainer.scrollHeight,
-          behavior: 'smooth'
-        });
+        behavior: 'smooth'
+      });
       }
     });
   }
 
-  // ✅ Optimized auto-scroll with RAF throttling for smooth streaming
-  let scrollRaf: number | null = null;
-
   // Auto-scroll only if user is already near bottom (ChatGPT behavior)
   function autoScrollToBottom() {
-    const messagesContainer = document.querySelector('.messages-container') as HTMLElement;
-    if (!messagesContainer) return;
-
-    const threshold = 150;
-    const distanceFromBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight;
-    
-    // Only scroll if user is near bottom
-    if (distanceFromBottom > threshold) return;
-
-    // Throttle with RAF for smooth performance during streaming
-    if (scrollRaf) return;
-
-    scrollRaf = requestAnimationFrame(() => {
-      messagesContainer.scrollTo({
-        top: messagesContainer.scrollHeight,
-        behavior: 'smooth'
-      });
-      scrollRaf = null;
-    });
+    if (isUserNearBottom()) {
+      scrollToBottom();
+    }
   }
 
   async function sendMessage() {
@@ -2273,9 +2264,6 @@ export function initializeChatApp(options: InitOptions = {}) {
     // Hide character counter after sending
     const counter = document.getElementById('char-counter');
     if (counter) counter.style.display = 'none';
-    
-    // ✅ Immediately scroll to show the new user message
-    setTimeout(() => scrollToBottom(), 50);
     
     // Update sidebar IMMEDIATELY before saving (for instant visual feedback)
     // This shows the new chat in sidebar right away
@@ -2346,9 +2334,6 @@ export function initializeChatApp(options: InitOptions = {}) {
       botDivInDOM: messagesDiv!.contains(botDiv)
     });
     
-    // ✅ Immediately scroll to show the new bot message container
-    setTimeout(() => scrollToBottom(), 50);
-    
     // Status update function - simplified for better performance
     let isStreamingStatus = false;
     
@@ -2382,8 +2367,7 @@ export function initializeChatApp(options: InitOptions = {}) {
       </div>
     `;
     
-    // ✅ Ensure thinking state is visible
-    setTimeout(() => autoScrollToBottom(), 100);
+    setTimeout(() => autoScrollToBottom(), 50);
 
     try {
       // ✅ FIX 2: Session-based auth - check user exists (no token needed)
@@ -2474,8 +2458,6 @@ export function initializeChatApp(options: InitOptions = {}) {
                 // Mark that we're done with thinking phase and starting content
                 isStreamingStatus = true;
                 botDiv.innerHTML = `<div class="message-content"></div>`;
-                // ✅ Scroll to show content area when streaming starts
-                autoScrollToBottom();
               } else if (data.type === 'sources') {
                 console.log("[CONSOLE]", data.sources);
               } else if (data.type === 'token') {
@@ -2572,9 +2554,6 @@ export function initializeChatApp(options: InitOptions = {}) {
                   </div>
                   ${recommendedQuestionsHTML}
                 `;
-                
-                // ✅ Ensure final message with buttons is visible
-                setTimeout(() => autoScrollToBottom(), 100);
                 
                 // Propagate trace_id to feedback buttons so click handlers always have access
                 if (traceId) {
