@@ -369,6 +369,31 @@ export default function AdminDashboardPage() {
             <DateRangeFilterDropdown onFilterChange={setDateRange} />
             <DeveloperExclusionFilterDropdown onExclusionChange={setExcludedUsers} />
             <button
+              onClick={() => router.push('/admin/jira')}
+              style={{
+                padding: '8px 16px',
+                borderRadius: '4px',
+                border: '1px solid #c8c6c4',
+                background: '#ffffff',
+                cursor: 'pointer',
+                color: '#323130',
+                fontWeight: 500,
+                fontSize: '14px',
+                transition: 'all 0.15s',
+                fontFamily: 'inherit'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = '#8a8886';
+                e.currentTarget.style.backgroundColor = '#faf9f8';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = '#c8c6c4';
+                e.currentTarget.style.backgroundColor = '#ffffff';
+              }}
+            >
+              Jira Management
+            </button>
+            <button
               onClick={() => router.push('/admin/top-questions')}
               style={{
                 padding: '8px 16px',

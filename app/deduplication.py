@@ -41,7 +41,8 @@ class Deduplicator:
     
     def compute_embeddings(self, texts: List[str]) -> np.ndarray:
         """
-        Compute embeddings for a list of texts.
+        Compute embeddings for a list of texts with automatic batching.
+        Processes in batches to avoid OpenAI token limits (300k tokens/request).
         
         Args:
             texts: List of text strings
@@ -52,8 +53,34 @@ class Deduplicator:
         if not texts:
             return np.array([])
         
-        embeddings = self.embeddings_model.embed_documents(texts)
-        return np.array(embeddings)
+        # Process in batches to avoid OpenAI token limits (300k tokens/request)
+        # Real-world data: 1000 chunks = 624k tokens (measured from actual run)
+        # This means ~624 tokens per chunk on average (very large chunks!)
+        # Max tokens: 300,000 / 624 = ~480 chunks per batch
+        # Use 400 as safe batch size with buffer
+        batch_size = 400
+        all_embeddings = []
+        
+        total_batches = (len(texts) + batch_size - 1) // batch_size
+        
+        if len(texts) > batch_size:
+            print(f"   Computing embeddings in {total_batches} batches...")
+        
+        for i in range(0, len(texts), batch_size):
+            batch_texts = texts[i:i + batch_size]
+            batch_num = i // batch_size + 1
+            
+            if len(texts) > batch_size:
+                print(f"   Batch {batch_num}/{total_batches}: Processing {len(batch_texts)} chunks...")
+            
+            try:
+                batch_embeddings = self.embeddings_model.embed_documents(batch_texts)
+                all_embeddings.extend(batch_embeddings)
+            except Exception as e:
+                print(f"   [ERROR] Failed to compute embeddings for batch {batch_num}: {e}")
+                raise
+        
+        return np.array(all_embeddings)
     
     def find_duplicates(
         self,

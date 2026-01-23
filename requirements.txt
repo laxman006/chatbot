@@ -50,7 +50,13 @@ xlrd==2.0.1
 markdown==3.5.1
 
 # Jira Integration
-jira>=3.5.0
+jira>=3.10.5
+
+# Security and Encryption
+cryptography>=42.0.0
+
+# Job Scheduling
+apscheduler>=3.10.0
 
 # Database
 motor==3.3.2
