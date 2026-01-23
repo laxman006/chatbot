@@ -173,7 +173,7 @@ async function proxyRequest(
         },
         data: body,
         maxRedirects: 5,
-        timeout: 35000, // 35 seconds (slightly longer than backend's 30s timeout)
+        timeout: 120000, // 120 seconds (longer than backend's 90s Langfuse timeout)
         validateStatus: () => true, // Don't throw on any status code
         // ⚠️ CRITICAL: Don't use arraybuffer - use default to let axios parse headers correctly
         // Axios automatically exposes Set-Cookie in response.headers['set-cookie']

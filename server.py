@@ -4,12 +4,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from app.endpoints import router as chat_router
 from app.routes.suggested_questions import router as questions_router
+from app.routes.jira_sync import router as jira_sync_router
 from app.mongodb_memory import close_mongodb_connection
 import uvicorn
 import asyncio
 from contextlib import asynccontextmanager
 import os
 import logging
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+import atexit
 
 # Configure logging
 logging.basicConfig(
@@ -18,6 +22,39 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
+
+# Initialize scheduler for Jira sync
+scheduler = BackgroundScheduler()
+
+def scheduled_jira_sync():
+    """
+    Background job for scheduled Jira sync.
+    Runs daily at 2 AM to sync new/updated tickets.
+    """
+    try:
+        from app.jira_vectorstore import add_jira_tickets_incrementally
+        from app.jira_sync_tracker import update_last_sync_time
+        
+        logger.info("[SCHEDULER] 🔄 Starting scheduled Jira sync...")
+        
+        result = add_jira_tickets_incrementally()
+        
+        if result:
+            total_docs = result._collection.count()
+            logger.info(f"[SCHEDULER] ✅ Sync completed successfully. Total documents: {total_docs}")
+        else:
+            logger.info("[SCHEDULER] ℹ️  No new tickets to sync")
+            
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f"[SCHEDULER] ❌ Sync failed: {error_msg}", exc_info=True)
+        
+        # Record failure for admin alerts
+        try:
+            from app.jira_sync_tracker import update_last_sync_time
+            update_last_sync_time(status="failed", documents_added=0, error_message=error_msg)
+        except:
+            pass
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -34,9 +71,32 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"[STARTUP] ❌ Failed to initialize MongoDB memory storage: {e}", exc_info=True)
     
+    # Start Jira sync scheduler
+    try:
+        sync_hour = int(os.getenv("JIRA_SYNC_HOUR", "2"))  # Default: 2 AM
+        
+        scheduler.add_job(
+            func=scheduled_jira_sync,
+            trigger=CronTrigger(hour=sync_hour, minute=0),  # Daily at specified hour
+            id='jira_sync_job',
+            name='Daily Jira Ticket Sync',
+            replace_existing=True
+        )
+        scheduler.start()
+        logger.info(f"[STARTUP] ✅ Jira sync scheduler started (runs daily at {sync_hour}:00 AM)")
+    except Exception as e:
+        logger.error(f"[STARTUP] ❌ Failed to start Jira sync scheduler: {e}", exc_info=True)
+    
     yield
     
     # Shutdown
+    try:
+        logger.info("[SHUTDOWN] Stopping Jira sync scheduler...")
+        scheduler.shutdown()
+        logger.info("[SHUTDOWN] ✅ Jira sync scheduler stopped")
+    except Exception as e:
+        logger.warning(f"[SHUTDOWN] ⚠️  Error stopping scheduler: {e}")
+    
     try:
         logger.info("[SHUTDOWN] Closing MongoDB memory storage...")
         await close_mongodb_connection()
@@ -145,6 +205,7 @@ async def health_check():
 
 app.include_router(chat_router)
 app.include_router(questions_router)
+app.include_router(jira_sync_router)
 
 # Mount static directories for images and other assets
 app.mount("/images", StaticFiles(directory="images"), name="images")

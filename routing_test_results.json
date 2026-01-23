@@ -1,0 +1,187 @@
+[
+  {
+    "query": "if during an ongoing migration the csv needs to be changed should we change from UI or from backend",
+    "expected_type": "migration_procedure",
+    "actual_type": "migration_procedure",
+    "type_match": true,
+    "expected_sources": [
+      "blog",
+      "jira"
+    ],
+    "actual_sources": [
+      "blog",
+      "jira",
+      "pdfs"
+    ],
+    "sources_match": [
+      "blog",
+      "jira"
+    ],
+    "total_k": 30,
+    "confidence": 0.85,
+    "has_results": true,
+    "note": "Previously returned 0 results - classified as general_info"
+  },
+  {
+    "query": "Why are messages posted in channels not migrating during the migration process?",
+    "expected_type": "troubleshooting",
+    "actual_type": "migration_procedure",
+    "type_match": false,
+    "expected_sources": [
+      "blog",
+      "jira"
+    ],
+    "actual_sources": [
+      "blog",
+      "jira",
+      "pdfs"
+    ],
+    "sources_match": [
+      "blog",
+      "jira"
+    ],
+    "total_k": 40,
+    "confidence": 0.85,
+    "has_results": true,
+    "note": "Previously returned 0 results"
+  },
+  {
+    "query": "how to configure Teams migration settings",
+    "expected_type": "configuration",
+    "actual_type": "configuration",
+    "type_match": true,
+    "expected_sources": [
+      "blog",
+      "pdfs"
+    ],
+    "actual_sources": [
+      "blog",
+      "sharepoint",
+      "jira",
+      "pdfs"
+    ],
+    "sources_match": [
+      "blog",
+      "pdfs"
+    ],
+    "total_k": 40,
+    "confidence": 0.85,
+    "has_results": true,
+    "note": "New configuration type test"
+  },
+  {
+    "query": "best practices for large file migrations",
+    "expected_type": "best_practices",
+    "actual_type": "best_practices",
+    "type_match": true,
+    "expected_sources": [
+      "blog",
+      "transcripts"
+    ],
+    "actual_sources": [
+      "blog",
+      "sharepoint",
+      "jira",
+      "transcripts",
+      "pdfs"
+    ],
+    "sources_match": [
+      "blog",
+      "transcripts"
+    ],
+    "total_k": 45,
+    "confidence": 0.85,
+    "has_results": true,
+    "note": "New best_practices type test"
+  },
+  {
+    "query": "what is CloudFuze Migrate",
+    "expected_type": "general_info",
+    "actual_type": "general_info",
+    "type_match": true,
+    "expected_sources": [
+      "blog",
+      "pdfs"
+    ],
+    "actual_sources": [
+      "blog",
+      "pdfs"
+    ],
+    "sources_match": [
+      "blog",
+      "pdfs"
+    ],
+    "total_k": 30,
+    "confidence": 0.85,
+    "has_results": true,
+    "note": "General info should still work"
+  },
+  {
+    "query": "SOC 2 Type 2 certification",
+    "expected_type": "compliance",
+    "actual_type": "compliance",
+    "type_match": true,
+    "expected_sources": [
+      "sharepoint"
+    ],
+    "actual_sources": [
+      "blog",
+      "sharepoint",
+      "pdfs"
+    ],
+    "sources_match": [
+      "sharepoint"
+    ],
+    "total_k": 25,
+    "confidence": 0.85,
+    "has_results": true,
+    "note": "Compliance should prioritize SharePoint"
+  },
+  {
+    "query": "migration failed with error 500",
+    "expected_type": "troubleshooting",
+    "actual_type": "troubleshooting",
+    "type_match": true,
+    "expected_sources": [
+      "blog",
+      "jira"
+    ],
+    "actual_sources": [
+      "blog",
+      "jira",
+      "pdfs"
+    ],
+    "sources_match": [
+      "blog",
+      "jira"
+    ],
+    "total_k": 45,
+    "confidence": 0.9,
+    "has_results": true,
+    "note": "Error troubleshooting"
+  },
+  {
+    "query": "how to modify user mappings during active migration",
+    "expected_type": "migration_procedure",
+    "actual_type": "migration_procedure",
+    "type_match": true,
+    "expected_sources": [
+      "blog",
+      "jira"
+    ],
+    "actual_sources": [
+      "blog",
+      "sharepoint",
+      "jira",
+      "pdfs"
+    ],
+    "sources_match": [
+      "blog",
+      "jira"
+    ],
+    "total_k": 40,
+    "confidence": 0.85,
+    "has_results": true,
+    "note": "Another migration procedure test"
+  }
+]
