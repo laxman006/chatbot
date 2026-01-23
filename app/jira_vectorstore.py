@@ -53,8 +53,13 @@ def load_jira_vectorstore():
         return None
 
 
-def build_jira_vectorstore():
-    """Build separate vectorstore for Jira tickets."""
+def build_jira_vectorstore(use_cache: bool = True):
+    """
+    Build separate vectorstore for Jira tickets.
+    
+    Args:
+        use_cache: If True, try to load tickets from cache before fetching
+    """
     if not JIRA_PROCESSOR_AVAILABLE:
         print("[ERROR] Cannot build Jira vectorstore: Jira processor not available")
         print("[INFO] Install jira package with: pip install jira")
@@ -74,17 +79,69 @@ def build_jira_vectorstore():
             print(f"[WARNING] Could not remove existing vectorstore: {e}")
             print("[WARNING] Continuing anyway - duplicates may occur")
     
-    print(f"[*] Fetching {JIRA_MAX_ISSUES} recent closed/resolved tickets...")
+    # Try to load tickets from cache if enabled
+    from app.jira_ticket_cache import load_tickets_from_cache, save_tickets_to_cache, get_cache_info
     
-    # Process Jira tickets
-    jira_docs = process_jira_content()
-    print(f"[OK] Processed {len(jira_docs)} Jira ticket chunks")
+    tickets = None
+    processor = None
+    
+    if use_cache:
+        print(f"[*] Checking for cached tickets...")
+        cache_info = get_cache_info()
+        if cache_info:
+            print(f"[CACHE] Found cache: {cache_info.get('ticket_count', 0)} tickets, "
+                  f"{cache_info.get('file_size_mb', 0)} MB")
+            print(f"[CACHE] Cache created: {cache_info.get('fetch_time', 'unknown')}")
+            tickets = load_tickets_from_cache()
+            if tickets:
+                print(f"[OK] Loaded {len(tickets)} tickets from cache - processing ALL tickets")
+        else:
+            print(f"[CACHE] No cache found - will fetch from Jira")
+    
+    # If no cache or cache disabled, fetch from Jira
+    if not tickets:
+        print(f"[*] Fetching {JIRA_MAX_ISSUES} recent closed/resolved tickets from Jira...")
+        
+        # Fetch tickets
+        from app.jira_processor import JiraProcessor
+        processor = JiraProcessor()
+        tickets = processor.fetch_tickets()
+        
+        # Save to cache for future use
+        if tickets:
+            from datetime import datetime
+            save_tickets_to_cache(tickets, {
+                "fetch_time": datetime.now().isoformat(),
+                "ticket_count": len(tickets),
+                "max_issues": JIRA_MAX_ISSUES,
+                "source": "Jira API"
+            })
+    
+    # Convert tickets to documents
+    if not tickets:
+        print("[WARNING] No Jira tickets found")
+        return None
+    
+    print(f"[*] Processing {len(tickets)} tickets into document chunks...")
+    print(f"[INFO] Processing ALL tickets (no deduplication)")
+    
+    # Reuse processor if available, otherwise create one
+    if processor is None:
+        from app.jira_processor import JiraProcessor
+        processor = JiraProcessor()
+    
+    jira_docs = []
+    for ticket in tickets:
+        field_docs = processor.format_ticket_documents(ticket)
+        jira_docs.extend(field_docs)
+    
+    print(f"[OK] Processed {len(jira_docs)} Jira ticket chunks from {len(tickets)} tickets")
     
     if not jira_docs:
         print("[WARNING] No Jira tickets found")
         return None
     
-    # Use enhanced pipeline for chunking and deduplication
+    # Use enhanced pipeline for chunking (deduplication is skipped for Jira source_type)
     builder = EnhancedVectorstoreBuilder()
     chunks = builder.process_documents(jira_docs, source_type="jira")
     
@@ -101,6 +158,135 @@ def build_jira_vectorstore():
     print("==========================================\n")
     
     return vectorstore
+
+
+def add_jira_tickets_incrementally():
+    """
+    Add new/updated Jira tickets to existing vectorstore (incremental update).
+    Only fetches tickets updated since last sync.
+    """
+    if not JIRA_PROCESSOR_AVAILABLE:
+        print("[ERROR] Cannot sync Jira tickets: Jira processor not available")
+        return None
+    
+    print("=" * 60)
+    print("INCREMENTAL JIRA VECTORSTORE UPDATE")
+    print("=" * 60)
+    
+    # Import sync tracker
+    from app.jira_sync_tracker import get_last_sync_time, update_last_sync_time
+    
+    # Get last sync time
+    last_sync = get_last_sync_time()
+    
+    if not last_sync:
+        print("[WARNING] No previous sync found. Use build_jira_vectorstore() for initial load.")
+        return None
+    
+    # Convert ISO timestamp to YYYY-MM-DD format for JQL
+    from datetime import datetime
+    last_sync_dt = datetime.fromisoformat(last_sync)
+    since_date = last_sync_dt.strftime('%Y-%m-%d')
+    
+    print(f"[*] Last sync: {last_sync_dt.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"[*] Fetching tickets updated since {since_date}...")
+    
+    # Fetch only new/updated tickets
+    from app.jira_processor import JiraProcessor
+    processor = JiraProcessor()
+    new_tickets = processor.fetch_tickets_since(since_date, max_issues=1000)
+    
+    if not new_tickets:
+        print("[INFO] No new tickets found")
+        update_last_sync_time(status="no_updates", documents_added=0)
+        return None
+    
+    print(f"[OK] Found {len(new_tickets)} new/updated tickets")
+    
+    # Load existing vectorstore
+    existing_vectorstore = load_jira_vectorstore()
+    
+    if not existing_vectorstore:
+        print("[ERROR] Existing vectorstore not found. Run build_jira_vectorstore() first.")
+        return None
+    
+    # Check for duplicates by querying existing tickets
+    existing_ticket_keys = set()
+    try:
+        # Get all ticket keys from vectorstore metadata
+        all_docs = existing_vectorstore.get()
+        if all_docs and 'metadatas' in all_docs:
+            for metadata in all_docs['metadatas']:
+                if metadata and 'ticket_key' in metadata:
+                    existing_ticket_keys.add(metadata['ticket_key'])
+        
+        print(f"[INFO] Found {len(existing_ticket_keys)} existing tickets in vectorstore")
+    except Exception as e:
+        print(f"[WARNING] Could not check for duplicates: {e}")
+    
+    # Filter out tickets that already exist
+    truly_new_tickets = [
+        ticket for ticket in new_tickets 
+        if ticket['key'] not in existing_ticket_keys
+    ]
+    
+    # For existing tickets that were updated, we need to remove old and add new
+    updated_tickets = [
+        ticket for ticket in new_tickets 
+        if ticket['key'] in existing_ticket_keys
+    ]
+    
+    print(f"[INFO] New tickets: {len(truly_new_tickets)}, Updated tickets: {len(updated_tickets)}")
+    
+    # Process new tickets into documents
+    all_new_docs = []
+    
+    # Add truly new tickets
+    for ticket in truly_new_tickets:
+        field_docs = processor.format_ticket_documents(ticket)
+        all_new_docs.extend(field_docs)
+    
+    # For updated tickets, we'll add them (ChromaDB handles updates by ID)
+    for ticket in updated_tickets:
+        field_docs = processor.format_ticket_documents(ticket)
+        all_new_docs.extend(field_docs)
+    
+    if not all_new_docs:
+        print("[INFO] No new documents to add")
+        update_last_sync_time(status="no_updates", documents_added=0)
+        return existing_vectorstore
+    
+    print(f"[OK] Processing {len(all_new_docs)} new document chunks...")
+    
+    # Use enhanced pipeline for chunking and deduplication
+    builder = EnhancedVectorstoreBuilder()
+    chunks = builder.process_documents(all_new_docs, source_type="jira")
+    
+    print(f"[OK] Processed into {len(chunks)} chunks after enhancement")
+    
+    # Add to existing vectorstore
+    try:
+        existing_vectorstore.add_documents(chunks)
+        print(f"[OK] Added {len(chunks)} chunks to existing vectorstore")
+        
+        # Update sync time with success status
+        update_last_sync_time(status="success", documents_added=len(chunks))
+        
+        # Get updated count
+        total_docs = existing_vectorstore._collection.count()
+        print(f"[OK] Vectorstore now contains {total_docs} total documents")
+        
+        return existing_vectorstore
+        
+    except Exception as e:
+        error_msg = str(e)
+        print(f"[ERROR] Failed to add documents: {error_msg}")
+        import traceback
+        traceback.print_exc()
+        
+        # Record failure
+        update_last_sync_time(status="failed", documents_added=0, error_message=error_msg)
+        return None
 
 
 def get_jira_vectorstore():

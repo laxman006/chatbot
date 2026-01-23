@@ -49,11 +49,17 @@ from config import (
     DENSE_WEIGHT, BM25_WEIGHT, RERANKER_WEIGHT,
     PRIMARY_KB_PRIORITY_BOOST, SECONDARY_KB_PRIORITY_BOOST, TRANSCRIPT_ARTIFACT_BOOST,
     PRIMARY_KB_TIER, TRANSCRIPT_KB_TIER,
+    # Retry Mode Configuration (Teammate's Feature)
     RETRY_ATTEMPT_1_K_DENSE, RETRY_ATTEMPT_1_K_BM25, RETRY_ATTEMPT_1_K_FINAL,
     RETRY_ATTEMPT_2_K_DENSE, RETRY_ATTEMPT_2_K_BM25, RETRY_ATTEMPT_2_K_FINAL,
     RETRY_ATTEMPT_3_PLUS_K_DENSE, RETRY_ATTEMPT_3_PLUS_K_BM25, RETRY_ATTEMPT_3_PLUS_K_FINAL,
     RETRY_DENSE_WEIGHT, RETRY_BM25_WEIGHT, RETRY_FORCE_EXPANSION, RETRY_SCORE_THRESHOLD_ADJUSTMENT,
-    ENABLE_ANSWER_QUALITY_CHECK, ANSWER_QUALITY_LLM_TEMPERATURE
+    ENABLE_ANSWER_QUALITY_CHECK, ANSWER_QUALITY_LLM_TEMPERATURE,
+    # Intelligent Routing Configuration (Your Feature)
+    ENABLE_INTELLIGENT_ROUTING, ROUTING_TOTAL_BUDGET, ROUTING_FINAL_K,
+    ROUTING_MIN_CONFIDENCE, ROUTING_ENABLE_DEDUPLICATION,
+    # Context Synthesis Configuration
+    USE_CONTEXT_SYNTHESIS, SYNTHESIS_MAX_CONTEXT_LENGTH, SYNTHESIS_MAX_OUTPUT_LENGTH, SYNTHESIS_TEMPERATURE
 )
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
@@ -65,6 +71,10 @@ from context_compressor import ContextCompressor
 from contextlib import suppress
 from collections import Counter, defaultdict
 
+# Intelligent Routing System
+from intelligent_router import IntelligentQueryRouter, get_routing_confidence
+from multi_source_retrieval import intelligent_multi_source_retrieve, normalize_scores
+
 
 # ============================================================================
 # OPTION E: PERPLEXITY-STYLE RETRIEVAL INITIALIZATION
@@ -74,6 +84,18 @@ from collections import Counter, defaultdict
 query_expander = QueryExpander()
 cross_reranker = CrossEncoderReranker()
 context_compressor = ContextCompressor()
+
+# Initialize Intelligent Router
+intelligent_router = None
+if ENABLE_INTELLIGENT_ROUTING:
+    try:
+        from app.llm_factory import get_llm
+        router_llm = get_llm()
+        intelligent_router = IntelligentQueryRouter(router_llm, total_budget=ROUTING_TOTAL_BUDGET)
+        print("[OK] Intelligent Query Router initialized")
+    except Exception as e:
+        print(f"[WARN] Failed to initialize Intelligent Router: {e}")
+        print("[INFO] Will use fallback retrieval strategy")
 
 # ============================================================================
 # INTENT CLASSIFICATION SYSTEM - Branch-Specific Retrieval
@@ -1420,7 +1442,8 @@ def apply_section_based_reranking(
     top_k: int = 8
 ) -> List[Tuple[Document, float]]:
     """
-    Apply cross-encoder reranking with section-based boosting.
+    Apply cross-encoder reranking with section-based and source-based boosting.
+    For troubleshooting queries, ensures both Jira and SharePoint are included.
     
     Priority order:
     1. root_cause (critical) → highest boost
@@ -1429,7 +1452,13 @@ def apply_section_based_reranking(
     4. summary (high) → low boost
     5. comment (medium) → no boost
     
-    This ensures fixes beat symptoms in final context.
+    Source boosting:
+    - Jira: +0.10 (internal troubleshooting source)
+    - SharePoint: +0.08 (internal documentation)
+    - PDFs: +0.05 (technical docs)
+    - Blog: -0.15 (marketing content, penalize)
+    
+    This ensures fixes beat symptoms and internal sources beat marketing content.
     """
     if not candidates:
         return []
@@ -1437,10 +1466,202 @@ def apply_section_based_reranking(
     # Get base reranker scores
     reranked_base = cross_reranker.rerank(query, candidates, top_k=len(candidates))
     
-    # Apply section-based boosting
-    boosted_results = apply_section_boosts(reranked_base)
+    # Apply section-based boosting using dedicated function
+    boosted_results = apply_section_boosts(query, reranked_base, top_k=len(reranked_base))
+    
+    # For troubleshooting queries, ensure both Jira and SharePoint are included
+    if is_troubleshooting and (jira_docs or sharepoint_docs):
+        final_results = []
+        seen_docs = set()
+        
+        # First, add top Jira tickets (up to 5)
+        jira_docs.sort(key=lambda x: x[1], reverse=True)
+        for doc, score in jira_docs[:5]:
+            doc_id = id(doc)
+            if doc_id not in seen_docs:
+                final_results.append((doc, score))
+                seen_docs.add(doc_id)
+        
+        # Then, add top SharePoint docs (up to 5)
+        sharepoint_docs.sort(key=lambda x: x[1], reverse=True)
+        for doc, score in sharepoint_docs[:5]:
+            doc_id = id(doc)
+            if doc_id not in seen_docs:
+                final_results.append((doc, score))
+                seen_docs.add(doc_id)
+        
+        # Fill remaining slots with other top results
+        for doc, score in boosted_results:
+            doc_id = id(doc)
+            if doc_id not in seen_docs and len(final_results) < top_k:
+                final_results.append((doc, score))
+                seen_docs.add(doc_id)
+        
+        final_results.sort(key=lambda x: x[1], reverse=True)
+        print(f"[RERANK] Troubleshooting query: Guaranteed {len([d for d, _ in final_results if 'jira' in d.metadata.get('source_type', '').lower() or 'jira' in d.metadata.get('tag', '').lower()])} Jira + {len([d for d, _ in final_results if 'sharepoint' in d.metadata.get('source_type', '').lower() or 'sharepoint' in d.metadata.get('tag', '').lower()])} SharePoint docs")
+        return final_results[:top_k]
     
     return boosted_results[:top_k]
+
+# ============================================================================
+# CONTEXT SYNTHESIS FUNCTION
+# ============================================================================
+
+def synthesize_context_with_llm(
+    query: str,
+    all_documents: List[Tuple[Document, float]],
+    llm,
+    max_context_length: int = None,
+    max_output_length: int = None
+) -> str:
+    """
+    Use LLM to synthesize all retrieved documents into a comprehensive summary.
+    Instead of just selecting top-k, this creates a synthesized context.
+    
+    Args:
+        query: User query
+        all_documents: All retrieved documents (document, score) tuples
+        llm: LLM instance for synthesis
+        max_context_length: Maximum characters to include in synthesis input
+        max_output_length: Maximum characters for synthesized output
+        
+    Returns:
+        Synthesized context string
+    """
+    from config import SYNTHESIS_MAX_CONTEXT_LENGTH, SYNTHESIS_MAX_OUTPUT_LENGTH
+    
+    if not all_documents:
+        return ""
+    
+    max_context_length = max_context_length or SYNTHESIS_MAX_CONTEXT_LENGTH
+    max_output_length = max_output_length or SYNTHESIS_MAX_OUTPUT_LENGTH
+    
+    # Group documents by source
+    docs_by_source = {
+        "jira": [],
+        "sharepoint": [],
+        "blog": [],
+        "pdfs": [],
+        "transcripts": [],
+        "excel": []
+    }
+    
+    for doc, score in all_documents:
+        source_type = doc.metadata.get("source_type", "").lower()
+        tag = doc.metadata.get("tag", "").lower()
+        
+        if "jira" in source_type or "jira" in tag:
+            docs_by_source["jira"].append((doc, score))
+        elif "sharepoint" in source_type or "sharepoint" in tag:
+            docs_by_source["sharepoint"].append((doc, score))
+        elif "blog" in source_type or "blog" in tag or ("web" in source_type and "jira" not in tag):
+            docs_by_source["blog"].append((doc, score))
+        elif "pdf" in source_type or "pdf" in tag:
+            docs_by_source["pdfs"].append((doc, score))
+        elif "transcript" in source_type or "transcript" in tag:
+            docs_by_source["transcripts"].append((doc, score))
+        elif "excel" in source_type or "excel" in tag:
+            docs_by_source["excel"].append((doc, score))
+    
+    # Build context from all documents (prioritize internal sources)
+    context_parts = []
+    total_length = 0
+    
+    # Priority order: Jira → SharePoint → PDFs → Others
+    priority_order = ["jira", "sharepoint", "pdfs", "transcripts", "excel", "blog"]
+    
+    for source in priority_order:
+        docs = docs_by_source.get(source, [])
+        if not docs:
+            continue
+        
+        # Sort by score (higher is better)
+        docs.sort(key=lambda x: x[1], reverse=True)
+        
+        source_context = []
+        for doc, score in docs:
+            content = doc.page_content
+            metadata = doc.metadata
+            
+            # Build document header
+            if source == "jira":
+                ticket_key = metadata.get("ticket_key", "N/A")
+                section = metadata.get("section", "unknown")
+                header = f"[SOURCE: jira/{ticket_key}] Section: {section}\n"
+            elif source == "sharepoint":
+                tag = metadata.get("tag", "unknown")
+                header = f"[SOURCE: {tag}]\n"
+            else:
+                title = metadata.get("title", metadata.get("post_title", "Unknown"))
+                header = f"[SOURCE: {source}] {title}\n"
+            
+            doc_text = header + content
+            
+            # Check if adding this doc would exceed limit
+            if total_length + len(doc_text) > max_context_length:
+                break
+            
+            source_context.append(doc_text)
+            total_length += len(doc_text)
+        
+        if source_context:
+            context_parts.append(f"\n{'='*70}\n{source.upper()} DOCUMENTS ({len(source_context)} docs)\n{'='*70}\n")
+            context_parts.append("\n\n".join(source_context))
+    
+    full_context = "\n".join(context_parts)
+    
+    # Use LLM to synthesize
+    synthesis_prompt = f"""You are a technical documentation synthesizer for CloudFuze internal team members.
+
+**User Query:** {query}
+
+**Retrieved Context from Multiple Sources:**
+{full_context}
+
+**Your Task:**
+Synthesize the above context into a comprehensive, well-organized summary that directly addresses the user's query. 
+
+**Guidelines:**
+1. Prioritize information from Jira tickets (solutions, fixes, root causes)
+2. Include relevant SharePoint documentation (procedures, policies)
+3. Extract technical facts from blog posts (ignore marketing language)
+4. Organize information logically (problem → solution → steps → references)
+5. Include ticket IDs and source references
+6. Be concise but comprehensive
+7. Focus on actionable information for internal team members
+8. If multiple sources discuss the same topic, synthesize them into one coherent explanation
+
+**Output Format:**
+Provide a synthesized summary that combines all relevant information from the sources above. Structure it clearly with sections if needed. Include specific references (ticket IDs, document paths) where relevant.
+
+**Synthesized Context:**"""
+
+    try:
+        from langchain_core.messages import SystemMessage, HumanMessage
+        messages = [
+            SystemMessage(content="You are a technical documentation synthesizer. Synthesize the provided context into a comprehensive, well-organized summary for internal team members."),
+            HumanMessage(content=synthesis_prompt)
+        ]
+        
+        response = llm.invoke(messages)
+        synthesized = response.content.strip()
+        
+        # Limit output length if needed
+        if len(synthesized) > max_output_length:
+            synthesized = synthesized[:max_output_length] + "\n\n[Note: Summary truncated due to length]"
+        
+        print(f"[SYNTHESIS] Synthesized {len(full_context)} chars → {len(synthesized)} chars")
+        print(f"[SYNTHESIS] Input docs: {len(all_documents)}, Output length: {len(synthesized)} chars")
+        return synthesized
+        
+    except Exception as e:
+        print(f"[ERROR] LLM synthesis failed: {e}")
+        import traceback
+        traceback.print_exc()
+        # Fallback: return original context (truncated if needed)
+        if len(full_context) > max_output_length:
+            return full_context[:max_output_length] + "\n\n[Note: Using original context due to synthesis failure]"
+        return full_context
 
 # ============================================================================
 # OPTION E: PERPLEXITY-STYLE RETRIEVAL FUNCTION
@@ -2206,6 +2427,131 @@ def perplexity_style_retrieve(
         print(f"[RERANK] No docs above threshold {STRICT_SCORE_THRESHOLD}, returning top {len(final_docs)} with low confidence")
     
     return final_docs  # list of (doc, final_score)
+
+
+def intelligent_route_and_retrieve(
+    query: str,
+    k_final: int = None,
+    use_routing: bool = True
+) -> List[Tuple[Document, float]]:
+    """
+    Intelligent multi-source retrieval with LLM-powered routing.
+    
+    This function:
+    1. Uses LLM to analyze query and determine source relevance
+    2. Dynamically allocates retrieval budget across sources
+    3. Retrieves from multiple sources in parallel
+    4. Deduplicates and merges results
+    5. Applies cross-encoder reranking
+    
+    Args:
+        query: User query string
+        k_final: Final number of documents to return (default from config)
+        use_routing: If True, use intelligent routing; else use balanced fallback
+        
+    Returns:
+        List of (document, score) tuples ranked by relevance
+    """
+    if k_final is None:
+        k_final = ROUTING_FINAL_K
+    
+    if not vectorstore:
+        print("[WARN] Vectorstore not available")
+        return []
+    
+    # ============ STEP 1: INTELLIGENT ROUTING ============
+    routing_plan = None
+    
+    if use_routing and intelligent_router:
+        try:
+            print(f"\n[ROUTING] Using intelligent LLM-based routing...")
+            routing_plan = intelligent_router.route_query(query)
+            
+            # Check routing confidence
+            confidence = get_routing_confidence(routing_plan)
+            
+            if confidence < ROUTING_MIN_CONFIDENCE:
+                print(f"[ROUTING] Low confidence ({confidence:.2f}), using fallback")
+                routing_plan = intelligent_router._get_fallback_routing()
+        except Exception as e:
+            print(f"[ERROR] Routing failed: {e}")
+            import traceback
+            traceback.print_exc()
+            routing_plan = None
+    
+    # Fallback if routing failed or disabled
+    if not routing_plan:
+        print("[ROUTING] Using fallback balanced routing")
+        if intelligent_router:
+            routing_plan = intelligent_router._get_fallback_routing()
+        else:
+            # Ultra-simple fallback
+            routing_plan = {
+                "query_type": "general",
+                "query_intent": "General query",
+                "sources": {
+                    "blog": {"k": 20, "relevance": 0.6},
+                    "jira": {"k": 15, "relevance": 0.5},
+                    "sharepoint": {"k": 8, "relevance": 0.3},
+                    "pdfs": {"k": 5, "relevance": 0.3},
+                    "transcripts": {"k": 2, "relevance": 0.2},
+                    "excel": {"k": 0, "relevance": 0.0}
+                },
+                "confidence": 0.3
+            }
+    
+    # ============ STEP 2: MULTI-SOURCE RETRIEVAL ============
+    print(f"\n[RETRIEVAL] Retrieving from sources based on routing plan...")
+    
+    all_candidates = intelligent_multi_source_retrieve(
+        vectorstore=vectorstore,
+        jira_vectorstore=jira_vectorstore,
+        query=query,
+        routing_plan=routing_plan,
+        enable_deduplication=ROUTING_ENABLE_DEDUPLICATION
+    )
+    
+    if not all_candidates:
+        print("[WARN] No candidates retrieved")
+        return []
+    
+    print(f"\n[RETRIEVAL] Total candidates for reranking: {len(all_candidates)}")
+    
+    # ============ STEP 3: NORMALIZE SCORES ============
+    # Convert distance scores to similarity scores for reranking
+    normalized_candidates = normalize_scores(all_candidates)
+    
+    # ============ STEP 4: CROSS-ENCODER RERANKING ============
+    print(f"\n[RERANKING] Reranking {len(normalized_candidates)} candidates to top {k_final}...")
+    
+    try:
+        reranked = apply_section_based_reranking(query, normalized_candidates, top_k=k_final)
+        print(f"[RERANKING] ✓ Final {len(reranked)} documents selected")
+        
+        # Log top results
+        print(f"\n[RESULTS] Top {min(3, len(reranked))} documents:")
+        for i, (doc, score) in enumerate(reranked[:3], 1):
+            source = doc.metadata.get("source_type", "unknown")
+            ticket_key = doc.metadata.get("ticket_key", "")
+            title = doc.metadata.get("title", doc.metadata.get("post_title", ""))
+            
+            if ticket_key:
+                print(f"  {i}. [{source}] {ticket_key} (score: {score:.3f})")
+            elif title:
+                print(f"  {i}. [{source}] {title[:50]}... (score: {score:.3f})")
+            else:
+                print(f"  {i}. [{source}] {doc.page_content[:50]}... (score: {score:.3f})")
+        
+        return reranked
+        
+    except Exception as e:
+        print(f"[ERROR] Reranking failed: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        # Fallback: return normalized candidates sorted by score
+        normalized_candidates.sort(key=lambda x: x[1], reverse=True)
+        return normalized_candidates[:k_final]
 
 
 class ChatRequest(BaseModel):
@@ -2974,22 +3320,39 @@ Answer clearly and correctly based on the provided context and knowledge base.""
                 yield f"data: {json.dumps({'type': 'status', 'status': 'retrieving_docs', 'message': 'Searching knowledge base'})}\n\n"
                 await asyncio.sleep(0.05)
                 
-                # ====== PERPLEXITY-STYLE RAG (OPTION E) ======
-                # Initialize expansion tracking (for diagnostic logging)
-                expansion_doc_tracking = {}
+                # ====== INTELLIGENT ROUTING OR PERPLEXITY-STYLE RAG ======
                 
-                # Retrieve docs with dense + BM25 + reranker
-                doc_results = perplexity_style_retrieve(
-                    query=enhanced_query,
-                    k_dense=60,  # Increased to ensure transcripts are in candidate pool
-                    k_bm25=60,   # Increased to ensure transcripts are in candidate pool
-                    k_final=8,
-                    use_expansion=ENABLE_QUERY_EXPANSION,
-                )
+                # Choose retrieval strategy based on configuration
+                if ENABLE_INTELLIGENT_ROUTING and intelligent_router:
+                    print("[RAG] Using Intelligent Routing strategy")
+                    
+                    # Use intelligent LLM-based routing
+                    doc_results = intelligent_route_and_retrieve(
+                        query=enhanced_query,
+                        k_final=ROUTING_FINAL_K,
+                        use_routing=True
+                    )
+                    
+                    final_docs = [doc for doc, score in doc_results]
+                    print(f"[RAG] Retrieved {len(final_docs)} docs using Intelligent Routing")
+                    
+                else:
+                    print("[RAG] Using Perplexity-Style (Option E) strategy")
+                    
+                    # Initialize expansion tracking (for diagnostic logging)
+                    expansion_doc_tracking = {}
+                    
+                    # Retrieve docs with dense + BM25 + reranker (fallback)
+                    doc_results = perplexity_style_retrieve(
+                        query=enhanced_query,
+                        k_dense=60,  # Increased to ensure transcripts are in candidate pool
+                        k_bm25=60,   # Increased to ensure transcripts are in candidate pool
+                        k_final=8,
+                        use_expansion=ENABLE_QUERY_EXPANSION,
+                    )
 
-                final_docs = [doc for doc, score in doc_results]
-                
-                print(f"[RAG] Retrieved {len(final_docs)} docs using Option E pipeline")
+                    final_docs = [doc for doc, score in doc_results]
+                    print(f"[RAG] Retrieved {len(final_docs)} docs using Option E pipeline")
                 
                 # Send status: Documents found and reranking
                 yield f"data: {json.dumps({'type': 'status', 'status': 'reranking_docs', 'message': f'Found {len(doc_results)} documents, reranking for relevance'})}\n\n"
@@ -3434,7 +3797,26 @@ Answer clearly and correctly based on the provided context and knowledge base.""
                     print("[WARNING] No relevant documents after score filtering!")
                     context_text = ""  # Empty context, not "No relevant documents found"
                     forced_no_context = True
+                elif USE_CONTEXT_SYNTHESIS and doc_results:
+                    # Use LLM-based context synthesis instead of top-k formatting
+                    print(f"[SYNTHESIS] Using LLM-based context synthesis for {len(doc_results)} documents")
+                    
+                    # Get synthesis LLM with lower temperature
+                    synthesis_llm = get_llm(temperature=SYNTHESIS_TEMPERATURE, max_tokens=2000)
+                    
+                    # Synthesize all retrieved documents (not just final_docs)
+                    context_text = synthesize_context_with_llm(
+                        query=enhanced_query,
+                        all_documents=doc_results,  # All retrieved docs, not just top-k
+                        llm=synthesis_llm,
+                        max_context_length=SYNTHESIS_MAX_CONTEXT_LENGTH,
+                        max_output_length=SYNTHESIS_MAX_OUTPUT_LENGTH
+                    )
+                    
+                    print(f"[DEBUG] Synthesized context length: {len(context_text)} characters")
+                    print(f"[DEBUG] First 500 chars of synthesized context: {context_text[:500]}...")
                 else:
+                    # Original approach: format top-k docs
                     formatted_docs = format_docs(final_docs)
                     context_text = "\n\n".join([f"Document {i+1}:\n{formatted_doc}" for i, formatted_doc in enumerate(formatted_docs)])
                     print(f"[DEBUG] Context length: {len(context_text)} characters")
@@ -6154,7 +6536,7 @@ async def get_teams_analytics_summary(
                         f"{LANGFUSE_HOST}/api/public/traces",
                         params=params,
                         auth=(LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY),
-                        timeout=30.0
+                        timeout=90.0  # Increased from 30s - Langfuse API can be slow
                     )
                     
                     logger.info(f"[LANGFUSE ANALYTICS] API Response: status={response.status_code}, page={page}")
@@ -6480,7 +6862,7 @@ async def get_team_details(
                         f"{LANGFUSE_HOST}/api/public/traces",
                         params=params,
                         auth=(LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY),
-                        timeout=30.0
+                        timeout=90.0  # Increased from 30s - Langfuse API can be slow
                     )
                     
                     logger.info(f"[LANGFUSE ANALYTICS] API Response: status={response.status_code}, page={page}")
@@ -6713,7 +7095,7 @@ async def get_langfuse_dashboard_summary(
                         f"{LANGFUSE_HOST}/api/public/traces",
                         params=params,
                         auth=(LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY),
-                        timeout=30.0  # Reduced timeout for filtered queries
+                        timeout=90.0  # Increased timeout - Langfuse API can be slow
                     )
                     
                     logger.info(f"[LANGFUSE ANALYTICS] API Response: status={response.status_code}, page={page}")
@@ -6940,7 +7322,7 @@ async def get_langfuse_users_analytics(
                         f"{LANGFUSE_HOST}/api/public/traces",
                         params=params,
                         auth=(LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY),
-                        timeout=30.0  # Reduced timeout
+                        timeout=90.0  # Increased timeout - Langfuse API can be slow
                     )
                     
                     logger.info(f"[LANGFUSE ANALYTICS] API Response: status={response.status_code}, page={page}")
@@ -7194,7 +7576,7 @@ async def get_user_langfuse_analytics(
                         f"{LANGFUSE_HOST}/api/public/traces",
                         params=params,
                         auth=(LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY),
-                        timeout=30.0  # Reduced timeout
+                        timeout=90.0  # Increased timeout - Langfuse API can be slow
                     )
                     
                     logger.info(f"[LANGFUSE ANALYTICS] API Response: status={response.status_code}, page={page}")
@@ -7409,7 +7791,7 @@ async def get_top_questions_global(
                         f"{LANGFUSE_HOST}/api/public/traces",
                         params=params,
                         auth=(LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY),
-                        timeout=30.0  # Reduced timeout
+                        timeout=90.0  # Increased timeout - Langfuse API can be slow
                     )
                     
                     logger.info(f"[LANGFUSE ANALYTICS] API Response: status={response.status_code}, page={page}")

@@ -8,9 +8,15 @@ and converts them into LangChain Documents for knowledge base integration.
 
 import os
 import re
+import warnings
+import time
+import requests
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
+
+# Suppress Jira API deprecation warnings (search_issues still works)
+warnings.filterwarnings('ignore', message='.*search.*API is deprecated.*')
 
 # Optional Jira import - allows backend to start without jira package
 try:
@@ -51,7 +57,8 @@ class JiraProcessor:
         self.max_issues = JIRA_MAX_ISSUES
         # Clean JQL query - remove if it's empty or starts with comment
         self.jql_query = JIRA_JQL_QUERY if JIRA_JQL_QUERY and not JIRA_JQL_QUERY.startswith("#") else ""
-        self.date_filter = JIRA_DATE_FILTER if JIRA_DATE_FILTER and not JIRA_DATE_FILTER.startswith("#") else "last_3_months"
+        # Default to empty (no date filter) - only use date filter if explicitly set
+        self.date_filter = JIRA_DATE_FILTER if JIRA_DATE_FILTER and not JIRA_DATE_FILTER.startswith("#") else ""
         
         # NOTE: Stage 1 chunking removed - using field-aware chunking instead
         # EnhancedVectorstoreBuilder will handle semantic chunking for Description section only
@@ -76,9 +83,11 @@ class JiraProcessor:
             if not self.api_token:
                 raise ValueError("JIRA_API_TOKEN is required")
             
+            # Force use of API v3 (v2 is deprecated and removed from Jira Cloud)
             self.jira = JIRA(
                 server=self.server,
-                basic_auth=(self.email, self.api_token)
+                basic_auth=(self.email, self.api_token),
+                options={'server': self.server, 'rest_api_version': '3'}
             )
             current_user = self.jira.current_user()
             print(f"[OK] Connected to Jira as: {current_user}")
@@ -92,6 +101,159 @@ class JiraProcessor:
             return ""
         soup = BeautifulSoup(text, "html.parser")
         return soup.get_text(separator="\n", strip=True)
+    
+    def _fetch_issues_rest_api(self, jql: str, start_at: int = 0, max_results: int = 100) -> List:
+        """
+        Fetch issues using REST API directly (bypasses jira-python library).
+        Uses the new /rest/api/3/search/jql endpoint.
+        Includes rate limiting protection with retry logic.
+        """
+        url = f"{self.server}/rest/api/3/search/jql"
+        
+        headers = {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+        }
+        
+        params = {
+            'jql': jql,
+            'startAt': start_at,
+            'maxResults': max_results,
+            'fields': '*all',
+            'expand': 'changelog,renderedFields'
+        }
+        
+        max_retries = 3
+        base_delay = 2
+        
+        for attempt in range(max_retries):
+            try:
+                response = requests.get(
+                    url,
+                    headers=headers,
+                    params=params,
+                    auth=(self.email, self.api_token),
+                    timeout=60
+                )
+                
+                # Handle rate limiting (429)
+                if response.status_code == 429:
+                    retry_after = int(response.headers.get('Retry-After', base_delay * (2 ** attempt)))
+                    print(f"[WARNING] Rate limited. Waiting {retry_after} seconds before retry {attempt + 1}/{max_retries}...")
+                    time.sleep(retry_after)
+                    continue
+                
+                # Handle other HTTP errors
+                if response.status_code != 200:
+                    if attempt < max_retries - 1:
+                        delay = base_delay * (2 ** attempt)
+                        print(f"[WARNING] API returned {response.status_code}. Retrying in {delay} seconds...")
+                        time.sleep(delay)
+                        continue
+                    else:
+                        response.raise_for_status()
+                
+                data = response.json()
+                
+                # Convert to JIRA issue objects for compatibility
+                issues = []
+                for idx, issue_dict in enumerate(data.get('issues', [])):
+                    # Create a simple object that mimics JIRA issue
+                    issue = type('obj', (object,), {
+                        'key': issue_dict['key'],
+                        'id': issue_dict['id'],
+                        'fields': type('obj', (object,), issue_dict['fields'])()
+                    })()
+                    
+                    # Add fields as attributes
+                    for field_name, field_value in issue_dict['fields'].items():
+                        setattr(issue.fields, field_name, field_value)
+                    
+                    # Convert project dict to object for compatibility
+                    if hasattr(issue.fields, 'project') and isinstance(issue.fields.project, dict):
+                        project_dict = issue.fields.project
+                        issue.fields.project = type('obj', (object,), project_dict)()
+                        for k, v in project_dict.items():
+                            setattr(issue.fields.project, k, v)
+                    
+                    # Fetch comments separately (not included in search)
+                    comments_url = f"{self.server}/rest/api/3/issue/{issue.key}/comment"
+                    comment_retries = 2
+                    comment_fetched = False
+                    
+                    for comment_attempt in range(comment_retries):
+                        try:
+                            comments_response = requests.get(
+                                comments_url,
+                                headers=headers,
+                                auth=(self.email, self.api_token),
+                                timeout=30
+                            )
+                            
+                            # Handle rate limiting for comments
+                            if comments_response.status_code == 429:
+                                retry_after = int(comments_response.headers.get('Retry-After', base_delay * (comment_attempt + 1)))
+                                print(f"[WARNING] Rate limited fetching comments for {issue.key}. Waiting {retry_after}s...")
+                                time.sleep(retry_after)
+                                continue
+                            
+                            if comments_response.status_code == 200:
+                                comments_data = comments_response.json()
+                                # Add comments to the issue
+                                comment_obj = type('obj', (object,), {
+                                    'comments': []
+                                })()
+                                for comment_dict in comments_data.get('comments', []):
+                                    c = type('obj', (object,), comment_dict)()
+                                    comment_obj.comments.append(c)
+                                issue.fields.comment = comment_obj
+                                comment_fetched = True
+                                break
+                            elif comments_response.status_code >= 500 and comment_attempt < comment_retries - 1:
+                                # Retry on server errors
+                                delay = base_delay * (comment_attempt + 1)
+                                print(f"[WARNING] Server error fetching comments for {issue.key}. Retrying in {delay}s...")
+                                time.sleep(delay)
+                                continue
+                            else:
+                                # Other errors - skip comments for this ticket
+                                issue.fields.comment = None
+                                break
+                                
+                        except requests.exceptions.RequestException as e:
+                            if comment_attempt < comment_retries - 1:
+                                delay = base_delay * (comment_attempt + 1)
+                                print(f"[WARNING] Error fetching comments for {issue.key}: {e}. Retrying in {delay}s...")
+                                time.sleep(delay)
+                                continue
+                            else:
+                                print(f"[WARNING] Could not fetch comments for {issue.key} after {comment_retries} attempts: {e}")
+                                issue.fields.comment = None
+                                break
+                    
+                    # Add small delay between comment fetches to avoid rate limits
+                    if idx < len(data.get('issues', [])) - 1:  # Don't delay after last ticket
+                        time.sleep(0.2)  # 200ms delay between comment API calls
+                    
+                    issues.append(issue)
+                
+                # Add delay after successful API call to avoid rate limits
+                time.sleep(0.5)  # 500ms delay between page requests
+                
+                return issues
+                
+            except requests.exceptions.RequestException as e:
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    print(f"[WARNING] Request failed: {e}. Retrying in {delay} seconds...")
+                    time.sleep(delay)
+                    continue
+                else:
+                    print(f"[ERROR] REST API request failed after {max_retries} attempts: {e}")
+                    return []
+        
+        print(f"[ERROR] Failed to fetch issues after {max_retries} retries")
+        return []
     
     def _build_date_filter(self, filter_type: str) -> str:
         """Build JQL date filter."""
@@ -124,14 +286,17 @@ class JiraProcessor:
         # Build query from project keys and filters
         jql_parts = []
         
-        # Project filter
+        # Project filter (supports multiple projects: PRI, QAB, etc.)
         if self.project_keys:
             project_filter = " OR ".join([f"project = {key}" for key in self.project_keys])
             jql_parts.append(f"({project_filter})")
         
         # Status filter - get resolved/closed tickets (solved issues)
-        # For Migration KB Board, we want closed/resolved tickets
-        status_filter = "(status = Resolved OR status = Closed)"
+        # Support different status name variations across boards:
+        # - "Resolved" (standard - PRI board)
+        # - "Resolved-" (QAB board - with dash)
+        # - "Closed"
+        status_filter = "(status = Resolved OR status = 'Resolved-' OR status = Closed)"
         jql_parts.append(status_filter)
         
         # Note: We'll filter for comments in Python since commentCount may not be available
@@ -147,6 +312,93 @@ class JiraProcessor:
         
         return jql
     
+    def _build_jql_query_with_date_range(self, start_date: str = None, end_date: str = None) -> str:
+        """
+        Build JQL query with custom date range (for incremental updates).
+        
+        Args:
+            start_date: Start date in YYYY-MM-DD format
+            end_date: End date in YYYY-MM-DD format (None = till now)
+        
+        Returns:
+            JQL query string
+        """
+        jql_parts = []
+        
+        # Project filter (supports multiple projects: PRI, QAB, etc.)
+        if self.project_keys:
+            project_filter = " OR ".join([f"project = {key}" for key in self.project_keys])
+            jql_parts.append(f"({project_filter})")
+        
+        # Status filter - resolved/closed tickets
+        # Support different status name variations across boards
+        status_filter = "(status = Resolved OR status = 'Resolved-' OR status = Closed)"
+        jql_parts.append(status_filter)
+        
+        # Date filter
+        if start_date:
+            jql_parts.append(f"updated >= '{start_date}'")
+        
+        if end_date:
+            jql_parts.append(f"updated <= '{end_date}'")
+        
+        # Order by most recently updated
+        jql = " AND ".join(jql_parts) + " ORDER BY updated DESC"
+        
+        return jql
+    
+    def fetch_tickets_since(self, since_date: str, max_issues: int = None) -> List[Dict[str, Any]]:
+        """
+        Fetch tickets updated since a specific date (for incremental updates).
+        
+        Args:
+            since_date: Date string in YYYY-MM-DD format
+            max_issues: Maximum issues to fetch (None = use self.max_issues)
+        
+        Returns:
+            List of ticket data dictionaries
+        """
+        print(f"[*] Fetching tickets updated since {since_date}...")
+        
+        jql = self._build_jql_query_with_date_range(start_date=since_date)
+        print(f"[*] JQL Query: {jql}")
+        
+        max_fetch = max_issues if max_issues else self.max_issues
+        all_tickets = []
+        start_at = 0
+        max_results_per_page = 100
+        
+        try:
+            while len(all_tickets) < max_fetch:
+                page_size = min(max_results_per_page, max_fetch - len(all_tickets))
+                issues = self._fetch_issues_rest_api(jql, start_at, page_size)
+                
+                if not issues:
+                    break
+                
+                for issue in issues:
+                    ticket_data = self._extract_ticket_data(issue)
+                    if ticket_data:
+                        all_tickets.append(ticket_data)
+                        if len(all_tickets) >= max_fetch:
+                            break
+                
+                print(f"   Fetched {len(all_tickets)}/{max_fetch} tickets...")
+                
+                if len(issues) < max_results_per_page:
+                    break
+                
+                start_at += len(issues)
+            
+            print(f"[OK] Total fetched: {len(all_tickets)} tickets since {since_date}")
+            return all_tickets
+            
+        except Exception as e:
+            print(f"[ERROR] Failed to fetch tickets: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
+    
     def fetch_tickets(self) -> List[Dict[str, Any]]:
         """Fetch tickets from Jira."""
         print(f"[*] Fetching tickets from Jira...")
@@ -159,35 +411,36 @@ class JiraProcessor:
         max_results_per_page = 100
         
         try:
-            # First attempt with the main query
-            # Fetch more issues than needed since we'll filter for comments
-            fetch_multiplier = 3  # Fetch 3x more since many may not have comments
+            # Use REST API directly (Jira v3 /search/jql endpoint)
+            # This bypasses jira-python library which hasn't updated to new endpoint
+            checked_count = 0
+            
             while len(all_tickets) < self.max_issues:
-                issues = self.jira.search_issues(
-                    jql,
-                    startAt=start_at,
-                    maxResults=min(max_results_per_page * fetch_multiplier, (self.max_issues - len(all_tickets)) * fetch_multiplier),
-                    expand='changelog,renderedFields,comments'
-                )
+                page_size = min(100, self.max_issues - len(all_tickets))
+                issues = self._fetch_issues_rest_api(jql, start_at, page_size)
                 
                 if not issues:
                     break
                 
-                fetched_count = 0
+                checked_count += len(issues)
                 for issue in issues:
                     ticket_data = self._extract_ticket_data(issue)
                     if ticket_data:
                         all_tickets.append(ticket_data)
-                        fetched_count += 1
                         if len(all_tickets) >= self.max_issues:
                             break
                 
-                print(f"   Fetched {len(all_tickets)}/{self.max_issues} tickets with comments (checked {len(issues)} total)...")
+                print(f"   Fetched {len(all_tickets)}/{self.max_issues} tickets (checked {checked_count} total)...")
                 
-                if len(issues) < max_results_per_page * fetch_multiplier:
+                # Break if we got fewer than page size (last page)
+                if len(issues) < page_size:
                     break
                 
                 start_at += len(issues)
+                
+                # Add delay between pages to avoid rate limits
+                if len(all_tickets) < self.max_issues:
+                    time.sleep(1)  # 1 second delay between pages
                 
                 if len(all_tickets) >= self.max_issues:
                     break
@@ -212,10 +465,10 @@ class JiraProcessor:
                 fallback_jql = " AND ".join(fallback_jql_parts) + " ORDER BY updated DESC"
                 print(f"[*] Fallback JQL Query: {fallback_jql}")
                 
-                issues = self.jira.search_issues(
+                issues = self._fetch_issues_rest_api(
                     fallback_jql,
-                    maxResults=min(200, self.max_issues * 3),
-                    expand='changelog,renderedFields,comments'
+                    start_at=0,
+                    max_results=min(200, self.max_issues * 3)
                 )
                 
                 for issue in issues:
@@ -322,7 +575,7 @@ class JiraProcessor:
                 "updated": str(issue.fields.updated),
                 "resolved": str(issue.fields.resolutiondate) if hasattr(issue.fields, 'resolutiondate') and issue.fields.resolutiondate else None,
                 "url": f"{self.server}/browse/{issue.key}",
-                "project_key": issue.fields.project.key,
+                "project_key": issue.fields.project.key if hasattr(issue.fields.project, 'key') else (issue.fields.project.get('key', 'UNKNOWN') if isinstance(issue.fields.project, dict) else 'UNKNOWN'),
                 "root_cause": root_cause,  # Root Cause
                 "combination": combination,  # Combination field
                 "fix_description": fix_description,  # Fix Description
