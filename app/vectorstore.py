@@ -6,11 +6,13 @@ from app.graph_store import get_graph_store
 from config import (
     CHROMA_DB_PATH, INITIALIZE_VECTORSTORE,
     ENABLE_WEB_SOURCE, ENABLE_PDF_SOURCE, ENABLE_EXCEL_SOURCE, ENABLE_DOC_SOURCE, ENABLE_SHAREPOINT_SOURCE, ENABLE_OUTLOOK_SOURCE, ENABLE_JIRA_SOURCE,
-    ENABLE_SHAREPOINT_SALES_SOURCE, ENABLE_SHAREPOINT_PRESALES_SOURCE,
+    ENABLE_SHAREPOINT_SALES_SOURCE, ENABLE_SHAREPOINT_PRESALES_SOURCE, ENABLE_SHAREPOINT_LIMITATIONS_SOURCE,
     WEB_SOURCE_URL, PDF_SOURCE_DIR, EXCEL_SOURCE_DIR, DOC_SOURCE_DIR, BLOG_START_PAGE,
     SHAREPOINT_SITE_URL, SHAREPOINT_START_PAGE,
     SHAREPOINT_SALES_SITE_URL, SHAREPOINT_SALES_FOLDER_PATH,
     SHAREPOINT_PRESALES_SITE_URL, SHAREPOINT_PRESALES_FOLDER_PATH,
+    SHAREPOINT_LIMITATIONS_SITE_URL, SHAREPOINT_LIMITATIONS_FOLDER_PATH,
+    FORCE_SHAREPOINT_REPROCESS,
     OUTLOOK_USER_EMAIL, OUTLOOK_FOLDER_NAME,
     JIRA_SERVER, JIRA_PROJECT_KEYS, JIRA_DATE_FILTER,
 )
@@ -62,6 +64,11 @@ def get_current_metadata():
         "enabled_sources": []
     }
     
+    # Initialize blog tracking fields
+    metadata["last_blog_poll"] = None
+    metadata["blog_post_count"] = 0
+    metadata["last_blog_post_date"] = None
+    
     # Only check enabled sources
     if ENABLE_WEB_SOURCE:
         metadata["url"] = WEB_SOURCE_URL
@@ -97,6 +104,12 @@ def get_current_metadata():
         metadata["sharepoint_presales"] = f"{SHAREPOINT_PRESALES_SITE_URL}/{presales_path}"
         metadata["enabled_sources"].append("sharepoint_presales")
     
+    if ENABLE_SHAREPOINT_LIMITATIONS_SOURCE:
+        # Store Limitations SharePoint metadata
+        limitations_path = f"{SHAREPOINT_LIMITATIONS_FOLDER_PATH}" if SHAREPOINT_LIMITATIONS_FOLDER_PATH else "Documents Library"
+        metadata["sharepoint_limitations"] = f"{SHAREPOINT_LIMITATIONS_SITE_URL}/{limitations_path}"
+        metadata["enabled_sources"].append("sharepoint_limitations")
+    
     if ENABLE_OUTLOOK_SOURCE:
         # Store Outlook metadata - folder and user email
         metadata["outlook"] = f"{OUTLOOK_USER_EMAIL}/{OUTLOOK_FOLDER_NAME}"
@@ -111,6 +124,17 @@ def get_current_metadata():
             jira_info += f"/filter:{JIRA_DATE_FILTER}"
         metadata["jira"] = jira_info
         metadata["enabled_sources"].append("jira")
+    
+    # Load existing metadata to preserve blog tracking info
+    stored_metadata = load_stored_metadata()
+    if stored_metadata:
+        # Preserve blog tracking information if it exists
+        if "last_blog_poll" in stored_metadata:
+            metadata["last_blog_poll"] = stored_metadata["last_blog_poll"]
+        if "blog_post_count" in stored_metadata:
+            metadata["blog_post_count"] = stored_metadata["blog_post_count"]
+        if "last_blog_post_date" in stored_metadata:
+            metadata["last_blog_post_date"] = stored_metadata["last_blog_post_date"]
     
     return metadata
 
@@ -218,6 +242,27 @@ def get_changed_sources():
             # Already built with current URL - skip rebuild, just load existing
             print("[OK] SharePoint Sales - already built, loading existing vectorstore")
     
+    # Additional check: Only rebuild SharePoint Limitations if enabled and not already built
+    if "sharepoint_limitations" in enabled_sources:
+        stored_limitations = stored_metadata.get("sharepoint_limitations", "")
+        current_limitations = current_metadata.get("sharepoint_limitations", "")
+        
+        if stored_limitations != current_limitations:
+            # URL has changed - rebuild needed
+            print(f"[!] SharePoint Limitations path has changed")
+            print(f"   Stored: {stored_limitations}")
+            print(f"   Current: {current_limitations}")
+            if "sharepoint_limitations" not in changed_sources:
+                changed_sources.append("sharepoint_limitations")
+        elif not stored_limitations:
+            # First time - no stored URL, initial build needed
+            print("[!] SharePoint Limitations - initial build needed (not built yet)")
+            if "sharepoint_limitations" not in changed_sources:
+                changed_sources.append("sharepoint_limitations")
+        else:
+            # Already built with current URL - skip rebuild, just load existing
+            print("[OK] SharePoint Limitations - already built, loading existing vectorstore")
+    
     if changed_sources:
         print(f"[*] Changed sources: {', '.join(changed_sources)}")
     else:
@@ -283,6 +328,99 @@ def rebuild_vectorstore_if_needed():
     print("[OK] Saved vectorstore metadata for future change detection")
     
     return vectorstore
+
+def add_new_blog_posts(new_posts: List[Document]) -> bool:
+    """Add new blog posts to existing vectorstore incrementally.
+    
+    Args:
+        new_posts: List of Document objects for new blog posts
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    if not new_posts:
+        print("[INFO] No new blog posts to add")
+        return True
+    
+    try:
+        if not os.path.exists(CHROMA_DB_PATH):
+            print("[ERROR] Vectorstore does not exist. Please build it first.")
+            return False
+        
+        # Load existing vectorstore
+        vectorstore = load_existing_vectorstore()
+        if not vectorstore:
+            print("[ERROR] Failed to load existing vectorstore")
+            return False
+        
+        # Process new posts with enhanced pipeline
+        from app.enhanced_helpers import EnhancedVectorstoreBuilder
+        builder = EnhancedVectorstoreBuilder()
+        chunks = builder.process_documents(new_posts, source_type="web")
+        
+        if not chunks:
+            print("[WARN] No chunks generated from new posts")
+            return False
+        
+        # Add chunks to vectorstore in batches
+        batch_size = 50
+        total_batches = (len(chunks) + batch_size - 1) // batch_size
+        
+        print(f"[*] Adding {len(chunks)} chunks from {len(new_posts)} new blog posts in {total_batches} batches...")
+        
+        for i in range(0, len(chunks), batch_size):
+            batch = chunks[i:i + batch_size]
+            batch_num = (i // batch_size) + 1
+            print(f"   [*] Adding batch {batch_num}/{total_batches} ({len(batch)} chunks)...")
+            vectorstore.add_documents(batch)
+        
+        print(f"[OK] Successfully added {len(new_posts)} new blog posts ({len(chunks)} chunks) to vectorstore")
+        
+        # Update metadata
+        current_metadata = get_current_metadata()
+        
+        # Find the most recent post date
+        latest_date = None
+        for post in new_posts:
+            post_date = post.metadata.get("post_date")
+            if post_date:
+                if latest_date is None or post_date > latest_date:
+                    latest_date = post_date
+        
+        if latest_date:
+            current_metadata["last_blog_post_date"] = latest_date
+        
+        current_metadata["last_blog_poll"] = datetime.now().isoformat()
+        
+        # Count blog posts
+        try:
+            all_docs = vectorstore.get(
+                where={"is_blog_post": True},
+                include=["metadatas"]
+            )
+            
+            # Count unique posts by slug
+            unique_slugs = set()
+            for meta in all_docs.get("metadatas", []):
+                slug = meta.get("post_slug")
+                if slug:
+                    unique_slugs.add(slug)
+            
+            current_metadata["blog_post_count"] = len(unique_slugs)
+            
+        except Exception as e:
+            print(f"[WARN] Could not count blog posts: {e}")
+        
+        save_metadata(current_metadata)
+        
+        return True
+        
+    except Exception as e:
+        print(f"[ERROR] Failed to add new blog posts: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
 
 def build_incremental_vectorstore(changed_sources):
     """Build vectorstore incrementally - only process changed sources."""
@@ -659,6 +797,119 @@ def build_enhanced_vectorstore_full() -> Chroma:
                 all_chunks.extend(chunks)
         except Exception as e:
             print(f"[WARN] Presales SharePoint ingestion failed: {e}")
+
+    # ---- SHAREPOINT LIMITATIONS (Repository25 - separate, incremental) ----
+    if ENABLE_SHAREPOINT_LIMITATIONS_SOURCE:
+        try:
+            from app.helpers import fetch_latest_sharepoint_limitations
+            
+            if existing_vectorstore:
+                # INCREMENTAL MODE: Only fetch latest documents (new files/folders)
+                print("[*] INCREMENTAL MODE: Fetching latest Limitations SharePoint documents...")
+                print("[*] This will scan all folders (including new ones) and only add NEW documents")
+                limitations_docs = fetch_latest_sharepoint_limitations(max_items=100)
+                print(f"[INGEST] Latest Limitations SharePoint docs: {len(limitations_docs)}")
+                
+                # Deduplicate by checking existing vectorstore
+                if limitations_docs:
+                    if FORCE_SHAREPOINT_REPROCESS:
+                        print("[*] FORCE_SHAREPOINT_REPROCESS enabled - skipping URL-based deduplication for reprocessing")
+                        new_limitations_docs = limitations_docs
+                    else:
+                        existing_identifiers = set()
+                        existing_docs_map = {}  # Map identifier to metadata for content-type checking
+                        existing_docs = existing_vectorstore.get(include=["metadatas"])
+                        
+                        print(f"[DEBUG] Checking {len(limitations_docs)} new documents against {len(existing_docs.get('metadatas', []))} existing documents")
+                        
+                        for meta in existing_docs.get("metadatas", []):
+                            # Use unique identifiers: page_url/file_url first, then file_name+folder_path combo
+                            identifier = (
+                                meta.get("page_url") or 
+                                meta.get("file_url") or 
+                                meta.get("webUrl") or
+                                # Fallback: create unique ID from file_name + folder_path
+                                (f"{meta.get('file_name', '')}||{meta.get('folder_path', '')}" if meta.get('file_name') else None)
+                            )
+                            if identifier:
+                                existing_identifiers.add(identifier)
+                                existing_docs_map[identifier] = meta
+                                # Also add normalized versions (remove query params, trailing slashes)
+                                if isinstance(identifier, str) and identifier.startswith('http'):
+                                    # Add normalized URL (remove query params)
+                                    normalized = identifier.split('?')[0].rstrip('/')
+                                    if normalized != identifier:
+                                        existing_identifiers.add(normalized)
+                                        existing_docs_map[normalized] = meta
+                        
+                        print(f"[DEBUG] Found {len(existing_identifiers)} unique identifiers in existing vectorstore")
+                        
+                        def get_doc_identifier(doc_meta):
+                            """Get unique identifier for a document."""
+                            identifier = (
+                                doc_meta.get("page_url") or 
+                                doc_meta.get("file_url") or 
+                                doc_meta.get("webUrl") or
+                                # Fallback: create unique ID from file_name + folder_path
+                                (f"{doc_meta.get('file_name', '')}||{doc_meta.get('folder_path', '')}" if doc_meta.get('file_name') else None)
+                            )
+                            # Return both original and normalized version
+                            if identifier and isinstance(identifier, str) and identifier.startswith('http'):
+                                return [identifier, identifier.split('?')[0].rstrip('/')]
+                            return [identifier] if identifier else [None]
+                        
+                        new_limitations_docs = []
+                        duplicate_count = 0
+                        reprocess_count = 0
+                        for doc in limitations_docs:
+                            doc_identifiers = get_doc_identifier(doc.metadata)
+                            # Check if any identifier variant matches
+                            is_duplicate = any(ident in existing_identifiers for ident in doc_identifiers if ident)
+                            
+                            # Smart detection: If it's a duplicate but content_type changed, force reprocessing
+                            if is_duplicate:
+                                # Check if this is an Excel file that needs reprocessing with new metadata
+                                new_content_type = doc.metadata.get('content_type')
+                                if new_content_type == 'excel_data':
+                                    # Find existing document metadata
+                                    existing_meta = None
+                                    for ident in doc_identifiers:
+                                        if ident and ident in existing_docs_map:
+                                            existing_meta = existing_docs_map[ident]
+                                            break
+                                    
+                                    if existing_meta and existing_meta.get('content_type') != 'excel_data':
+                                        print(f"[*] Content type changed for {doc.metadata.get('file_name')} (was: {existing_meta.get('content_type')}, now: {new_content_type}) - forcing reprocessing")
+                                        is_duplicate = False  # Force reprocessing
+                                        reprocess_count += 1
+                            
+                            if not is_duplicate:
+                                new_limitations_docs.append(doc)
+                            else:
+                                duplicate_count += 1
+                                if duplicate_count <= 5:  # Log first 5 duplicates for debugging
+                                    print(f"[DEBUG] Duplicate found: {doc.metadata.get('file_name', 'Unknown')} - {doc_identifiers[0]}")
+                        
+                        if reprocess_count > 0:
+                            print(f"[OK] Forcing reprocessing of {reprocess_count} document(s) due to content_type changes")
+                        print(f"[OK] New Limitations SharePoint documents to add: {len(new_limitations_docs)} (skipped {duplicate_count} duplicates)")
+                        if len(new_limitations_docs) == 0 and len(limitations_docs) > 0:
+                            print(f"[WARNING] All {len(limitations_docs)} documents were marked as duplicates!")
+                            print(f"[DEBUG] Sample document metadata: {limitations_docs[0].metadata}")
+                            print(f"[DEBUG] Sample identifier: {get_doc_identifier(limitations_docs[0].metadata)}")
+                    
+                    limitations_docs = new_limitations_docs
+            else:
+                # FULL BUILD MODE: Fetch all documents from entire folder
+                print("[*] FULL BUILD MODE: Fetching all Limitations SharePoint documents...")
+                limitations_docs = fetch_latest_sharepoint_limitations(max_items=99999)  # Get all documents
+                print(f"[INGEST] Limitations SharePoint docs: {len(limitations_docs)}")
+            
+            if limitations_docs:
+                chunks = builder.process_documents(limitations_docs, source_type="sharepoint_limitations")
+                all_chunks.extend(chunks)
+        except Exception as e:
+            print(f"[WARN] Limitations SharePoint ingestion failed: {e}")
 
     # ---- OUTLOOK / EMAIL ----
     if ENABLE_OUTLOOK_SOURCE:

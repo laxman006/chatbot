@@ -494,6 +494,9 @@ Note: Full text content could not be extracted from this file, but it is availab
                     #         is_video = True
                     #         video_type = "video"
                     
+                    # Detect Excel files for proper metadata tagging
+                    is_excel = file_ext in ['xls', 'xlsx']
+                    
                     # Create metadata
                     metadata = {
                         "source_type": "sharepoint",
@@ -504,10 +507,15 @@ Note: Full text content could not be extracted from this file, but it is availab
                         "folder_tags": tag,
                         "tag": tag,
                         "page_url": web_url,
-                        "content_type": "sharepoint_video" if is_video else "sharepoint_file",
+                        "content_type": "excel_data" if is_excel else ("sharepoint_video" if is_video else "sharepoint_file"),  # Mark Excel files
                         "is_certificate": is_certificate,
                         "depth": depth
                     }
+                    
+                    # Add Excel-specific metadata
+                    if is_excel:
+                        metadata["file_format"] = file_ext
+                        metadata["excel_tag"] = "excel"  # Additional tag for better retrieval
                     
                     # Add download URL for certificates and downloadable files (policy documents, etc.)
                     if is_certificate or is_downloadable:

@@ -34,9 +34,57 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"[STARTUP] ❌ Failed to initialize MongoDB memory storage: {e}", exc_info=True)
     
+    # Start blog polling service if enabled
+    poller_task = None
+    try:
+        from config import BLOG_POLLING_ENABLED, BLOG_POLLING_INTERVAL
+        from app.blog_poller import BlogPoller
+        
+        if BLOG_POLLING_ENABLED:
+            logger.info("[STARTUP] Starting blog polling service...")
+            poller = BlogPoller()
+            
+            # Run polling in background
+            async def run_polling():
+                loop = asyncio.get_event_loop()
+                while True:
+                    try:
+                        # Run poll_once synchronously in thread pool to avoid blocking
+                        await loop.run_in_executor(None, poller.poll_once)
+                        # Wait for next interval
+                        await asyncio.sleep(BLOG_POLLING_INTERVAL)
+                    except asyncio.CancelledError:
+                        logger.info("[BLOG POLLER] Polling task cancelled (shutdown)")
+                        break
+                    except Exception as e:
+                        logger.error(f"[BLOG POLLER] Error in polling loop: {e}", exc_info=True)
+                        # Wait 1 minute before retrying after error
+                        await asyncio.sleep(60)
+            
+            poller_task = asyncio.create_task(run_polling())
+            logger.info(f"[STARTUP] ✅ Blog polling service started (interval: {BLOG_POLLING_INTERVAL}s)")
+        else:
+            logger.info("[STARTUP] Blog polling is disabled (BLOG_POLLING_ENABLED=false)")
+    except Exception as e:
+        logger.error(f"[STARTUP] ❌ Failed to start blog polling service: {e}", exc_info=True)
+        logger.warning("[STARTUP] Server will continue without blog polling")
+    
     yield
     
     # Shutdown
+    # Cancel blog polling task
+    if poller_task:
+        try:
+            logger.info("[SHUTDOWN] Stopping blog polling service...")
+            poller_task.cancel()
+            try:
+                await poller_task
+            except asyncio.CancelledError:
+                pass
+            logger.info("[SHUTDOWN] ✅ Blog polling service stopped")
+        except Exception as e:
+            logger.warning(f"[SHUTDOWN] ⚠️  Error stopping blog polling service: {e}")
+    
     try:
         logger.info("[SHUTDOWN] Closing MongoDB memory storage...")
         await close_mongodb_connection()

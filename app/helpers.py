@@ -3,6 +3,7 @@ import requests
 import json
 import markdown
 from typing import List, Optional
+from datetime import datetime
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -12,7 +13,8 @@ from langchain_core.documents import Document
 from config import (
     CHROMA_DB_PATH, BLOG_POSTS_PER_PAGE, BLOG_MAX_PAGES, BLOG_START_PAGE,
     SHAREPOINT_SALES_SITE_URL, SHAREPOINT_SALES_FOLDER_PATH, SHAREPOINT_SALES_MAX_DEPTH,
-    SHAREPOINT_PRESALES_SITE_URL, SHAREPOINT_PRESALES_FOLDER_PATH, SHAREPOINT_PRESALES_MAX_DEPTH
+    SHAREPOINT_PRESALES_SITE_URL, SHAREPOINT_PRESALES_FOLDER_PATH, SHAREPOINT_PRESALES_MAX_DEPTH,
+    SHAREPOINT_LIMITATIONS_SITE_URL, SHAREPOINT_LIMITATIONS_FOLDER_PATH, SHAREPOINT_LIMITATIONS_MAX_DEPTH
 )
 from app.pdf_processor import process_pdf_directory, chunk_pdf_documents
 from app.excel_processor import process_excel_directory, chunk_excel_documents
@@ -44,6 +46,29 @@ def fetch_posts(base_url: str, per_page=10, max_pages=6, start_page=1, extra_par
                 break
             all_posts.extend(posts)
             print(f"Page {page} fetched, total so far: {len(all_posts)}")
+        except requests.exceptions.HTTPError as e:
+            # If it's a 400 error and we have an 'after' parameter, try without it
+            if e.response is not None and e.response.status_code == 400 and "after" in params:
+                print(f"Error fetching page {page} with 'after' parameter: {e}")
+                print(f"[*] Retrying without 'after' parameter...")
+                # Retry without the 'after' parameter
+                params_retry = dict(params)
+                params_retry.pop("after", None)
+                url_retry = f"{base_url}?{urlencode(params_retry, doseq=True)}"
+                try:
+                    resp_retry = session.get(url_retry, timeout=60, stream=True)
+                    resp_retry.raise_for_status()
+                    posts = json.loads(resp_retry.content.decode("utf-8"))
+                    if not posts:
+                        break
+                    all_posts.extend(posts)
+                    print(f"Page {page} fetched (without 'after' filter), total so far: {len(all_posts)}")
+                except Exception as e2:
+                    print(f"Error fetching page {page} (retry): {e2}")
+                    break
+            else:
+                print(f"Error fetching page {page}: {e}")
+                break
         except Exception as e:
             print(f"Error fetching page {page}: {e}")
             break
@@ -81,7 +106,7 @@ def load_webpage(url: str):
             texts.append(post["content"]["rendered"])
     return "\n\n".join(texts)
 
-def fetch_latest_web_content(url: str, max_posts: int = 50):
+def fetch_latest_web_content(url: str, max_posts: int = 50, since_date: str = None):
     """Fetch only the latest blog posts (first page, limited to max_posts).
     
     This is optimized for incremental updates - only fetches newest posts.
@@ -90,6 +115,7 @@ def fetch_latest_web_content(url: str, max_posts: int = 50):
     Args:
         url: WordPress API URL
         max_posts: Maximum number of latest posts to fetch (default: 50)
+        since_date: ISO date string (YYYY-MM-DD) - only fetch posts after this date (optional)
     
     Returns:
         List of Document objects for latest blog posts
@@ -118,6 +144,22 @@ def fetch_latest_web_content(url: str, max_posts: int = 50):
     base_params.pop("page", None)
     base_params.pop("per_page", None)
     
+    # Add date filter if provided (WordPress API supports after parameter)
+    if since_date:
+        # Validate date is not in the future
+        try:
+            date_obj = datetime.strptime(since_date, "%Y-%m-%d")
+            today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            if date_obj > today:
+                print(f"[WARN] Date {since_date} is in the future. Skipping date filter.")
+            else:
+                # WordPress API expects date in YYYY-MM-DD format or ISO datetime
+                base_params["after"] = since_date
+                print(f"[*] Filtering posts after {since_date}...")
+        except ValueError:
+            # Invalid date format, skip the filter
+            print(f"[WARN] Invalid date format '{since_date}'. Expected YYYY-MM-DD. Skipping date filter.")
+    
     # Fetch only first page with limited posts
     data = fetch_posts(
         base_url,
@@ -144,6 +186,7 @@ def fetch_latest_web_content(url: str, max_posts: int = 50):
         slug = post.get("slug", "")
         link = post.get("link", "")  # Full URL to the blog post
         content = post["content"]["rendered"]
+        post_date = post.get("date", "")  # ISO date string from WordPress API
         
         # Clean HTML tags from blog content
         soup = BeautifulSoup(content, "html.parser")
@@ -172,12 +215,30 @@ def fetch_latest_web_content(url: str, max_posts: int = 50):
             chunk.metadata["post_slug"] = slug
             chunk.metadata["post_url"] = link
             chunk.metadata["is_blog_post"] = True
+            if post_date:
+                chunk.metadata["post_date"] = post_date  # Store post date for filtering
         
         all_docs.extend(chunks)
         posts_processed += 1
     
     print(f"[OK] Loaded {posts_processed} latest blog posts into {len(all_docs)} chunks")
     return all_docs
+
+
+def get_last_blog_post_date() -> Optional[str]:
+    """Get the date of the most recent blog post from vectorstore metadata.
+    
+    Returns:
+        ISO date string (YYYY-MM-DD) of the last processed blog post, or None if not found
+    """
+    try:
+        from app.vectorstore import load_stored_metadata
+        metadata = load_stored_metadata()
+        if metadata and "last_blog_post_date" in metadata:
+            return metadata["last_blog_post_date"]
+    except Exception as e:
+        print(f"[WARN] Could not get last blog post date: {e}")
+    return None
 
 def fetch_web_content(url: str):
     """Fetch and chunk web content into LangChain Documents with blog post URLs and metadata.
@@ -226,6 +287,7 @@ def fetch_web_content(url: str):
         slug = post.get("slug", "")
         link = post.get("link", "")  # Full URL to the blog post
         content = post["content"]["rendered"]
+        post_date = post.get("date", "")  # ISO date string from WordPress API
         
         # Clean HTML tags from blog content
         soup = BeautifulSoup(content, "html.parser")
@@ -254,6 +316,8 @@ def fetch_web_content(url: str):
             chunk.metadata["post_slug"] = slug  # URL slug
             chunk.metadata["post_url"] = link  # Full blog post URL
             chunk.metadata["is_blog_post"] = True  # Flag to identify blog content
+            if post_date:
+                chunk.metadata["post_date"] = post_date  # Store post date for filtering
         
         all_docs.extend(chunks)
         posts_processed += 1
@@ -511,6 +575,119 @@ def fetch_latest_sharepoint_presales(max_items: int = 100) -> List[Document]:
         # No priority flag - works like regular SharePoint
     
     print(f"[OK] Fetched {len(documents)} Presales SharePoint documents")
+    return documents
+
+def fetch_latest_sharepoint_limitations(max_items: int = 100) -> List[Document]:
+    """
+    Fetch SharePoint documents from Repository25 Limitations and Features folder.
+    Extracts from the specified folder path (e.g., "Neutara Labs/Limitations and features").
+    Similar to fetch_latest_sharepoint_presales - optimized for incremental updates.
+    
+    Args:
+        max_items: Maximum number of latest documents to fetch (default: 100)
+                  Set to 9999 to get all documents
+    
+    Returns:
+        List of Document objects for SharePoint Limitations documents
+    """
+    from app.sharepoint_graph_extractor import SharePointGraphExtractor
+    from config import (
+        SHAREPOINT_LIMITATIONS_SITE_URL,
+        SHAREPOINT_LIMITATIONS_FOLDER_PATH,
+        SHAREPOINT_LIMITATIONS_MAX_DEPTH
+    )
+    
+    print(f"[*] Fetching SharePoint documents from Limitations and Features...")
+    print(f"   Site: {SHAREPOINT_LIMITATIONS_SITE_URL}")
+    
+    # Extract just the site URL from the full path if needed
+    parsed_url = urlparse(SHAREPOINT_LIMITATIONS_SITE_URL)
+    path_parts = [p for p in parsed_url.path.split('/') if p]
+    
+    # Find 'sites' in path and extract site URL
+    clean_site_url = SHAREPOINT_LIMITATIONS_SITE_URL  # Default to original
+    if 'sites' in path_parts:
+        site_idx = path_parts.index('sites')
+        if site_idx + 1 < len(path_parts):
+            # Build clean site URL: https://hostname/sites/sitename
+            clean_site_url = f"{parsed_url.scheme}://{parsed_url.netloc}/sites/{path_parts[site_idx + 1]}"
+            print(f"[*] Extracted site URL: {clean_site_url}")
+        else:
+            print("[ERROR] Could not extract site name from URL")
+            return []
+    else:
+        # If no 'sites' found, use URL as-is (might already be clean)
+        print(f"[*] Using site URL as-is: {clean_site_url}")
+    
+    # Create extractor with cleaned limitations site URL
+    extractor = SharePointGraphExtractor()
+    extractor.site_url = clean_site_url
+    # Reset cached IDs so they're fetched for the new site
+    extractor.site_id = None
+    extractor.drive_id = None
+    
+    # Get site and drive IDs
+    site_id = extractor.get_site_id()
+    if not site_id:
+        print("[ERROR] Failed to get Limitations site ID")
+        return []
+    
+    drive_id = extractor.get_drive_id()
+    if not drive_id:
+        print("[ERROR] Failed to get Limitations drive ID")
+        return []
+    
+    # Check if a specific folder path is configured
+    folder_id = None
+    folder_path_list = []
+    
+    if SHAREPOINT_LIMITATIONS_FOLDER_PATH:
+        print(f"[*] Extracting from specific folder: {SHAREPOINT_LIMITATIONS_FOLDER_PATH}")
+        # Find folder by path
+        folder_id = find_folder_by_path_helper(extractor, drive_id, SHAREPOINT_LIMITATIONS_FOLDER_PATH)
+        if folder_id:
+            # Convert folder path string to list for extract_from_folder
+            folder_path_list = [p.strip() for p in SHAREPOINT_LIMITATIONS_FOLDER_PATH.split('/') if p.strip()]
+            print(f"[OK] Found folder ID: {folder_id[:50]}...")
+        else:
+            print(f"[WARNING] Folder not found: {SHAREPOINT_LIMITATIONS_FOLDER_PATH}")
+            print("[*] Falling back to entire Documents library...")
+    else:
+        print(f"[*] Extracting from entire Documents library...")
+    
+    # Extract documents from the folder (or root if no folder specified)
+    documents = extractor.extract_from_folder(
+        item_id=folder_id,  # None means root folder (Documents library)
+        folder_path=folder_path_list,  # Empty list means root
+        visited_ids=set(),
+        depth=0
+    )
+    
+    # Sort by modified date (newest first) and limit
+    # Note: SharePoint documents may have 'lastModifiedDateTime' in metadata
+    documents.sort(
+        key=lambda d: d.metadata.get('modified_at', '') or d.metadata.get('lastModifiedDateTime', ''),
+        reverse=True
+    )
+    documents = documents[:max_items]
+    
+    # Add tag and source type, preserve Excel metadata
+    for doc in documents:
+        doc.metadata['source_type'] = 'sharepoint_limitations'
+        # Get folder path from metadata if available
+        folder_path = doc.metadata.get('folder_tags', '').replace('sharepoint/', '') or 'Documents'
+        doc.metadata['tag'] = f"sharepoint_limitations/{folder_path}"
+        
+        # Preserve and enhance Excel-specific metadata if it's an Excel file
+        file_name = doc.metadata.get('file_name', '')
+        if file_name and file_name.lower().endswith(('.xlsx', '.xls')):
+            doc.metadata['content_type'] = 'excel_data'
+            doc.metadata['file_format'] = file_name.rsplit('.', 1)[-1].lower()
+            # Add Excel tag for better retrieval
+            if 'excel_tag' not in doc.metadata:
+                doc.metadata['excel_tag'] = 'excel'
+    
+    print(f"[OK] Fetched {len(documents)} Limitations SharePoint documents")
     return documents
 
 def strip_markdown(md_text: str) -> str:
