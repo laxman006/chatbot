@@ -75,3 +75,7 @@ sentence-transformers>=2.7.0        # Cross-encoder reranking (used in reranker.
 
 google-generativeai>=0.3.0
 langchain-google-genai>=0.1.0
+
+apscheduler>=3.10.0
+cryptography>=42.0.0
+

@@ -116,12 +116,14 @@ class EnhancedVectorstoreBuilder:
         
         self.reporter.add_chunks(chunks, source_type)
         
-        # Step 3: Deduplication
-        if self.deduplicator:
+        # Step 3: Deduplication (SKIP for Jira - each ticket is unique)
+        if self.deduplicator and source_type != "jira":
             print(f"[*] Running deduplication (threshold={DEDUP_THRESHOLD})...")
             chunks, dedup_stats = self.deduplicator.deduplicate_within_batch(chunks)
             print(f"[OK] Deduplication: {dedup_stats['duplicates_found']} duplicates found, {len(chunks)} unique chunks")
             self.reporter.add_deduplication_stats(dedup_stats)
+        elif source_type == "jira":
+            print(f"[*] Skipping deduplication for Jira tickets (each ticket is unique)")
         
         # Step 4: Store graph relationships
         if self.graph_store:
@@ -355,10 +357,11 @@ class EnhancedVectorstoreBuilder:
         
         # Create new vectorstore if it doesn't exist or loading failed
         print("[*] Creating new vectorstore...")
-        vectorstore = Chroma.from_documents(
-            all_chunks,
-            embeddings,
+        
+        # Create empty vectorstore first
+        vectorstore = Chroma(
             persist_directory=persist_directory,
+            embedding_function=embeddings,
             collection_metadata={
                 "hnsw:space": "cosine",
                 "hnsw:construction_ef": 200,
@@ -366,6 +369,33 @@ class EnhancedVectorstoreBuilder:
                 "hnsw:M": 48,
             }
         )
+        
+        # Add documents in batches to avoid token limits
+        batch_size = 250  # Conservative batch size (Jira chunks avg 638 tokens: 250 × 638 = 159k tokens, well under 300k limit)
+        total_batches = (len(all_chunks) + batch_size - 1) // batch_size
+        
+        if len(all_chunks) > batch_size:
+            print(f"[*] Adding {len(all_chunks)} chunks in {total_batches} batches...")
+        
+        for i in range(0, len(all_chunks), batch_size):
+            batch = all_chunks[i:i + batch_size]
+            batch_num = i // batch_size + 1
+            
+            if len(all_chunks) > batch_size:
+                print(f"   Batch {batch_num}/{total_batches}: Adding {len(batch)} chunks...")
+            
+            vectorstore.add_documents(batch)
+        
+        # Ensure proper persistence of the vectorstore and index
+        # This prevents index corruption issues when reloading
+        try:
+            # Force persistence by accessing the client and ensuring it's flushed
+            if hasattr(vectorstore, '_client') and vectorstore._client:
+                # ChromaDB automatically persists, but we ensure it's complete
+                vectorstore._client.persist()
+        except Exception as e:
+            print(f"[WARNING] Could not explicitly persist vectorstore: {e}")
+            # Continue anyway - ChromaDB should auto-persist
         
         print(f"[OK] Vectorstore created with HNSW graph indexing")
         print(f"[OK] Total chunks in vectorstore: {vectorstore._collection.count()}")
