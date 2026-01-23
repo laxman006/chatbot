@@ -48,7 +48,12 @@ from config import (
     DENSE_RETRIEVAL_K, BM25_RETRIEVAL_K, FINAL_RETRIEVAL_K,
     DENSE_WEIGHT, BM25_WEIGHT, RERANKER_WEIGHT,
     PRIMARY_KB_PRIORITY_BOOST, SECONDARY_KB_PRIORITY_BOOST, TRANSCRIPT_ARTIFACT_BOOST,
-    PRIMARY_KB_TIER, TRANSCRIPT_KB_TIER
+    PRIMARY_KB_TIER, TRANSCRIPT_KB_TIER,
+    RETRY_ATTEMPT_1_K_DENSE, RETRY_ATTEMPT_1_K_BM25, RETRY_ATTEMPT_1_K_FINAL,
+    RETRY_ATTEMPT_2_K_DENSE, RETRY_ATTEMPT_2_K_BM25, RETRY_ATTEMPT_2_K_FINAL,
+    RETRY_ATTEMPT_3_PLUS_K_DENSE, RETRY_ATTEMPT_3_PLUS_K_BM25, RETRY_ATTEMPT_3_PLUS_K_FINAL,
+    RETRY_DENSE_WEIGHT, RETRY_BM25_WEIGHT, RETRY_FORCE_EXPANSION, RETRY_SCORE_THRESHOLD_ADJUSTMENT,
+    ENABLE_ANSWER_QUALITY_CHECK, ANSWER_QUALITY_LLM_TEMPERATURE
 )
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
@@ -969,6 +974,21 @@ def extract_migration_direction(text: str) -> dict:
         "teams": [r"microsoft\s+teams", r"teams"],
         "dropbox": [r"dropbox"],
         "box": [r"box"],
+        "google_chat": [
+        r"google\s+chat", r"gchat", r"g\s+chat",
+        r"^chat\s+to", r"chat\s+migration",  # Add: "chat to teams" = Google Chat
+    ],
+        "egnyte": [r"egnyte"],
+        "amazon_s3": [r"amazon\s+s3"],
+        "google_drive": [r"google\s+drive"],
+        "gmail": [r"gmail"],
+        "outlook": [r"outlook"],
+        "sharepoint": [r"sharepoint"],
+        "onedrive": [r"onedrive"],
+        "sharefile": [r"sharefile", r"citrix\s+sharefile"],
+        
+        
+       
     }
     
     # Compile patterns
@@ -1041,6 +1061,116 @@ def extract_migration_direction(text: str) -> dict:
         "direction_detected": direction_detected,
         "mentioned_platforms": mentioned_platforms
     }
+
+def filter_by_direction(
+    doc_results: List[Tuple[Document, float]], 
+    query_intent: dict,
+    strict_mode: bool = False
+) -> List[Tuple[Document, float]]:
+    """
+    Filter and re-rank documents based on direction match.
+    
+    CRITICAL: Whitelists support matrix documents (limitations/features sheets)
+    to ensure authoritative sources always survive filtering.
+    
+    Args:
+        doc_results: List of (doc, score) tuples
+        query_intent: Dict with source_platform, target_platform, direction_detected
+        strict_mode: If True, remove mismatched docs. If False, heavily penalize them.
+    
+    Returns:
+        Filtered and re-ranked list of (doc, score) tuples
+    """
+    if not query_intent.get("source_platform") or not query_intent.get("target_platform"):
+        # No direction detected in query - skip filtering
+        return doc_results
+    
+    query_source = query_intent["source_platform"]
+    query_target = query_intent["target_platform"]
+    
+    matched_docs = []
+    mismatched_docs = []
+    unknown_docs = []
+    
+    for doc, score in doc_results:
+        meta = doc.metadata or {}
+        tag = (meta.get("tag", "") or "").lower()
+        filename = (meta.get("filename", "") or meta.get("file_name", "") or "").lower()
+        
+        # CRITICAL FIX #3: Whitelist support matrix documents
+        # Never drop limitations/features sheets even if direction unclear
+        is_support_matrix = (
+            "limitations" in tag or 
+            "limitations" in filename or 
+            "features" in filename and "limitations" in filename or
+            "feature summary" in filename or
+            "feature matrix" in filename or
+            "sharepoint_limitations" in tag
+        )
+        
+        if is_support_matrix:
+            # Always keep support matrix docs with original score
+            matched_docs.append((doc, score, "support_matrix"))
+            continue
+        
+        # CRITICAL FIX #1: Use richer context for direction detection
+        # Include metadata + filename + folder + tag + longer content
+        meta_blob = " ".join([
+            str(meta.get("tag", "")),
+            str(meta.get("source_type", "")),
+            str(meta.get("folder_path", "") or meta.get("folder", "")),
+            str(meta.get("filename", "") or meta.get("file_name", "")),
+            str(meta.get("page_url", "")),
+            str(meta.get("title", "") or meta.get("post_title", "")),
+        ])
+        content_preview = doc.page_content[:1500] if doc.page_content else ''
+        doc_text = f"{meta_blob} {content_preview}"
+        
+        doc_direction = extract_migration_direction(doc_text)
+        doc_source = doc_direction.get("source_platform")
+        doc_target = doc_direction.get("target_platform")
+        
+        # Determine match status
+        if doc_source and doc_target:
+            # Document has explicit direction
+            if doc_source == query_source and doc_target == query_target:
+                # Perfect match - keep with original score
+                matched_docs.append((doc, score, "match"))
+            elif doc_source == query_target and doc_target == query_source:
+                # Reversed direction - heavily penalize or remove
+                if strict_mode:
+                    continue  # Remove reversed docs
+                else:
+                    # Penalize: reduce score by 70%
+                    penalized_score = score * 0.3
+                    mismatched_docs.append((doc, penalized_score, "reversed"))
+            else:
+                # Different direction - penalize or remove
+                if strict_mode:
+                    continue  # Remove different direction docs
+                else:
+                    # Penalize: reduce score by 50%
+                    penalized_score = score * 0.5
+                    mismatched_docs.append((doc, penalized_score, "different"))
+        else:
+            # Unknown direction - keep but don't boost
+            unknown_docs.append((doc, score, "unknown"))
+    
+    # Reconstruct results: matched first, then unknown, then mismatched
+    if strict_mode:
+        # Strict: only matched + unknown
+        filtered_results = matched_docs + unknown_docs
+        print(f"[DIRECTION GATING] STRICT MODE: Kept {len(matched_docs)} matched, {len(unknown_docs)} unknown, removed {len(mismatched_docs)} mismatched")
+    else:
+        # Lenient: all docs but penalized mismatches
+        filtered_results = matched_docs + unknown_docs + mismatched_docs
+        print(f"[DIRECTION GATING] LENIENT MODE: {len(matched_docs)} matched, {len(unknown_docs)} unknown, {len(mismatched_docs)} mismatched (penalized)")
+    
+    # Re-sort by score (higher is better)
+    filtered_results.sort(key=lambda x: x[1], reverse=True)
+    
+    # Return as (doc, score) tuples
+    return [(doc, score) for doc, score, _ in filtered_results]
 
 def analyze_retrieved_documents(docs_with_scores):
     """Analyze retrieved documents and extract metadata."""
@@ -1243,6 +1373,47 @@ def merge_retrieval_results(main_results: List, jira_results: List = None, max_d
 # SECTION-BASED RERANKING
 # ============================================================================
 
+def apply_section_boosts(
+    reranked_results: List[Tuple[Document, float]]
+) -> List[Tuple[Document, float]]:
+    """
+    Apply section-based boosting to already-reranked results.
+    Uses MULTIPLICATIVE boosts to preserve calibration.
+    
+    Priority order:
+    1. root_cause (critical) → highest boost
+    2. ai_suggestions (critical) → high boost
+    3. description (high) → medium boost
+    4. summary (high) → low boost
+    5. comment (medium) → no boost
+    
+    This ensures fixes beat symptoms in final context.
+    """
+    if not reranked_results:
+        return []
+    
+    # Section priority multipliers (multiplicative, not additive)
+    SECTION_MULT = {
+        "root_cause": 0.15,      # +15%
+        "ai_suggestions": 0.12,  # +12%
+        "description": 0.05,     # +5%
+        "summary": 0.02,         # +2%
+        "comment": 0.0,
+    }
+    
+    boosted_results = []
+    for doc, score in reranked_results:
+        section = doc.metadata.get("section", "unknown")
+        mult = 1.0 + SECTION_MULT.get(section, 0.0)
+        boosted_score = score * mult
+        boosted_results.append((doc, boosted_score))
+        
+        if section in SECTION_MULT and SECTION_MULT[section] > 0:
+            print(f"[RERANK] Section '{section}': base={score:.4f}, mult={mult:.3f}, final={boosted_score:.4f}")
+    
+    boosted_results.sort(key=lambda x: x[1], reverse=True)
+    return boosted_results
+
 def apply_section_based_reranking(
     query: str,
     candidates: List[Tuple[Document, float]],
@@ -1263,36 +1434,11 @@ def apply_section_based_reranking(
     if not candidates:
         return []
     
-    # Section priority weights (higher = better)
-    SECTION_BOOSTS = {
-        "root_cause": 0.15,      # Highest priority - actual fixes
-        "ai_suggestions": 0.12,  # High priority - AI solutions
-        "description": 0.05,     # Medium - problem description
-        "summary": 0.02,         # Low - ticket summary
-        "comment": 0.0,          # No boost - developer comments
-    }
-    
     # Get base reranker scores
     reranked_base = cross_reranker.rerank(query, candidates, top_k=len(candidates))
     
     # Apply section-based boosting
-    boosted_results = []
-    for doc, base_score in reranked_base:
-        section = doc.metadata.get("section", "unknown")
-        section_priority = doc.metadata.get("section_priority", "medium")
-        
-        # Get boost for this section
-        boost = SECTION_BOOSTS.get(section, 0.0)
-        
-        # Apply boost to score
-        boosted_score = base_score + boost
-        
-        boosted_results.append((doc, boosted_score))
-        if section in SECTION_BOOSTS:  # Only log if section has boost
-            print(f"[RERANK] Section '{section}' ({section_priority}): base={base_score:.4f}, boost={boost:.4f}, final={boosted_score:.4f}")
-    
-    # Re-sort by boosted scores
-    boosted_results.sort(key=lambda x: x[1], reverse=True)
+    boosted_results = apply_section_boosts(reranked_base)
     
     return boosted_results[:top_k]
 
@@ -1432,6 +1578,208 @@ def _get_transcript_keywords() -> set:
         return set()
 
 
+# ============================================================================
+# QUALITY DETECTION FUNCTIONS - Dual-Level (Retrieval + Answer)
+# ============================================================================
+
+def calculate_retrieval_quality(doc_results: List[Tuple[Document, float]]) -> dict:
+    """Calculate quality metrics from retrieval results."""
+    if not doc_results:
+        return {"quality": "low", "avg_score": 0.0, "confidence": 0.0, "min_score": 0.0, "max_score": 0.0, "doc_count": 0}
+    
+    scores = [score for _, score in doc_results]
+    avg_score = sum(scores) / len(scores)
+    min_score = min(scores)
+    max_score = max(scores)
+    
+    # Quality thresholds
+    HIGH_THRESHOLD = 0.6
+    MEDIUM_THRESHOLD = 0.4
+    
+    if avg_score >= HIGH_THRESHOLD:
+        quality = "high"
+    elif avg_score >= MEDIUM_THRESHOLD:
+        quality = "medium"
+    else:
+        quality = "low"
+    
+    return {
+        "quality": quality,
+        "avg_score": avg_score,
+        "min_score": min_score,
+        "max_score": max_score,
+        "doc_count": len(doc_results),
+        "confidence": avg_score
+    }
+
+
+def calculate_answer_quality(
+    query: str,
+    answer: str,
+    context_docs: List[Document]
+) -> dict:
+    """Use LLM to evaluate answer quality (relevance, completeness, accuracy)."""
+    if not ENABLE_ANSWER_QUALITY_CHECK:
+        # Return default if disabled
+        return {
+            "relevance": 0.5,
+            "completeness": 0.5,
+            "accuracy": 0.5,
+            "overall_score": 0.5,
+            "quality": "medium",
+            "issues": []
+        }
+    
+    try:
+        quality_prompt = ChatPromptTemplate.from_messages([
+            ("system", "You are an expert evaluator of RAG system responses. Evaluate answers based on the provided context."),
+            ("human", """Evaluate the following answer for quality:
+
+Question: {query}
+
+Answer: {answer}
+
+Context Available: {context_summary}
+
+Rate the answer on:
+1. Relevance (0-1): Does it directly address the question?
+2. Completeness (0-1): Does it provide sufficient information?
+3. Accuracy (0-1): Is it factually correct based on context?
+
+Respond in JSON format:
+{{
+    "relevance": 0.0-1.0,
+    "completeness": 0.0-1.0,
+    "accuracy": 0.0-1.0,
+    "overall_score": 0.0-1.0,
+    "quality": "high|medium|low",
+    "issues": ["list of issues if any"]
+}}""")
+        ])
+        
+        # Summarize context
+        context_summary = f"{len(context_docs)} documents retrieved"
+        
+        llm = get_llm(temperature=ANSWER_QUALITY_LLM_TEMPERATURE)
+        result = llm.invoke(quality_prompt.format_messages(
+            query=query,
+            answer=answer,
+            context_summary=context_summary
+        ))
+        
+        # Parse JSON response
+        import json
+        try:
+            quality_metrics = json.loads(result.content)
+        except json.JSONDecodeError:
+            # Try to extract JSON from markdown code blocks
+            content = result.content
+            if "```json" in content:
+                json_start = content.find("```json") + 7
+                json_end = content.find("```", json_start)
+                quality_metrics = json.loads(content[json_start:json_end].strip())
+            elif "```" in content:
+                json_start = content.find("```") + 3
+                json_end = content.find("```", json_start)
+                quality_metrics = json.loads(content[json_start:json_end].strip())
+            else:
+                raise
+        
+        return {
+            "relevance": float(quality_metrics.get("relevance", 0.5)),
+            "completeness": float(quality_metrics.get("completeness", 0.5)),
+            "accuracy": float(quality_metrics.get("accuracy", 0.5)),
+            "overall_score": float(quality_metrics.get("overall_score", 0.5)),
+            "quality": quality_metrics.get("quality", "medium"),
+            "issues": quality_metrics.get("issues", [])
+        }
+    except Exception as e:
+        print(f"[WARNING] Answer quality check failed: {e}")
+        # Return default on error
+        return {
+            "relevance": 0.5,
+            "completeness": 0.5,
+            "accuracy": 0.5,
+            "overall_score": 0.5,
+            "quality": "medium",
+            "issues": []
+        }
+
+
+def calculate_combined_quality(
+    retrieval_quality: dict,
+    answer_quality: dict
+) -> dict:
+    """Combine retrieval and answer quality scores."""
+    retrieval_weight = 0.4  # 40% weight on retrieval
+    answer_weight = 0.6      # 60% weight on answer
+    
+    combined_score = (
+        retrieval_weight * retrieval_quality["avg_score"] +
+        answer_weight * answer_quality["overall_score"]
+    )
+    
+    # Determine overall quality
+    if combined_score >= 0.7:
+        quality = "high"
+    elif combined_score >= 0.5:
+        quality = "medium"
+    else:
+        quality = "low"
+    
+    return {
+        "combined_score": combined_score,
+        "quality": quality,
+        "retrieval_score": retrieval_quality["avg_score"],
+        "answer_score": answer_quality["overall_score"]
+    }
+
+
+def extract_used_doc_chunks(doc_results: List[Tuple[Document, float]]) -> List[Tuple[str, str]]:
+    """Extract (doc_id, chunk_id) pairs from retrieved documents."""
+    used_chunks = []
+    for doc, score in doc_results:
+        meta = doc.metadata or {}
+        # Get doc_id from various metadata fields
+        doc_id = (
+            meta.get("id") or
+            meta.get("source") or
+            meta.get("filename") or
+            meta.get("page_url") or
+            meta.get("file_url") or
+            meta.get("webUrl") or
+            ""
+        )
+        # Get chunk_id
+        chunk_id = meta.get("chunk_id") or ""
+        
+        if doc_id and chunk_id:
+            used_chunks.append((str(doc_id), str(chunk_id)))
+    
+    return used_chunks
+
+
+
+
+def normalize_distance_to_similarity(dist: float, metric: str = "cosine") -> float:
+    """Convert distance to similarity based on metric type."""
+    import numpy as np
+    d = float(dist)
+    if metric.lower() in ("cosine", "cos"):
+        # ChromaDB with cosine: d ≈ 1 - cos_sim  ⇒  cos_sim = 1 - d
+        # Distance range: 0.0 (identical) to 2.0 (opposite)
+        return max(0.0, min(1.0, 1.0 - d))
+    elif metric.lower() in ("l2", "euclidean", "euclid"):
+        # Bounded, monotonic mapping for L2
+        return 1.0 / (1.0 + d)
+    elif metric.lower() in ("ip", "inner_product", "dot"):
+        # Treat as unbounded similarity; squash to [0,1] with sigmoid
+        return float(1.0 / (1.0 + np.exp(-d)))
+    else:
+        # Safe default (assume cosine-like)
+        return max(0.0, min(1.0, 1.0 - d))
+
+
 def perplexity_style_retrieve(
     query: str,
     k_dense: int = None,
@@ -1439,6 +1787,8 @@ def perplexity_style_retrieve(
     k_final: int = None,
     use_expansion: bool = None,
     jira_weight: float = None,  # Weighted inclusion (0.0-1.0), auto-calculate if None
+    retry_mode: bool = False,
+    retry_attempt: int = 1,  # Current retry attempt number (1, 2, 3...)
 ):
     """
     Perplexity-style retrieval with weighted Jira vectorstore integration:
@@ -1448,7 +1798,13 @@ def perplexity_style_retrieve(
       4. Weighted retrieval from Jira vectorstore (0-10 tickets based on weight)
       5. Merge MAIN + Jira results
       6. Cross-encoder reranking with section-based boosting
+    
+    Retry mode features:
+    - Gradual step-up retrieval (increases k values based on attempt number)
+    - Force query expansion
+    - Adjusted weights and thresholds
     """
+    
     # Calculate Jira weight if not provided
     if jira_weight is None:
         jira_weight = calculate_jira_weight(query)
@@ -1457,15 +1813,41 @@ def perplexity_style_retrieve(
     k_jira = int(10 * jira_weight)
     if k_jira > 0:
         print(f"[RETRIEVAL] Will retrieve {k_jira} tickets from Jira vectorstore (weight={jira_weight:.2f})")
-    # Use config defaults if not provided
-    if k_dense is None:
-        k_dense = DENSE_RETRIEVAL_K
-    if k_bm25 is None:
-        k_bm25 = BM25_RETRIEVAL_K
-    if k_final is None:
-        k_final = FINAL_RETRIEVAL_K
-    if use_expansion is None:
-        use_expansion = ENABLE_QUERY_EXPANSION
+    
+    # Retry mode: Gradual step-up retrieval
+    if retry_mode:
+        print(f"[RETRY MODE] Attempt {retry_attempt} - Applying gradual step-up retrieval")
+        if retry_attempt == 1:
+            # Attempt 1: 25% increase
+            k_dense = RETRY_ATTEMPT_1_K_DENSE if k_dense is None else max(k_dense, RETRY_ATTEMPT_1_K_DENSE)
+            k_bm25 = RETRY_ATTEMPT_1_K_BM25 if k_bm25 is None else max(k_bm25, RETRY_ATTEMPT_1_K_BM25)
+            k_final = RETRY_ATTEMPT_1_K_FINAL if k_final is None else max(k_final, RETRY_ATTEMPT_1_K_FINAL)
+        elif retry_attempt == 2:
+            # Attempt 2: 50% increase
+            k_dense = RETRY_ATTEMPT_2_K_DENSE if k_dense is None else max(k_dense, RETRY_ATTEMPT_2_K_DENSE)
+            k_bm25 = RETRY_ATTEMPT_2_K_BM25 if k_bm25 is None else max(k_bm25, RETRY_ATTEMPT_2_K_BM25)
+            k_final = RETRY_ATTEMPT_2_K_FINAL if k_final is None else max(k_final, RETRY_ATTEMPT_2_K_FINAL)
+        else:
+            # Attempt 3+: 100% increase
+            k_dense = RETRY_ATTEMPT_3_PLUS_K_DENSE if k_dense is None else max(k_dense, RETRY_ATTEMPT_3_PLUS_K_DENSE)
+            k_bm25 = RETRY_ATTEMPT_3_PLUS_K_BM25 if k_bm25 is None else max(k_bm25, RETRY_ATTEMPT_3_PLUS_K_BM25)
+            k_final = RETRY_ATTEMPT_3_PLUS_K_FINAL if k_final is None else max(k_final, RETRY_ATTEMPT_3_PLUS_K_FINAL)
+        
+        # Force query expansion in retry mode
+        if RETRY_FORCE_EXPANSION:
+            use_expansion = True
+        
+        print(f"[RETRY MODE] Using k_dense={k_dense}, k_bm25={k_bm25}, k_final={k_final}")
+    else:
+        # Use config defaults if not provided
+        if k_dense is None:
+            k_dense = DENSE_RETRIEVAL_K
+        if k_bm25 is None:
+            k_bm25 = BM25_RETRIEVAL_K
+        if k_final is None:
+            k_final = FINAL_RETRIEVAL_K
+        if use_expansion is None:
+            use_expansion = ENABLE_QUERY_EXPANSION
     
     if not vectorstore:
         return []
@@ -1510,7 +1892,7 @@ def perplexity_style_retrieve(
                 }
         except Exception as e:
             print(f"[WARN] Dense retrieval failed for query '{q}': {e}")
-
+    
     # Deduplicate dense docs by id+content (keep best distance)
     dense_map = {}
     for doc, dist in dense_candidates:
@@ -1545,7 +1927,7 @@ def perplexity_style_retrieve(
         for q in queries:
             with suppress(Exception):
                 bm25_results.extend(bm25_retriever.search(q, k=k_bm25))
-
+    
         bm25_map = {}
         for doc, score in bm25_results:
             key = (doc.page_content[:120], doc.metadata.get("source_type", ""), doc.metadata.get("page_url", ""))
@@ -1601,6 +1983,10 @@ def perplexity_style_retrieve(
     candidates = []
     q_lower = query.lower()  # For metadata matching
     
+    # Use retry weights if in retry mode
+    dense_weight = RETRY_DENSE_WEIGHT if retry_mode else DENSE_WEIGHT
+    bm25_weight = RETRY_BM25_WEIGHT if retry_mode else BM25_WEIGHT
+    
     for key, info in combined.items():
         doc = info["doc"]
         meta = doc.metadata or {}
@@ -1616,8 +2002,8 @@ def perplexity_style_retrieve(
         else:
             bm25_sim = 0.0
 
-        # Base score: DENSE_WEIGHT * dense + BM25_WEIGHT * bm25 (0–1)
-        base_score = DENSE_WEIGHT * dense_sim + BM25_WEIGHT * bm25_sim
+        # Base score: Use retry weights if in retry mode
+        base_score = dense_weight * dense_sim + bm25_weight * bm25_sim
         
         # ---- Metadata-based boosts (generic, not hardcoded intents) ----
         # These boosts help surface relevant SharePoint docs that match query signals
@@ -1670,8 +2056,8 @@ def perplexity_style_retrieve(
     # Sort by base score descending (similarity scores - higher is better)
     candidates.sort(key=lambda x: x[1], reverse=True)
     
-    # ---- 4. QUOTA-BASED HYBRID RETRIEVAL: Always Retrieve Both Tiers ----
-    # Step 1: Separate primary and secondary KB candidates
+    # ---- 4. BUILD WIDE RERANK POOL (No Early Slicing) ----
+    # Separate primary and secondary KB candidates
     primary_candidates = []
     secondary_candidates = []
     
@@ -1690,114 +2076,136 @@ def perplexity_style_retrieve(
             # Default to primary if not specified
             primary_candidates.append((doc, score))
     
-    # Step 2: Apply Tier-Aware Score Filtering
-    # Primary KB: Higher threshold (structured content scores better)
-    PRIMARY_SCORE_THRESHOLD = 0.3
+    # Apply Tier-Aware Score Filtering (lowered thresholds to keep more candidates)
+    # Primary KB: Lower threshold to allow more candidates into rerank pool
+    PRIMARY_SCORE_THRESHOLD = 0.25
     # Secondary KB: Lower threshold (conversational content scores lower but still valuable)
     SECONDARY_SCORE_THRESHOLD = 0.15
     
-    # Preserve full candidate info (doc, base_score, dense_sim, bm25_sim) through filtering
-    filtered_primary = [item for item in primary_candidates if item[1] >= PRIMARY_SCORE_THRESHOLD]
-    filtered_secondary = [item for item in secondary_candidates if item[1] >= SECONDARY_SCORE_THRESHOLD]
+    # Keep more candidates (do NOT slice by quota yet)
+    primary_pool = [item for item in primary_candidates if item[1] >= PRIMARY_SCORE_THRESHOLD][:30]
+    secondary_pool = [item for item in secondary_candidates if item[1] >= SECONDARY_SCORE_THRESHOLD][:15]
     
-    print(f"[HYBRID RETRIEVAL] Primary: {len(primary_candidates)} candidates → {len(filtered_primary)} after filtering (threshold: {PRIMARY_SCORE_THRESHOLD})")
-    print(f"[HYBRID RETRIEVAL] Secondary: {len(secondary_candidates)} candidates → {len(filtered_secondary)} after filtering (threshold: {SECONDARY_SCORE_THRESHOLD})")
+    print(f"[POOL] Primary: {len(primary_candidates)} candidates → {len(primary_pool)} in pool (threshold: {PRIMARY_SCORE_THRESHOLD})")
+    print(f"[POOL] Secondary: {len(secondary_candidates)} candidates → {len(secondary_pool)} in pool (threshold: {SECONDARY_SCORE_THRESHOLD})")
     
-    # Step 3: Calculate Primary KB Confidence for Adaptive Quota
-    if filtered_primary:
-        primary_scores = [item[1] for item in filtered_primary]  # item[1] is base_score
-        max_primary_score = max(primary_scores)
-        avg_primary_score = sum(primary_scores) / len(primary_scores)
-        primary_confidence = (max_primary_score + avg_primary_score) / 2  # Combined confidence metric
-    else:
-        max_primary_score = 0.0
-        avg_primary_score = 0.0
-        primary_confidence = 0.0
+    # Combine primary and secondary pools
+    pool_candidates = primary_pool + secondary_pool
+    print(f"[POOL] Combined pool: {len(pool_candidates)} candidates (Primary={len(primary_pool)}, Secondary={len(secondary_pool)})")
     
-    # Step 4: Adaptive Quota Assembly (8:2 default, adaptive based on confidence)
-    # Strong primary KB → more primary (9:1)
-    # Medium primary KB → balanced (7:3)
-    # Weak primary KB → more transcripts (5:5)
-    if primary_confidence >= 0.75:
-        primary_quota, secondary_quota = 9, 1
-        ratio_reason = "high confidence"
-    elif primary_confidence >= 0.5:
-        primary_quota, secondary_quota = 7, 3
-        ratio_reason = "medium confidence"
-    else:
-        primary_quota, secondary_quota = 5, 5
-        ratio_reason = "low confidence"
-    
-    # Ensure quotas don't exceed k_final
-    total_quota = primary_quota + secondary_quota
-    if total_quota > k_final:
-        # Scale down proportionally
-        scale = k_final / total_quota
-        primary_quota = max(1, int(primary_quota * scale))
-        secondary_quota = k_final - primary_quota
-    
-    # Assemble final candidates with quota
-    final_candidates = []
-    
-    # Add primary KB documents (up to quota)
-    final_candidates.extend(filtered_primary[:primary_quota])
-    print(f"[HYBRID RETRIEVAL] Added {min(primary_quota, len(filtered_primary))} primary KB documents")
-    
-    # Prioritize artifacts in secondary KB (Q&A, objections, features, decision drivers)
-    artifact_types = ["q&a", "objection", "feature", "decision driver"]
-    artifact_candidates = [item for item in filtered_secondary 
-                          if item[0].metadata.get("artifact_type", "").lower() in artifact_types]
-    raw_candidates = [item for item in filtered_secondary 
-                     if item[0].metadata.get("artifact_type", "").lower() not in artifact_types]
-    
-    # Add secondary KB documents (artifacts first, then raw transcripts)
-    remaining_quota = secondary_quota
-    if artifact_candidates and remaining_quota > 0:
-        added_artifacts = min(remaining_quota, len(artifact_candidates))
-        final_candidates.extend(artifact_candidates[:added_artifacts])
-        remaining_quota -= added_artifacts
-        print(f"[HYBRID RETRIEVAL] Added {added_artifacts} transcript artifacts")
-    
-    if raw_candidates and remaining_quota > 0:
-        added_raw = min(remaining_quota, len(raw_candidates))
-        final_candidates.extend(raw_candidates[:added_raw])
-        print(f"[HYBRID RETRIEVAL] Added {added_raw} raw transcript chunks")
-    
-    print(f"[HYBRID RETRIEVAL] Final assembly: {len(final_candidates)} docs (ratio: {primary_quota}:{secondary_quota}, reason: {ratio_reason}, primary confidence: {primary_confidence:.3f})")
-    
-    # ---- 5. Weighted retrieval from JIRA vectorstore ----
-    jira_results = []
+    # ---- 5. Add Jira candidates separately, properly normalized ----
+    jira_pool = []
     if k_jira > 0 and jira_vectorstore:
-        print(f"[RETRIEVAL] Retrieving {k_jira} tickets from Jira vectorstore (weight={jira_weight:.2f})...")
+        print(f"[RETRIEVAL] Retrieving Jira tickets for rerank pool (weight={jira_weight:.2f})...")
         try:
             # Get Jira tickets using similarity search (returns distance scores)
-            jira_docs_with_scores = jira_vectorstore.similarity_search_with_score(query, k=k_jira)
+            jira_docs_with_scores = jira_vectorstore.similarity_search_with_score(query, k=15)
+            # Jira vectorstore uses cosine distance (confirmed in jira_vectorstore.py:42)
+            jira_metric = "cosine"
             for doc, dist in jira_docs_with_scores:
-                jira_results.append((doc, float(dist)))  # dist is already distance (lower=better)
-            print(f"[RETRIEVAL] Retrieved {len(jira_results)} Jira tickets")
+                sim = normalize_distance_to_similarity(dist, metric=jira_metric)
+                jira_pool.append((doc, sim))
+            print(f"[RETRIEVAL] Retrieved {len(jira_pool)} Jira tickets for rerank pool")
         except Exception as e:
             print(f"[WARN] Jira retrieval failed: {e}")
-
-    # ---- 6. Merge HYBRID + Jira results ----
-    if jira_results:
-        # Convert final_candidates to distance format (lower = better) for merging with Jira results
-        # final_candidates has similarity scores (0-1, higher=better), convert to distance
-        hybrid_results = [(doc, 1.0 - score) for doc, score in final_candidates]
+    
+    pool_candidates.extend(jira_pool)
+    
+    # ---- 6. Deduplicate by document (max 2 chunks per document) ----
+    import hashlib
+    MAX_CHUNKS_PER_DOC = 2
+    counts = defaultdict(int)
+    deduped_pool = []
+    
+    for doc, score in pool_candidates:
+        meta = doc.metadata or {}
         
-        # Merge results with Jira tickets prioritized (both in distance format)
-        merged_results = merge_retrieval_results(hybrid_results, jira_results, max_docs=k_final * 3)
-        print(f"[RETRIEVAL] Merged results: {len(hybrid_results)} hybrid + {len(jira_results)} Jira = {len(merged_results)} total")
+        # Prefer stable, explicit IDs; fall back to a stable hash of doc-level keys
+        doc_id = (
+            meta.get("id")
+            or meta.get("doc_id")
+            or meta.get("source")
+            or meta.get("filename")
+            or meta.get("page_url")
+        )
         
-        # Convert back to similarity scores for reranker (reranker expects similarity, higher=better)
-        candidates_for_rerank = [(doc, 1.0 - score) for doc, score in merged_results]
+        if not doc_id:
+            # Fallback: hash of canonical doc-level features (deterministic, not id(doc))
+            base_key = "|".join([
+                meta.get("repo", ""),
+                meta.get("path", ""),
+                meta.get("url", ""),
+                meta.get("title", ""),
+                meta.get("source_type", ""),
+                doc.page_content[:300] if doc.page_content else "",  # First 300 chars for stability
+            ])
+            doc_id = hashlib.sha1(base_key.encode("utf-8")).hexdigest() if base_key.strip() else None
+        
+        # If still no doc_id, skip (shouldn't happen, but safe fallback)
+        if not doc_id:
+            print(f"[WARN] Could not determine doc_id for document, skipping dedup")
+            deduped_pool.append((doc, score))
+            continue
+        
+        # Count per document, not per (doc_id, chunk_id)
+        if counts[doc_id] < MAX_CHUNKS_PER_DOC:
+            counts[doc_id] += 1
+            deduped_pool.append((doc, score))
+    
+    # ---- Cap pool size BEFORE CE without resorting by base score ----
+    MAX_POOL = 60  # Can go to 80 if latency allows
+    if len(deduped_pool) > MAX_POOL:
+        deduped_pool = deduped_pool[:MAX_POOL]  # Keep original order (hybrid assembled)
+    
+    print(f"[POOL] Final pool for rerank: {len(deduped_pool)} candidates (after dedup, max {MAX_POOL})")
+    
+    # ---- 6.5. DIRECTION GATING (BEFORE CROSS-ENCODER RERANK) ----
+    # CRITICAL FIX #2: Apply direction gating BEFORE rerank to prevent wrong-direction docs from being locked in
+    query_intent = extract_migration_direction(query)
+    
+    if query_intent.get("source_platform") and query_intent.get("target_platform"):
+        print(f"[DIRECTION GATING] Query direction: {query_intent['source_platform']} → {query_intent['target_platform']}")
+        
+        # Apply direction filtering BEFORE cross-encoder rerank
+        # Use lenient mode to avoid dropping too many docs, but heavily penalize mismatches
+        DIRECTION_STRICT_MODE = False  # Set to True for strict filtering (removes mismatched)
+        
+        deduped_pool = filter_by_direction(
+            doc_results=deduped_pool,
+            query_intent=query_intent,
+            strict_mode=DIRECTION_STRICT_MODE
+        )
+        
+        print(f"[DIRECTION GATING] After filtering: {len(deduped_pool)} documents (before rerank)")
     else:
-        # No Jira results, use hybrid candidates directly (already in similarity format)
-        candidates_for_rerank = final_candidates[:max(k_final * 3, k_final)]
-
-    # ---- 7. Cross-encoder reranking with section-based boosting ----
-    reranked = apply_section_based_reranking(query, candidates_for_rerank, top_k=k_final)
-
-    return reranked  # list of (doc, final_score)
+        print(f"[DIRECTION GATING] No direction detected in query - skipping direction filter")
+    
+    # ---- 7. Cross-encoder rerank (full pool) ----
+    reranked = cross_reranker.rerank(query, deduped_pool, top_k=len(deduped_pool))
+    
+    # ---- 8. Apply threshold on PRE-BOOST scores (best practice) ----
+    from config import MIN_SCORE_THRESHOLD, RETRY_SCORE_THRESHOLD_ADJUSTMENT
+    
+    # Conservative thresholds for sigmoid calibration (start here, tune based on real queries)
+    # sigmoid(0.0) = 0.5, so 0.55 is a meaningful relevance threshold
+    if retry_mode:
+        STRICT_SCORE_THRESHOLD = max(0.50, MIN_SCORE_THRESHOLD + RETRY_SCORE_THRESHOLD_ADJUSTMENT)
+    else:
+        STRICT_SCORE_THRESHOLD = max(0.55, MIN_SCORE_THRESHOLD)  # Start conservative, tune up if needed
+    
+    # Filter using pre-boost scores
+    pre_boost_docs = [(d, s) for d, s in reranked if s >= STRICT_SCORE_THRESHOLD][:k_final]
+    
+    # ---- 9. Apply section boosts ONLY to passed docs (for final ordering) ----
+    if pre_boost_docs:
+        final_docs = apply_section_boosts(pre_boost_docs)
+        print(f"[RERANK] {len(final_docs)} docs passed strict threshold {STRICT_SCORE_THRESHOLD}")
+    else:
+        # Fallback: return top-3 with low confidence
+        final_docs = apply_section_boosts(reranked[:min(3, k_final)])
+        print(f"[RERANK] No docs above threshold {STRICT_SCORE_THRESHOLD}, returning top {len(final_docs)} with low confidence")
+    
+    return final_docs  # list of (doc, final_score)
 
 
 class ChatRequest(BaseModel):
@@ -1946,7 +2354,10 @@ Answer clearly and correctly based on the provided context and knowledge base.""
             try:
                 # ============ QUERY EXPANSION ============
                 # Expand query with intent-specific terms for better retrieval
-                expanded_query = expand_query_with_intent(enhanced_query, intent)
+                if ENABLE_QUERY_EXPANSION:
+                    expanded_query = expand_query_with_intent(enhanced_query, intent)
+                else:
+                    expanded_query = enhanced_query
                 
                 # ============ BRANCH-SPECIFIC RETRIEVAL ============
                 # Use intent-based filtering to retrieve relevant documents
@@ -2028,6 +2439,27 @@ Answer clearly and correctly based on the provided context and knowledge base.""
                 )
                 
                 print(f"[HYBRID RANKING] Reranked {len(doc_results)} documents with semantic + keyword scores")
+                
+                # ============ DIRECTION GATING (MANDATORY) ============
+                # Extract query intent for direction filtering
+                query_intent = extract_migration_direction(enhanced_query)
+                
+                if query_intent.get("source_platform") and query_intent.get("target_platform"):
+                    print(f"[DIRECTION GATING] Query direction: {query_intent['source_platform']} → {query_intent['target_platform']}")
+                    
+                    # Apply direction filtering
+                    # Use lenient mode to avoid dropping too many docs, but heavily penalize mismatches
+                    DIRECTION_STRICT_MODE = False  # Set to True for strict filtering (removes mismatched)
+                    
+                    doc_results = filter_by_direction(
+                        doc_results=doc_results,
+                        query_intent=query_intent,
+                        strict_mode=DIRECTION_STRICT_MODE
+                    )
+                    
+                    print(f"[DIRECTION GATING] After filtering: {len(doc_results)} documents")
+                else:
+                    print(f"[DIRECTION GATING] No direction detected in query - skipping direction filter")
                 
                 # ============ DOCUMENT DIVERSITY ============
                 # Calculate diversity metrics for retrieved documents
@@ -2552,7 +2984,7 @@ Answer clearly and correctly based on the provided context and knowledge base.""
                     k_dense=60,  # Increased to ensure transcripts are in candidate pool
                     k_bm25=60,   # Increased to ensure transcripts are in candidate pool
                     k_final=8,
-                    use_expansion=True,
+                    use_expansion=ENABLE_QUERY_EXPANSION,
                 )
 
                 final_docs = [doc for doc, score in doc_results]
@@ -2855,9 +3287,36 @@ Answer clearly and correctly based on the provided context and knowledge base.""
                     pass
                 print(f"[RETRIEVAL BASELINE] {json.dumps(retrieval_log, indent=2, default=str)}")
             
-            # ===== DIRECTIONALITY DIAGNOSTIC LOGGING =====
-            # Extract query intent (migration direction from user query)
+            # ===== DIRECTION GATING (MANDATORY) =====
+            # Extract query intent for direction filtering
             query_intent = extract_migration_direction(enhanced_query)
+            
+            if query_intent.get("source_platform") and query_intent.get("target_platform"):
+                print(f"[DIRECTION GATING] Query direction: {query_intent['source_platform']} → {query_intent['target_platform']}")
+                
+                # Apply direction filtering to final_docs_with_scores
+                # Use lenient mode to avoid dropping too many docs, but heavily penalize mismatches
+                DIRECTION_STRICT_MODE = False  # Set to True for strict filtering (removes mismatched)
+                
+                filtered_with_scores = filter_by_direction(
+                    doc_results=final_docs_with_scores,
+                    query_intent=query_intent,
+                    strict_mode=DIRECTION_STRICT_MODE
+                )
+                
+                if len(filtered_with_scores) < len(final_docs_with_scores):
+                    print(f"[DIRECTION GATING] Filtered from {len(final_docs_with_scores)} to {len(filtered_with_scores)} documents")
+                    final_docs_with_scores = filtered_with_scores
+                    final_docs = [doc for doc, score in filtered_with_scores]
+                else:
+                    print(f"[DIRECTION GATING] No documents filtered (all matched or unknown direction)")
+            else:
+                print(f"[DIRECTION GATING] No direction detected in query - skipping direction filter")
+            
+            # ===== DIRECTIONALITY DIAGNOSTIC LOGGING =====
+            # Extract query intent (migration direction from user query) - reuse from above
+            if 'query_intent' not in locals():
+                query_intent = extract_migration_direction(enhanced_query)
             
             if query_intent["source_platform"] or query_intent["target_platform"]:
                 print(f"\n[DIRECTIONALITY DIAGNOSTIC] Query Intent:")
@@ -3204,6 +3663,19 @@ User Question:
             llm_time_ms = int((time.time() - llm_start_time) * 1000)
             streaming_time_ms = llm_time_ms  # In streaming mode, these are the same
             
+            # ===== QUALITY DETECTION (Retrieval + Answer Level) =====
+            retrieval_quality = calculate_retrieval_quality(doc_results) if doc_results else {"quality": "low", "avg_score": 0.0, "confidence": 0.0, "min_score": 0.0, "max_score": 0.0, "doc_count": 0}
+            answer_quality = calculate_answer_quality(enhanced_query, full_response, final_docs) if final_docs else {"relevance": 0.5, "completeness": 0.5, "accuracy": 0.5, "overall_score": 0.5, "quality": "medium", "issues": []}
+            combined_quality = calculate_combined_quality(retrieval_quality, answer_quality)
+            
+            # Extract used document/chunk identifiers for retry exclusion
+            used_doc_chunks = extract_used_doc_chunks(doc_results) if doc_results else []
+            
+            print(f"[QUALITY] Retrieval: {retrieval_quality['quality']} (score: {retrieval_quality['avg_score']:.3f})")
+            print(f"[QUALITY] Answer: {answer_quality['quality']} (score: {answer_quality['overall_score']:.3f})")
+            print(f"[QUALITY] Combined: {combined_quality['quality']} (score: {combined_quality['combined_score']:.3f})")
+            print(f"[QUALITY] Used {len(used_doc_chunks)} document chunks")
+            
             # Track message event for analytics (non-blocking)
             try:
                 await mongodb_memory.insert_message_event(user_id, session_id, user_email)
@@ -3360,6 +3832,44 @@ User Question:
                     "vectorstore_available": vectorstore is not None,
                     "documents_found": len(final_docs) > 0,
                     "vectorstore_version": get_vectorstore_build_date()
+                },
+                
+                # ===== QUALITY METRICS (Retrieval + Answer Level) =====
+                "quality": {
+                    "retrieval": retrieval_quality,
+                    "answer": answer_quality,
+                    "combined": combined_quality
+                },
+                
+                # ===== RETRY METADATA =====
+                "retry_metadata": {
+                    "used_doc_chunks": used_doc_chunks,  # List of (doc_id, chunk_id) pairs
+                    "retrieval_parameters": {
+                        "k_dense": DENSE_RETRIEVAL_K,
+                        "k_bm25": BM25_RETRIEVAL_K,
+                        "k_final": FINAL_RETRIEVAL_K,
+                        "use_expansion": ENABLE_QUERY_EXPANSION,
+                        "dense_weight": DENSE_WEIGHT,
+                        "bm25_weight": BM25_WEIGHT
+                    },
+                    "retry_attempt": 0,  # Initial response is attempt 0
+                    "doc_results": [
+                        {
+                            "doc_id": (
+                                doc.metadata.get("id") or
+                                doc.metadata.get("source") or
+                                doc.metadata.get("filename") or
+                                doc.metadata.get("page_url") or
+                                doc.metadata.get("file_url") or
+                                ""
+                            ),
+                            "chunk_id": doc.metadata.get("chunk_id", ""),
+                            "score": float(score),
+                            "source_type": doc.metadata.get("source_type", "unknown"),
+                            "tag": doc.metadata.get("tag", "unknown")
+                        }
+                        for doc, score in doc_results[:20]  # Store top 20 for retry
+                    ] if doc_results else []
                 }
             }
             
@@ -3436,6 +3946,333 @@ User Question:
 
     return StreamingResponse(
         generate_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Content-Type": "text/event-stream",
+        }
+    )
+
+# ============================================================================
+# RETRY ENDPOINTS - Self-Healing RAG with Auto-Reranking
+# ============================================================================
+
+class RetryRequest(BaseModel):
+    question: str
+    session_id: str
+    previous_trace_id: str
+    retry_attempt: int = 1  # Optional, defaults to 1
+
+
+@router.post("/chat/retry/stream")
+async def chat_retry_stream(request: Request, auth_user: dict = Depends(require_auth)):
+    """
+    Retry endpoint with streaming - regenerates response with improved retrieval.
+    Uses gradual step-up retrieval to improve results.
+    """
+    data = await request.json()
+    question = data.get("question", "")
+    session_id = data.get("session_id", str(uuid.uuid4()))
+    previous_trace_id = data.get("previous_trace_id", "")
+    retry_attempt = data.get("retry_attempt", 1)
+    
+    # Use VERIFIED user info from auth token
+    user_id = auth_user["user_id"]
+    user_name = auth_user["name"]
+    user_email = auth_user["email"]
+    
+    if not user_id or not user_id.strip():
+        logger.error(f"[AUTH] ⚠️ Invalid user_id in auth_user: {auth_user}")
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid user identity. Please log in again."
+        )
+    
+    conversation_id = user_id
+    
+    # Get conversation history
+    conversation_history = await get_last_messages(session_id, limit=8)
+    
+    CONVERSATIONAL_SYSTEM_PROMPT = """You are a helpful CloudFuze AI assistant.
+Use the chat history only if it is relevant to the user's latest question.
+If the user asks something unrelated, ignore the old context and answer fresh.
+Answer clearly and correctly based on the provided context and knowledge base."""
+    
+    async def generate_retry_stream():
+        try:
+            
+            # Enhance query (same as regular chat)
+            enhanced_query = question
+            if conversation_history:
+                # Build context from history if relevant
+                context_messages = []
+                for msg in conversation_history[-4:]:  # Last 4 messages
+                    if msg["role"] == "user":
+                        context_messages.append(f"User: {msg['content']}")
+                    elif msg["role"] == "assistant":
+                        context_messages.append(f"Assistant: {msg['content']}")
+                
+                if context_messages:
+                    context_text = "\n".join(context_messages)
+                    enhanced_query = f"Previous conversation:\n{context_text}\n\nCurrent question: {question}"
+            
+            # Create RAG trace for retry
+            rag_trace = None
+            try:
+                rag_trace = langfuse_tracker.create_rag_pipeline_trace(
+                    user_id=conversation_id,
+                    question=question,
+                    session_id=session_id,
+                    user_name=user_name,
+                    user_email=user_email,
+                    metadata={
+                        "endpoint": "/chat/retry/stream",
+                        "retry_mode": True,
+                        "retry_attempt": retry_attempt,
+                        "previous_trace_id": previous_trace_id,
+                        "streaming": True
+                    }
+                )
+                if rag_trace:
+                    started = rag_trace.start_query(enhanced_query, metadata={"retry_mode": True, "retry_attempt": retry_attempt})
+                    if started is None:
+                        print("[LANGFUSE][WARN] start_query failed — synthesis spans will be skipped")
+            except Exception as e:
+                print(f"[WARNING] Failed to create RAG trace: {e}")
+                rag_trace = None
+            
+            # Send status: Retrying with enhanced retrieval
+            yield f"data: {json.dumps({'type': 'status', 'status': 'retrying', 'message': f'Retrying with enhanced retrieval (attempt {retry_attempt})...'})}\n\n"
+            await asyncio.sleep(0.05)
+            
+            # Send status: Retrieving with step-up
+            yield f"data: {json.dumps({'type': 'status', 'status': 'retrieving_docs', 'message': 'Searching knowledge base with enhanced parameters'})}\n\n"
+            await asyncio.sleep(0.05)
+            
+            retrieval_start_time = time.time()
+            
+            # Retrieve with retry mode (uses step-up retrieval)
+            doc_results = perplexity_style_retrieve(
+                query=enhanced_query,
+                retry_mode=True,
+                retry_attempt=retry_attempt,
+                use_expansion=RETRY_FORCE_EXPANSION or ENABLE_QUERY_EXPANSION,
+            )
+            
+            final_docs = [doc for doc, score in doc_results]
+            retrieval_time_ms = int((time.time() - retrieval_start_time) * 1000)
+            
+            print(f"[RETRY] Retrieved {len(final_docs)} docs (attempt {retry_attempt})")
+            
+            # ===== RETRY DEBUG: Document Retrieval Analysis =====
+            print(f"\n[RETRY DEBUG] ===== Retry Attempt {retry_attempt} Document Retrieval =====")
+            print(f"[RETRY DEBUG] Query: {enhanced_query[:100]}...")
+            print(f"[RETRY DEBUG] Retrieved {len(doc_results)} documents with scores")
+            
+            # Count documents by tag/source
+            retrieved_sources = {}
+            for doc, score in doc_results:
+                tag = doc.metadata.get('tag', 'unknown')
+                source_type = doc.metadata.get('source_type', 'unknown')
+                if tag not in retrieved_sources:
+                    retrieved_sources[tag] = 0
+                retrieved_sources[tag] += 1
+            
+            print(f"[RETRY DEBUG] Documents by tag: {retrieved_sources}")
+            
+            # Detailed document breakdown (top 15 for retry debugging)
+            print(f"\n[RETRY DEBUG] Detailed document breakdown (top 15):")
+            for i, (doc, score) in enumerate(doc_results[:15]):
+                metadata = doc.metadata if hasattr(doc, 'metadata') else {}
+                
+                # Extract metadata
+                tag = metadata.get('tag', 'N/A')
+                source_type = metadata.get('source_type', 'N/A')
+                
+                # Get title from various possible fields
+                title = metadata.get('post_title') or metadata.get('title') or metadata.get('file_name') or 'N/A'
+                
+                # Get URL or file path
+                url = metadata.get('url') or metadata.get('file_path') or metadata.get('source') or metadata.get('page_url') or 'N/A'
+                
+                # Get chunk_id if available
+                chunk_id = metadata.get('chunk_id', 'N/A')
+                
+                # Content preview
+                content_preview = doc.page_content[:150] if hasattr(doc, 'page_content') else 'N/A'
+                
+                print(f"  [{i+1}] Score: {score:.4f}")
+                print(f"      Type: {tag} | Source: {source_type}")
+                print(f"      Title: {title[:80]}")
+                print(f"      URL/Path: {url[:100]}")
+                print(f"      Chunk ID: {chunk_id}")
+                print(f"      Preview: {content_preview}...")
+                print()
+            
+            # Send status: Documents found
+            yield f"data: {json.dumps({'type': 'status', 'status': 'reranking_docs', 'message': f'Found {len(doc_results)} new documents, reranking for relevance'})}\n\n"
+            await asyncio.sleep(0.05)
+            
+            # Filter and prepare documents (same as regular chat)
+            final_docs = [doc for doc in final_docs if doc.page_content is not None and doc.page_content.strip()]
+            print(f"[RETRY DEBUG] After filtering None content: {len(final_docs)} docs")
+            
+            # Deduplicate
+            seen_ids = set()
+            unique_docs = []
+            for doc in final_docs:
+                doc_id = f"{doc.metadata.get('source', '')}_{doc.metadata.get('file_name', '')}_{doc.page_content[:100]}"
+                if doc_id not in seen_ids:
+                    seen_ids.add(doc_id)
+                    unique_docs.append(doc)
+            
+            print(f"[RETRY DEBUG] After deduplication: {len(unique_docs)} unique docs")
+            final_docs = unique_docs[:30]
+            print(f"[RETRY DEBUG] Final docs sent to LLM: {len(final_docs)} (limited to 30)")
+            print(f"[RETRY DEBUG] ===== End Retry Attempt {retry_attempt} Debug =====\n")
+            
+            # Format context
+            from app.llm import format_docs
+            if not final_docs:
+                context_text = ""
+            else:
+                formatted_docs = format_docs(final_docs)
+                context_text = "\n\n".join([f"Document {i+1}:\n{formatted_doc}" for i, formatted_doc in enumerate(formatted_docs)])
+            
+            # Send status: Generating response
+            yield f"data: {json.dumps({'type': 'status', 'status': 'generating', 'message': 'Generating improved response'})}\n\n"
+            await asyncio.sleep(0.05)
+            
+            # Generate response (same as regular chat)
+            from app.llm import get_llm
+            from langchain_core.prompts import ChatPromptTemplate
+            from langchain_core.messages import SystemMessage, HumanMessage
+            
+            llm = get_llm(temperature=0.3, max_tokens=1500)
+            
+            messages = [
+                SystemMessage(content=SYSTEM_PROMPT),
+                HumanMessage(content=f"Context:\n{context_text}\n\nQuestion: {enhanced_query}")
+            ]
+            
+            # Stream response
+            full_response = ""
+            llm_start_time = time.time()
+            
+            if rag_trace:
+                try:
+                    # Calculate sources breakdown for tracing
+                    trace_sources = {}
+                    for doc in final_docs:
+                        source_type = doc.metadata.get('source_type', 'unknown')
+                        tag = doc.metadata.get('tag', 'unknown')
+                        key = f"{source_type}:{tag}"
+                        trace_sources[key] = trace_sources.get(key, 0) + 1
+                    
+                    rag_trace.log_retrieval(
+                        query=enhanced_query,
+                        retrieved_docs=final_docs,
+                        doc_count=len(final_docs),
+                        sources_breakdown=trace_sources,
+                        metadata={"retry_mode": True, "retry_attempt": retry_attempt}
+                    )
+                except Exception as e:
+                    print(f"[WARNING] Failed to log retrieval: {e}")
+            
+            # Start synthesis span before LLM generation
+            if rag_trace:
+                try:
+                    rag_trace.start_synthesis(
+                        context=context_text,
+                        metadata={
+                            "context_length": len(context_text),
+                            "document_count": len(final_docs),
+                            "model": "gpt-4o-mini",
+                            "temperature": 0.3,
+                            "retry_mode": True,
+                            "retry_attempt": retry_attempt
+                        }
+                    )
+                except Exception as e:
+                    print(f"[WARNING] Failed to start synthesis: {e}")
+            
+            async for chunk in llm.astream(messages):
+                if hasattr(chunk, 'content'):
+                    token = chunk.content
+                    full_response += token
+                    yield f"data: {json.dumps({'token': token, 'type': 'token'})}\n\n"
+            
+            llm_time_ms = int((time.time() - llm_start_time) * 1000)
+            
+            # Quality checks
+            retrieval_quality = calculate_retrieval_quality(doc_results) if doc_results else {"quality": "low", "avg_score": 0.0, "confidence": 0.0, "min_score": 0.0, "max_score": 0.0, "doc_count": 0}
+            answer_quality = calculate_answer_quality(enhanced_query, full_response, final_docs) if final_docs else {"relevance": 0.5, "completeness": 0.5, "accuracy": 0.5, "overall_score": 0.5, "quality": "medium", "issues": []}
+            combined_quality = calculate_combined_quality(retrieval_quality, answer_quality)
+            used_doc_chunks = extract_used_doc_chunks(doc_results) if doc_results else []
+            
+            print(f"[RETRY QUALITY] Retrieval: {retrieval_quality['quality']}, Answer: {answer_quality['quality']}, Combined: {combined_quality['quality']}")
+            
+            # Save messages
+            try:
+                await save_message(session_id, "user", question)
+                await save_message(session_id, "assistant", full_response)
+            except Exception as e:
+                logger.warning(f"Failed to save messages: {e}")
+            
+            # Complete trace
+            trace_id = None
+            try:
+                if rag_trace and getattr(rag_trace, "synthesize_span", None):
+                    rag_trace.log_llm_generation(
+                        prompt=str(messages),
+                        response=full_response,
+                        model="gpt-4o-mini",
+                        metadata={"retry_mode": True, "retry_attempt": retry_attempt}
+                    )
+                    
+                    retry_metadata = {
+                        "retry_mode": True,
+                        "retry_attempt": retry_attempt,
+                        "previous_trace_id": previous_trace_id,
+                        "used_doc_chunks": used_doc_chunks,
+                        "quality": {
+                            "retrieval": retrieval_quality,
+                            "answer": answer_quality,
+                            "combined": combined_quality
+                        },
+                    }
+                    
+                    trace_id = rag_trace.complete(full_response, metadata=retry_metadata)
+                elif rag_trace:
+                    print("[LANGFUSE][WARN] Skipping log_llm_generation: synthesize_span not initialized")
+                    # Still complete the trace even if generation logging failed
+                    retry_metadata = {
+                        "retry_mode": True,
+                        "retry_attempt": retry_attempt,
+                        "previous_trace_id": previous_trace_id,
+                        "used_doc_chunks": used_doc_chunks,
+                        "quality": {
+                            "retrieval": retrieval_quality,
+                            "answer": answer_quality,
+                            "combined": combined_quality
+                        },
+                    }
+                    trace_id = rag_trace.complete(full_response, metadata=retry_metadata)
+            except Exception as e:
+                print(f"[WARNING] Langfuse logging failed: {e}")
+            
+            # Send completion
+            yield f"data: {json.dumps({'type': 'done', 'full_response': full_response, 'trace_id': trace_id})}\n\n"
+            
+        except Exception as e:
+            print(f"[ERROR] ERROR in retry stream: {e}")
+            import traceback
+            traceback.print_exc()
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+    
+    return StreamingResponse(
+        generate_retry_stream(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -4689,6 +5526,164 @@ async def get_admin_rankers(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to retrieve rankers: {str(e)}"
+        )
+
+
+# ---------------- Blog Polling Admin Endpoints ----------------
+
+@router.post("/admin/blog/poll")
+async def trigger_blog_poll(
+    current_user: dict = Depends(require_admin)
+):
+    """
+    Manually trigger a blog poll to check for new posts and add them to vectorstore.
+    Requires admin access.
+    """
+    try:
+        from app.blog_poller import BlogPoller
+        
+        poller = BlogPoller()
+        success = poller.poll_once()
+        
+        if success:
+            return {
+                "success": True,
+                "message": "Blog poll completed successfully",
+                "timestamp": datetime.now().isoformat()
+            }
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail="Blog poll completed with errors. Check server logs for details."
+            )
+    except Exception as e:
+        logger.error(f"Error triggering blog poll: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to trigger blog poll: {str(e)}"
+        )
+
+
+@router.get("/admin/blog/status")
+async def get_blog_poll_status(
+    current_user: dict = Depends(require_admin)
+):
+    """
+    Get blog polling status including last poll time and configuration.
+    Requires admin access.
+    """
+    try:
+        from app.blog_poller import BlogPoller
+        from app.vectorstore import load_stored_metadata
+        from config import BLOG_POLLING_ENABLED, BLOG_POLLING_INTERVAL, BLOG_LAST_POLL_FILE, CHROMA_DB_PATH
+        import os
+        
+        poller = BlogPoller()
+        last_poll_time = poller.load_last_poll_time()
+        
+        # Get metadata
+        metadata = load_stored_metadata()
+        
+        status = {
+            "polling_enabled": BLOG_POLLING_ENABLED,
+            "polling_interval_seconds": BLOG_POLLING_INTERVAL,
+            "polling_interval_minutes": BLOG_POLLING_INTERVAL / 60,
+            "last_poll_file": BLOG_LAST_POLL_FILE,
+            "last_poll_time": last_poll_time.isoformat() if last_poll_time else None,
+            "last_blog_poll": metadata.get("last_blog_poll") if metadata else None,
+            "blog_post_count": metadata.get("blog_post_count", 0) if metadata else 0,
+            "last_blog_post_date": metadata.get("last_blog_post_date") if metadata else None,
+            "vectorstore_exists": os.path.exists(CHROMA_DB_PATH)
+        }
+        
+        return status
+        
+    except Exception as e:
+        logger.error(f"Error getting blog poll status: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get blog poll status: {str(e)}"
+        )
+
+
+@router.get("/admin/blog/stats")
+async def get_blog_stats(
+    current_user: dict = Depends(require_admin)
+):
+    """
+    Get blog statistics including total posts, last update, and polling information.
+    Requires admin access.
+    """
+    try:
+        from app.vectorstore import load_stored_metadata, vectorstore
+        from config import WEB_SOURCE_URL, ENABLE_WEB_SOURCE
+        import os
+        
+        metadata = load_stored_metadata()
+        
+        from config import CHROMA_DB_PATH
+        
+        stats = {
+            "source_url": WEB_SOURCE_URL,
+            "web_source_enabled": ENABLE_WEB_SOURCE,
+            "vectorstore_exists": os.path.exists(CHROMA_DB_PATH),
+            "blog_post_count": metadata.get("blog_post_count", 0) if metadata else 0,
+            "last_blog_poll": metadata.get("last_blog_poll") if metadata else None,
+            "last_blog_post_date": metadata.get("last_blog_post_date") if metadata else None,
+            "vectorstore_build_date": metadata.get("timestamp") if metadata else None
+        }
+        
+        # Try to get more detailed stats from vectorstore
+        if vectorstore:
+            try:
+                all_docs = vectorstore.get(
+                    where={"is_blog_post": True},
+                    include=["metadatas"]
+                )
+                
+                # Count unique posts by slug and track latest post
+                unique_slugs = set()
+                post_dates = []
+                latest_post_url = None
+                latest_post_title = None
+                latest_post_date = None
+                
+                for meta in all_docs.get("metadatas", []):
+                    slug = meta.get("post_slug")
+                    if slug:
+                        unique_slugs.add(slug)
+                    post_date = meta.get("post_date")
+                    if post_date:
+                        post_dates.append(post_date)
+                        # Track the latest post URL
+                        if latest_post_date is None or post_date > latest_post_date:
+                            latest_post_date = post_date
+                            latest_post_url = meta.get("post_url")
+                            latest_post_title = meta.get("post_title")
+                
+                stats["unique_blog_posts"] = len(unique_slugs)
+                stats["total_blog_chunks"] = len(all_docs.get("metadatas", []))
+                
+                if post_dates:
+                    stats["oldest_post_date"] = min(post_dates)
+                    stats["newest_post_date"] = max(post_dates)
+                
+                # Add latest post URL and title
+                if latest_post_url:
+                    stats["last_blog_post_url"] = latest_post_url
+                if latest_post_title:
+                    stats["last_blog_post_title"] = latest_post_title
+                
+            except Exception as e:
+                logger.warning(f"Could not get detailed blog stats from vectorstore: {e}")
+        
+        return stats
+        
+    except Exception as e:
+        logger.error(f"Error getting blog stats: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get blog stats: {str(e)}"
         )
 
 

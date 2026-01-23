@@ -1266,6 +1266,11 @@ export function initializeChatApp(options: InitOptions = {}) {
             <button class="copy-button" data-action="copy-message" title="Copy message">
               <img src="/images/copy-icon.svg?v=2" alt="Copy" width="16" height="16">
             </button>
+            <button class="retry-button" data-action="retry-message" title="Regenerate response" data-trace-id="${msg.traceId || ''}">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M1 8a7 7 0 0 1 7-7v2M15 8a7 7 0 0 1-7 7v-2M8 1l2 2-2 2M8 15l-2-2 2-2"/>
+              </svg>
+            </button>
             ${!isReadOnly ? `
             <button class="feedback-btn thumbs-up" data-action="feedback" data-rating="thumbs_up" title="Good response">
               <img src="/images/thumbs-up-icon.svg?v=2" alt="Thumbs up" width="16" height="16">
@@ -2089,12 +2094,17 @@ export function initializeChatApp(options: InitOptions = {}) {
     div.className = "message " + sender;
     
     if (sender === "bot") {
-      // For bot messages, wrap content and add copy button + feedback buttons
+      // For bot messages, wrap content and add copy button + retry button + feedback buttons
       div.innerHTML = `
         <div class="message-content">${content}</div>
         <div class="feedback-buttons">
           <button class="copy-button" data-action="copy-message" title="Copy message">
             <img src="/images/copy-icon.svg?v=2" alt="Copy" width="16" height="16">
+          </button>
+          <button class="retry-button" data-action="retry-message" title="Regenerate response" data-trace-id="${traceId || ''}">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M1 8a7 7 0 0 1 7-7v2M15 8a7 7 0 0 1-7 7v-2M8 1l2 2-2 2M8 15l-2-2 2-2"/>
+            </svg>
           </button>
           <button class="feedback-btn thumbs-up" data-action="feedback" data-rating="thumbs_up" title="Good response">
             <img src="/images/thumbs-up-icon.svg?v=2" alt="Thumbs up" width="16" height="16">
@@ -2536,6 +2546,11 @@ export function initializeChatApp(options: InitOptions = {}) {
                     <button class="copy-button" data-action="copy-message" title="Copy message">
                       <img src="/images/copy-icon.svg?v=2" alt="Copy" width="16" height="16">
                     </button>
+                    <button class="retry-button" data-action="retry-message" title="Regenerate response" data-trace-id="${traceId || ''}">
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M1 8a7 7 0 0 1 7-7v2M15 8a7 7 0 0 1-7 7v-2M8 1l2 2-2 2M8 15l-2-2 2-2"/>
+                      </svg>
+                    </button>
                     <button class="feedback-btn thumbs-up ${feedbackDisabledClass}" 
                             data-action="feedback" 
                             data-rating="thumbs_up"
@@ -2674,6 +2689,206 @@ export function initializeChatApp(options: InitOptions = {}) {
         saveCurrentSession();
       }
       /* ================================ */
+    }
+  }
+
+  async function retryMessage(button: HTMLElement) {
+    // ✅ PHASE-1: Check per-session state
+    if (!sessionId || isSessionGenerating(sessionId)) {
+      console.warn('[RETRY] Cannot retry - session is generating or no session ID');
+      return;
+    }
+    
+    // Find the message container
+    const messageDiv = button.closest('.message.bot') as HTMLElement;
+    if (!messageDiv) {
+      console.error('[RETRY] Could not find message container');
+      return;
+    }
+    
+    // Get trace ID from message
+    const traceId = messageDiv.dataset.traceId || button.getAttribute('data-trace-id');
+    if (!traceId) {
+      console.error('[RETRY] No trace ID found for message');
+      alert('Cannot retry: No trace ID found. The response may not have been logged yet.');
+      return;
+    }
+    
+    // Find the user question from conversation history
+    // Use the messages container from the DOM, not the variable
+    const messagesContainer = document.querySelector('.messages-list') || document.querySelector('#messages') || messagesDiv;
+    if (!messagesContainer) {
+      console.error('[RETRY] Could not find messages container');
+      return;
+    }
+    
+    const messages = Array.from(messagesContainer.querySelectorAll('.message'));
+    const currentMessageIndex = messages.indexOf(messageDiv);
+    let userQuestion = '';
+    
+    // Look backwards for the user message
+    for (let i = currentMessageIndex - 1; i >= 0; i--) {
+      const msg = messages[i] as HTMLElement;
+      if (msg.classList.contains('user')) {
+        // Get text content, handling both plain text and HTML
+        const textContent = msg.textContent?.trim() || msg.innerText?.trim() || '';
+        if (textContent) {
+          userQuestion = textContent;
+          break;
+        }
+      }
+    }
+    
+    if (!userQuestion) {
+      console.error('[RETRY] Could not find user question for retry');
+      alert('Could not find the original question. Please ask again.');
+      return;
+    }
+    
+    // Get retry attempt count from button or message
+    let retryAttempt = 1;
+    const attemptAttr = button.getAttribute('data-retry-attempt');
+    if (attemptAttr) {
+      retryAttempt = parseInt(attemptAttr, 10) + 1;
+    } else {
+      // Check if this message has been retried before
+      const existingAttempt = messageDiv.dataset.retryAttempt;
+      if (existingAttempt) {
+        retryAttempt = parseInt(existingAttempt, 10) + 1;
+      }
+    }
+    
+    // Disable retry button and show loading
+    button.disabled = true;
+    button.classList.add('loading');
+    const originalHTML = button.innerHTML;
+    button.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" class="spinning"><path d="M1 8a7 7 0 0 1 7-7v2M15 8a7 7 0 0 1-7 7v-2M8 1l2 2-2 2M8 15l-2-2 2-2"/></svg>';
+    
+    // Store retry attempt on message
+    messageDiv.dataset.retryAttempt = retryAttempt.toString();
+    button.setAttribute('data-retry-attempt', retryAttempt.toString());
+    
+    try {
+      // Get current user
+      const currentUser = getCurrentUser();
+      if (!currentUser) {
+        throw new Error('User not authenticated');
+      }
+      
+      console.log('[RETRY] Starting retry:', { question: userQuestion, traceId, attempt: retryAttempt });
+      
+      // Call retry endpoint
+      const response = await apiFetch('/chat/retry/stream', {
+        method: 'POST',
+        body: JSON.stringify({
+          question: userQuestion,
+          session_id: sessionId,
+          previous_trace_id: traceId,
+          retry_attempt: retryAttempt
+        })
+      });
+      
+      if (response.status === 401 || response.status === 403) {
+        console.error("[RETRY] Authentication failed, redirecting to login");
+        localStorage.removeItem('user');
+        window.location.href = "/login?error=session_expired";
+        return;
+      }
+      
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => 'Unknown error');
+        console.error('[RETRY] HTTP error:', response.status, errorText);
+        throw new Error(`Retry failed: ${response.statusText}`);
+      }
+      
+      // Check if response body exists
+      if (!response.body) {
+        throw new Error('No response body received');
+      }
+      
+      // Get message content area
+      const messageContent = messageDiv.querySelector('.message-content') as HTMLElement;
+      if (!messageContent) {
+        throw new Error('Could not find message content area');
+      }
+      
+      // Clear existing content and show loading
+      messageContent.innerHTML = '<div class="thinking">Regenerating response<span class="thinking-dots"><span></span><span></span><span></span></span></div>';
+      
+      // Stream the new response
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let newTraceId: string | null = null;
+      let fullResponse = '';
+      let isStreamingContent = false;
+      
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              
+              if (data.type === 'status') {
+                console.log('[RETRY] Status:', data.message);
+                // Update status message
+                if (!isStreamingContent) {
+                  messageContent.innerHTML = `<div class="thinking">${data.message}<span class="thinking-dots"><span></span><span></span><span></span></span></div>`;
+                }
+              } else if (data.type === 'token') {
+                // Start streaming content
+                if (!isStreamingContent) {
+                  isStreamingContent = true;
+                  messageContent.innerHTML = '';
+                  fullResponse = '';
+                }
+                // Append token to response
+                fullResponse += data.token;
+                messageContent.innerHTML = renderMarkdown(fullResponse);
+                autoScrollToBottom();
+              } else if (data.type === 'done') {
+                // Complete
+                fullResponse = data.full_response || fullResponse;
+                newTraceId = data.trace_id || null;
+                if (newTraceId) {
+                  messageDiv.dataset.traceId = newTraceId;
+                  // Update retry button trace ID
+                  button.setAttribute('data-trace-id', newTraceId);
+                }
+                messageContent.innerHTML = renderMarkdown(fullResponse);
+                console.log('[RETRY] Retry completed successfully');
+              } else if (data.type === 'error') {
+                throw new Error(data.message || 'Retry failed');
+              }
+            } catch (e) {
+              console.error('[RETRY] Error parsing SSE data:', e, 'Line:', line);
+            }
+          }
+        }
+      }
+      
+      // Restore button
+      button.disabled = false;
+      button.classList.remove('loading');
+      button.innerHTML = originalHTML;
+      
+      console.log('[RETRY] Successfully retried message');
+      
+    } catch (error) {
+      console.error('[RETRY] Error:', error);
+      alert(`Failed to retry: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      
+      // Restore button
+      button.disabled = false;
+      button.classList.remove('loading');
+      button.innerHTML = originalHTML;
     }
   }
 
@@ -4399,6 +4614,9 @@ export function initializeChatApp(options: InitOptions = {}) {
           break;
         case 'copy-user-message':
           copyUserMessage(button);
+          break;
+        case 'retry-message':
+          retryMessage(button);
           break;
         case 'feedback':
           const rating = button.getAttribute('data-rating');

@@ -240,6 +240,10 @@ class RAGPipelineTrace:
     def start_synthesis(self, context: str, metadata: Optional[Dict[str, Any]] = None):
         """Start synthesis span."""
         try:
+            if not getattr(self, "query_span", None):
+                print("[LANGFUSE][WARN] start_synthesis skipped: query_span not initialized")
+                return None
+
             self.synthesize_span = self.query_span.span(
                 name="synthesize",
                 input={"context_length": len(context)},
@@ -248,12 +252,17 @@ class RAGPipelineTrace:
             return self.synthesize_span
             
         except Exception as e:
-            print(f"[ERROR] Synthesis span failed: {e}")
+            print(f"[LANGFUSE][ERROR] start_synthesis failed: {e}")
+            self.synthesize_span = None
             return None
     
     def log_llm_generation(self, prompt: str, response: str, model: str = "gpt-4o-mini", metadata: Optional[Dict[str, Any]] = None):
         """Log LLM generation span."""
         try:
+            if not getattr(self, "synthesize_span", None):
+                print("[LANGFUSE][WARN] log_llm_generation skipped: synthesize_span not initialized")
+                return None
+
             return self.synthesize_span.generation(
                 name="openai_llm",
                 model=model,
@@ -262,7 +271,7 @@ class RAGPipelineTrace:
                 metadata={**(metadata or {}), "timestamp": datetime.now(timezone.utc).isoformat()}
             )
         except Exception as e:
-            print(f"[ERROR] LLM generation failed: {e}")
+            print(f"[LANGFUSE][ERROR] log_llm_generation failed: {e}")
             return None
     
     def log_response_generation(self, final_response: str, metadata: Optional[Dict[str, Any]] = None):

@@ -890,6 +890,31 @@ export default function ChatSidebar({
                       </svg>
                       <span>Most Asked Questions</span>
                     </div>
+                    <div 
+                      className="dropdown-item admin-item" 
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.nativeEvent.stopImmediatePropagation();
+                        console.log('[Admin Nav] Blog Management clicked - mousedown');
+                        handleAdminNavigation('/admin/blog', e);
+                      }}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.nativeEvent.stopImmediatePropagation();
+                        console.log('[Admin Nav] Blog Management clicked - click');
+                        handleAdminNavigation('/admin/blog', e);
+                      }}
+                      style={{ cursor: 'pointer', pointerEvents: 'auto', position: 'relative', zIndex: 10000 }}
+                    >
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                        <path d="M8 7h8M8 11h8M8 15h4" />
+                      </svg>
+                      <span>Blog Management</span>
+                    </div>
                   </div>
                 )}
               </>
