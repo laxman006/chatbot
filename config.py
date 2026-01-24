@@ -287,6 +287,11 @@ BLOG_MAX_PAGES = 14        # Maximum number of pages to fetch (total: 1500 posts
 # Allow starting from a specific page to continue partial fetches
 BLOG_START_PAGE = int(os.getenv("BLOG_START_PAGE", "1"))
 
+# Blog polling configuration for automatic ingestion
+BLOG_POLLING_ENABLED = os.getenv("BLOG_POLLING_ENABLED", "false").lower() == "true"
+BLOG_POLLING_INTERVAL = int(os.getenv("BLOG_POLLING_INTERVAL", "3600"))  # Polling interval in seconds (default: 1 hour)
+BLOG_LAST_POLL_FILE = os.getenv("BLOG_LAST_POLL_FILE", "./data/blog_last_poll.json")
+
 # Langfuse configuration for observability
 LANGFUSE_PUBLIC_KEY = os.getenv("LANGFUSE_PUBLIC_KEY")
 LANGFUSE_SECRET_KEY = os.getenv("LANGFUSE_SECRET_KEY")
@@ -353,6 +358,12 @@ ENABLE_TRANSCRIPT_PROCESSING = os.getenv("ENABLE_TRANSCRIPT_PROCESSING", "false"
 SHAREPOINT_TRANSCRIPTS_SITE_URL = os.getenv("SHAREPOINT_TRANSCRIPTS_SITE_URL", "https://cloudfuzecom.sharepoint.com/sites/Repository25")
 SHAREPOINT_TRANSCRIPTS_FOLDER_PATH = os.getenv("SHAREPOINT_TRANSCRIPTS_FOLDER_PATH", "Neutara Labs/Transcripts")
 
+# SharePoint Limitations and Features Configuration
+ENABLE_SHAREPOINT_LIMITATIONS_SOURCE = os.getenv("ENABLE_SHAREPOINT_LIMITATIONS_SOURCE", "false").lower() == "true"
+SHAREPOINT_LIMITATIONS_SITE_URL = os.getenv("SHAREPOINT_LIMITATIONS_SITE_URL", "https://cloudfuzecom.sharepoint.com/sites/Repository25")
+SHAREPOINT_LIMITATIONS_FOLDER_PATH = os.getenv("SHAREPOINT_LIMITATIONS_FOLDER_PATH", "Neutara Labs/Limitations and features")
+SHAREPOINT_LIMITATIONS_MAX_DEPTH = int(os.getenv("SHAREPOINT_LIMITATIONS_MAX_DEPTH", "999"))
+
 # PPTX Extraction Pipeline
 # Extract PPTX files and add to vectorstore (production-ready)
 ENABLE_PPTX_PIPELINE = os.getenv("ENABLE_PPTX_PIPELINE", "false").lower() == "true"
@@ -381,7 +392,7 @@ def _clean_env_value(value: str, default: str = "") -> str:
     cleaned = value.split('#')[0].strip()
     return cleaned if cleaned else default
 
-JIRA_PROJECT_KEYS = _clean_env_value(os.getenv("JIRA_PROJECT_KEYS", "PRI,QAB"), "PRI,QAB")  # Comma-separated project keys (PRI=Production Issue, QAB=Quality-Analyst-Board)
+JIRA_PROJECT_KEYS = _clean_env_value(os.getenv("JIRA_PROJECT_KEYS", "PRI"), "PRI")  # Comma-separated project keys (PRI=Production Issue)
 JIRA_MAX_ISSUES = int(os.getenv("JIRA_MAX_ISSUES", "10000"))  # Maximum issues to fetch (PRI=9000 + QAB=453 = 9453 total)
 JIRA_JQL_QUERY = _clean_env_value(os.getenv("JIRA_JQL_QUERY", ""), "")  # Optional: Custom JQL query (overrides project keys)
 JIRA_DATE_FILTER = _clean_env_value(os.getenv("JIRA_DATE_FILTER", ""), "")  # Options: last_month, last_3_months, last_6_months, last_year, or empty for all tickets
@@ -465,6 +476,11 @@ JIRA_CHUNK_MIN_TOKENS = int(os.getenv("JIRA_CHUNK_MIN_TOKENS", "120"))  # Minimu
 ENABLE_DEDUPLICATION = os.getenv("ENABLE_DEDUPLICATION", "true").lower() == "true"
 DEDUP_THRESHOLD = float(os.getenv("DEDUP_THRESHOLD", "0.98"))  # Cosine similarity threshold (0.98 = only exact duplicates, 98%+ similar)
 
+# SharePoint URL-based Deduplication Control
+# When enabled, forces reprocessing of SharePoint documents even if URL already exists
+# Useful when document content or metadata has changed (e.g., enhanced Excel processor)
+FORCE_SHAREPOINT_REPROCESS = os.getenv("FORCE_SHAREPOINT_REPROCESS", "false").lower() == "true"
+
 # Unstructured Library Configuration
 ENABLE_UNSTRUCTURED = os.getenv("ENABLE_UNSTRUCTURED", "true").lower() == "true"  # Use Unstructured for complex files
 ENABLE_OCR = os.getenv("ENABLE_OCR", "true").lower() == "true"  # Enable OCR for scanned PDFs
@@ -529,6 +545,35 @@ TRANSCRIPT_QA_CHUNK_TOKENS = int(os.getenv("TRANSCRIPT_QA_CHUNK_TOKENS", "500"))
 TRANSCRIPT_FEATURE_CHUNK_TOKENS = int(os.getenv("TRANSCRIPT_FEATURE_CHUNK_TOKENS", "600"))  # Target tokens for feature chunks
 TRANSCRIPT_OBJECTION_CHUNK_TOKENS = int(os.getenv("TRANSCRIPT_OBJECTION_CHUNK_TOKENS", "400"))  # Target tokens for objection chunks
 TRANSCRIPT_RAW_CHUNK_TOKENS = int(os.getenv("TRANSCRIPT_RAW_CHUNK_TOKENS", "800"))  # Target tokens for raw transcript chunks
+
+# ============================================================================
+# RETRY MODE CONFIGURATION - Self-Healing RAG with Gradual Step-Up
+# ============================================================================
+
+# Retry Mode Configuration - Gradual Step-Up
+# Attempt 1: 25% increase
+RETRY_ATTEMPT_1_K_DENSE = int(os.getenv("RETRY_ATTEMPT_1_K_DENSE", "75"))
+RETRY_ATTEMPT_1_K_BM25 = int(os.getenv("RETRY_ATTEMPT_1_K_BM25", "75"))
+RETRY_ATTEMPT_1_K_FINAL = int(os.getenv("RETRY_ATTEMPT_1_K_FINAL", "10"))
+
+# Attempt 2: 50% increase
+RETRY_ATTEMPT_2_K_DENSE = int(os.getenv("RETRY_ATTEMPT_2_K_DENSE", "90"))
+RETRY_ATTEMPT_2_K_BM25 = int(os.getenv("RETRY_ATTEMPT_2_K_BM25", "90"))
+RETRY_ATTEMPT_2_K_FINAL = int(os.getenv("RETRY_ATTEMPT_2_K_FINAL", "12"))
+
+# Attempt 3+: 100% increase
+RETRY_ATTEMPT_3_PLUS_K_DENSE = int(os.getenv("RETRY_ATTEMPT_3_PLUS_K_DENSE", "120"))
+RETRY_ATTEMPT_3_PLUS_K_BM25 = int(os.getenv("RETRY_ATTEMPT_3_PLUS_K_BM25", "120"))
+RETRY_ATTEMPT_3_PLUS_K_FINAL = int(os.getenv("RETRY_ATTEMPT_3_PLUS_K_FINAL", "15"))
+
+RETRY_DENSE_WEIGHT = float(os.getenv("RETRY_DENSE_WEIGHT", "0.6"))  # Adjusted weight for retry
+RETRY_BM25_WEIGHT = float(os.getenv("RETRY_BM25_WEIGHT", "0.4"))   # Adjusted weight for retry
+RETRY_FORCE_EXPANSION = os.getenv("RETRY_FORCE_EXPANSION", "true").lower() == "true"
+RETRY_SCORE_THRESHOLD_ADJUSTMENT = float(os.getenv("RETRY_SCORE_THRESHOLD_ADJUSTMENT", "-0.05"))  # Lower threshold for more recall
+
+# Answer Quality Check Configuration
+ENABLE_ANSWER_QUALITY_CHECK = os.getenv("ENABLE_ANSWER_QUALITY_CHECK", "true").lower() == "true"
+ANSWER_QUALITY_LLM_TEMPERATURE = float(os.getenv("ANSWER_QUALITY_LLM_TEMPERATURE", "0.3"))
 
 # ============================================================================
 # INTELLIGENT QUERY ROUTING CONFIGURATION

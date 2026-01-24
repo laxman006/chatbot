@@ -317,8 +317,8 @@ class JiraProcessor:
         Build JQL query with custom date range (for incremental updates).
         
         Args:
-            start_date: Start date in YYYY-MM-DD format
-            end_date: End date in YYYY-MM-DD format (None = till now)
+            start_date: Start date/datetime in YYYY-MM-DD or YYYY-MM-DD HH:mm format
+            end_date: End date/datetime in YYYY-MM-DD or YYYY-MM-DD HH:mm format (None = till now)
         
         Returns:
             JQL query string
@@ -349,10 +349,10 @@ class JiraProcessor:
     
     def fetch_tickets_since(self, since_date: str, max_issues: int = None) -> List[Dict[str, Any]]:
         """
-        Fetch tickets updated since a specific date (for incremental updates).
+        Fetch tickets updated since a specific date/datetime (for incremental updates).
         
         Args:
-            since_date: Date string in YYYY-MM-DD format
+            since_date: Date/datetime string in YYYY-MM-DD or YYYY-MM-DD HH:mm format
             max_issues: Maximum issues to fetch (None = use self.max_issues)
         
         Returns:

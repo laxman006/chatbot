@@ -43,7 +43,7 @@ export default function JiraSyncPanel() {
   const loadStatus = async () => {
     try {
       const token = localStorage.getItem("authToken");
-      const response = await fetch("/api/proxy/jira/sync/status", {
+      const response = await fetch("/api/proxy/api/jira/sync/status", {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -66,7 +66,7 @@ export default function JiraSyncPanel() {
 
     try {
       const token = localStorage.getItem("authToken");
-      const response = await fetch("/api/proxy/jira/sync", {
+      const response = await fetch("/api/proxy/api/jira/sync", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -101,41 +101,60 @@ export default function JiraSyncPanel() {
     }
   };
 
+  const formatDate = (dateString: string | null): string => {
+    if (!dateString) return 'Never';
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return dateString;
+    }
+  };
+
   if (isLoading) {
     return (
-      <div className="bg-white/10 backdrop-blur-lg rounded-lg p-6 text-white">
-        <p>Loading sync status...</p>
+      <div style={{ padding: '20px', backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '10px', color: '#1d4ed8', textAlign: 'center' }}>
+        Loading sync status...
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <div>
       {/* Alerts Section */}
       {syncStatus?.has_alerts && syncStatus.alerts && syncStatus.alerts.length > 0 && (
-        <div className="space-y-3">
+        <div style={{ marginBottom: '24px' }}>
           {syncStatus.alerts.map((alert, index) => (
             <div
               key={index}
-              className={`p-4 rounded-lg border ${
-                alert.type === "error"
-                  ? "bg-red-500/20 border-red-500"
-                  : "bg-yellow-500/20 border-yellow-500"
-              }`}
+              style={{
+                padding: '12px 16px',
+                backgroundColor: alert.type === "error" ? '#fef2f2' : '#fffbeb',
+                border: `1px solid ${alert.type === "error" ? '#fecdd3' : '#fde68a'}`,
+                borderRadius: '10px',
+                color: alert.type === "error" ? '#b91c1c' : '#92400e',
+                marginBottom: '12px',
+              }}
             >
-              <div className="flex items-start gap-3">
-                <span className="text-2xl">
+              <div style={{ display: 'flex', alignItems: 'start', gap: '12px' }}>
+                <span style={{ fontSize: '20px' }}>
                   {alert.type === "error" ? "❌" : "⚠️"}
                 </span>
-                <div className="flex-1">
-                  <div className="font-bold text-white mb-1">
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600, marginBottom: '4px' }}>
                     {alert.message}
                   </div>
-                  <div className="text-sm text-gray-300 mb-2">
+                  <div style={{ fontSize: '13px', marginBottom: '4px' }}>
                     {alert.details}
                   </div>
                   {alert.last_attempt && (
-                    <div className="text-xs text-gray-400">
+                    <div style={{ fontSize: '12px', color: '#6b7280' }}>
                       Last attempt: {alert.last_attempt}
                     </div>
                   )}
@@ -146,158 +165,316 @@ export default function JiraSyncPanel() {
         </div>
       )}
 
-      {/* Sync Status Card */}
-      <div className="bg-white/10 backdrop-blur-lg rounded-lg p-6">
-        <h2 className="text-2xl font-bold text-white mb-4">Sync Status</h2>
+      {/* Trigger Sync Button Section */}
+      <div
+        style={{
+          padding: '24px',
+          border: '2px solid #e5e7eb',
+          borderRadius: '12px',
+          marginBottom: '24px',
+          backgroundColor: '#f9fafb',
+        }}
+      >
+        <div style={{ marginBottom: '16px' }}>
+          <h2 style={{ fontSize: '20px', fontWeight: 600, color: '#111827', marginBottom: '8px' }}>
+            Trigger Jira Sync
+          </h2>
+          <p style={{ color: '#6b7280', fontSize: '14px' }}>
+            Manually trigger a Jira sync to fetch new and updated tickets from Jira.
+          </p>
+        </div>
 
         {/* Message */}
         {message && (
           <div
-            className={`mb-4 p-4 rounded-lg ${
-              message.type === "success"
-                ? "bg-green-500/20 border border-green-500 text-green-100"
-                : message.type === "error"
-                ? "bg-red-500/20 border border-red-500 text-red-100"
-                : "bg-blue-500/20 border border-blue-500 text-blue-100"
-            }`}
+            style={{
+              padding: '12px 16px',
+              backgroundColor:
+                message.type === "success"
+                  ? '#f0fdf4'
+                  : message.type === "error"
+                  ? '#fef2f2'
+                  : '#eff6ff',
+              border: `1px solid ${
+                message.type === "success"
+                  ? '#bbf7d0'
+                  : message.type === "error"
+                  ? '#fecdd3'
+                  : '#bfdbfe'
+              }`,
+              borderRadius: '10px',
+              color:
+                message.type === "success"
+                  ? '#166534'
+                  : message.type === "error"
+                  ? '#b91c1c'
+                  : '#1d4ed8',
+              marginBottom: '16px',
+            }}
           >
             {message.text}
           </div>
         )}
 
-        {/* Status Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          <div className="bg-white/5 rounded-lg p-4">
-            <div className="text-sm text-gray-400 mb-1">Vectorstore Status</div>
-            <div
-              className={`text-2xl font-bold ${
-                syncStatus?.status === "active"
-                  ? "text-green-400"
-                  : "text-red-400"
-              }`}
-            >
-              {syncStatus?.status === "active" ? "Active" : "Inactive"}
-            </div>
-          </div>
-
-          <div className="bg-white/5 rounded-lg p-4">
-            <div className="text-sm text-gray-400 mb-1">Last Sync</div>
-            <div className="text-2xl font-bold text-white">
-              {syncStatus?.last_sync || "Never"}
-            </div>
-          </div>
-
-          <div className="bg-white/5 rounded-lg p-4">
-            <div className="text-sm text-gray-400 mb-1">Total Tickets</div>
-            <div className="text-2xl font-bold text-purple-400">
-              {syncStatus?.total_documents?.toLocaleString() || "0"}
-            </div>
-          </div>
-        </div>
-
-        {/* Sync Button */}
         <button
           onClick={handleSync}
           disabled={isSyncing}
-          className="w-full px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 disabled:from-gray-600 disabled:to-gray-600 disabled:cursor-not-allowed text-white rounded-lg transition-all font-semibold text-lg shadow-lg"
+          style={{
+            padding: '14px 28px',
+            borderRadius: '10px',
+            border: 'none',
+            background: isSyncing ? '#9ca3af' : '#0129ac',
+            color: 'white',
+            cursor: isSyncing ? 'not-allowed' : 'pointer',
+            fontWeight: 700,
+            fontSize: '16px',
+            minWidth: '200px',
+            transition: 'all 0.2s',
+          }}
+          onMouseEnter={(e) => {
+            if (!isSyncing) {
+              e.currentTarget.style.background = '#011a8a';
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (!isSyncing) {
+              e.currentTarget.style.background = '#0129ac';
+            }
+          }}
         >
-          {isSyncing ? (
-            <>
-              <span className="inline-block animate-spin mr-2">⟳</span>
-              Syncing...
-            </>
-          ) : (
-            "Trigger Manual Sync"
-          )}
+          {isSyncing ? 'Syncing...' : 'Trigger Manual Sync'}
         </button>
-
-        <p className="text-sm text-gray-400 mt-3 text-center">
+        <p style={{ color: '#6b7280', fontSize: '13px', marginTop: '12px' }}>
           This will fetch all new and updated tickets since the last sync
         </p>
       </div>
 
-      {/* Sync History */}
-      {syncStatus?.sync_history && syncStatus.sync_history.length > 0 && (
-        <div className="bg-white/10 backdrop-blur-lg rounded-lg p-6">
-          <h3 className="text-xl font-bold text-white mb-4">Sync History</h3>
-
-          <div className="space-y-2">
-            {syncStatus.sync_history.slice(0, 10).map((entry, index) => (
+      {/* Status Cards */}
+      {syncStatus && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px', marginBottom: '24px' }}>
+          {/* Vectorstore Status Card */}
+          <div
+            style={{
+              padding: '20px',
+              border: '1px solid #e5e7eb',
+              borderRadius: '12px',
+              backgroundColor: 'white',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: '12px' }}>
               <div
-                key={index}
-                className="bg-white/5 rounded-lg p-4"
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-4">
-                    <div
-                      className={`w-2 h-2 rounded-full ${
-                        entry.status === "success"
-                          ? "bg-green-400"
-                          : entry.status === "no_updates"
-                          ? "bg-blue-400"
-                          : "bg-red-400"
-                      }`}
-                    />
-                    <div>
-                      <div className="text-white font-medium">
-                        {new Date(entry.timestamp).toLocaleString()}
-                      </div>
-                      <div className="text-sm text-gray-400">
-                        {entry.documents_added > 0
-                          ? `Added ${entry.documents_added} documents`
-                          : entry.status === "no_updates"
-                          ? "No new tickets"
-                          : "Sync failed"}
-                      </div>
-                    </div>
-                  </div>
-                  <div
-                    className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                      entry.status === "success"
-                        ? "bg-green-500/20 text-green-300"
-                        : entry.status === "no_updates"
-                        ? "bg-blue-500/20 text-blue-300"
-                        : "bg-red-500/20 text-red-300"
-                    }`}
-                  >
-                    {entry.status}
-                  </div>
-                </div>
-                {entry.error && (
-                  <div className="ml-6 mt-2 text-xs text-red-300 bg-red-500/10 p-2 rounded">
-                    Error: {entry.error}
-                  </div>
-                )}
+                style={{
+                  width: '12px',
+                  height: '12px',
+                  borderRadius: '50%',
+                  backgroundColor: syncStatus.status === "active" ? '#10b981' : '#ef4444',
+                  marginRight: '8px',
+                }}
+              />
+              <h3 style={{ fontSize: '16px', fontWeight: 600, color: '#111827' }}>
+                Vectorstore Status
+              </h3>
+            </div>
+            <div style={{ fontSize: '14px', color: '#6b7280', lineHeight: '1.6' }}>
+              <div>
+                <strong>Status:</strong>{' '}
+                <span style={{ color: syncStatus.status === "active" ? '#10b981' : '#ef4444' }}>
+                  {syncStatus.status === "active" ? 'Active' : 'Inactive'}
+                </span>
               </div>
-            ))}
+            </div>
+          </div>
+
+          {/* Last Sync Card */}
+          <div
+            style={{
+              padding: '20px',
+              border: '1px solid #e5e7eb',
+              borderRadius: '12px',
+              backgroundColor: 'white',
+            }}
+          >
+            <h3 style={{ fontSize: '16px', fontWeight: 600, color: '#111827', marginBottom: '12px' }}>
+              Last Sync
+            </h3>
+            <div style={{ fontSize: '14px', color: '#6b7280', lineHeight: '1.6' }}>
+              <div>
+                <strong>Time:</strong> {formatDate(syncStatus.last_sync)}
+              </div>
+              {syncStatus.last_status && (
+                <div style={{ marginTop: '8px' }}>
+                  <strong>Status:</strong>{' '}
+                  <span style={{ color: syncStatus.last_status === "success" ? '#10b981' : syncStatus.last_status === "no_updates" ? '#3b82f6' : '#ef4444' }}>
+                    {syncStatus.last_status}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Total Tickets Card */}
+          <div
+            style={{
+              padding: '20px',
+              border: '1px solid #e5e7eb',
+              borderRadius: '12px',
+              backgroundColor: 'white',
+            }}
+          >
+            <h3 style={{ fontSize: '16px', fontWeight: 600, color: '#111827', marginBottom: '12px' }}>
+              Total Tickets
+            </h3>
+            <div style={{ fontSize: '14px', color: '#6b7280', lineHeight: '1.6' }}>
+              <div>
+                <strong>Documents:</strong>{' '}
+                <span style={{ color: '#111827', fontWeight: 600, fontSize: '18px' }}>
+                  {syncStatus.total_documents?.toLocaleString() || "0"}
+                </span>
+              </div>
+            </div>
           </div>
         </div>
       )}
 
-      {/* Quick Stats */}
-      <div className="bg-white/10 backdrop-blur-lg rounded-lg p-6">
-        <h3 className="text-xl font-bold text-white mb-4">Quick Info</h3>
+      {/* Sync History */}
+      {syncStatus?.sync_history && syncStatus.sync_history.length > 0 && (
+        <div
+          style={{
+            border: '1px solid #e5e7eb',
+            borderRadius: '12px',
+            overflow: 'hidden',
+            backgroundColor: 'white',
+            marginBottom: '24px',
+          }}
+        >
+          <div
+            style={{
+              padding: '16px 20px',
+              backgroundColor: '#f9fafb',
+              borderBottom: '1px solid #e5e7eb',
+            }}
+          >
+            <h2 style={{ fontSize: '18px', fontWeight: 600, color: '#111827' }}>
+              Sync History
+            </h2>
+          </div>
+          <div style={{ padding: '20px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {syncStatus.sync_history.slice(0, 10).map((entry, index) => (
+                <div
+                  key={index}
+                  style={{
+                    padding: '16px',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    backgroundColor: '#f9fafb',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <div
+                        style={{
+                          width: '8px',
+                          height: '8px',
+                          borderRadius: '50%',
+                          backgroundColor:
+                            entry.status === "success"
+                              ? '#10b981'
+                              : entry.status === "no_updates"
+                              ? '#3b82f6'
+                              : '#ef4444',
+                        }}
+                      />
+                      <div>
+                        <div style={{ fontSize: '14px', fontWeight: 600, color: '#111827' }}>
+                          {formatDate(entry.timestamp)}
+                        </div>
+                        <div style={{ fontSize: '13px', color: '#6b7280', marginTop: '4px' }}>
+                          {entry.documents_added > 0
+                            ? `Added ${entry.documents_added} documents`
+                            : entry.status === "no_updates"
+                            ? "No new tickets"
+                            : "Sync failed"}
+                        </div>
+                      </div>
+                    </div>
+                    <div
+                      style={{
+                        padding: '4px 12px',
+                        borderRadius: '12px',
+                        fontSize: '12px',
+                        fontWeight: 600,
+                        backgroundColor:
+                          entry.status === "success"
+                            ? '#d1fae5'
+                            : entry.status === "no_updates"
+                            ? '#dbeafe'
+                            : '#fee2e2',
+                        color:
+                          entry.status === "success"
+                            ? '#065f46'
+                            : entry.status === "no_updates"
+                            ? '#1e40af'
+                            : '#991b1b',
+                      }}
+                    >
+                      {entry.status}
+                    </div>
+                  </div>
+                  {entry.error && (
+                    <div style={{ marginLeft: '20px', marginTop: '8px', fontSize: '12px', color: '#b91c1c', backgroundColor: '#fef2f2', padding: '8px', borderRadius: '6px' }}>
+                      Error: {entry.error}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
-        <div className="space-y-3 text-sm">
-          <div className="flex justify-between">
-            <span className="text-gray-400">Sync Type:</span>
-            <span className="text-white font-medium">Incremental</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-gray-400">Project Keys:</span>
-            <span className="text-white font-medium">PRI, QAB</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-gray-400">Status Filter:</span>
-            <span className="text-white font-medium">
-              Resolved, Resolved-, Closed
-            </span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-gray-400">Automatic Sync:</span>
-            <span className="text-yellow-400 font-medium">
-              Coming Soon (Scheduled)
-            </span>
+      {/* Quick Info */}
+      <div
+        style={{
+          border: '1px solid #e5e7eb',
+          borderRadius: '12px',
+          overflow: 'hidden',
+          backgroundColor: 'white',
+        }}
+      >
+        <div
+          style={{
+            padding: '16px 20px',
+            backgroundColor: '#f9fafb',
+            borderBottom: '1px solid #e5e7eb',
+          }}
+        >
+          <h2 style={{ fontSize: '18px', fontWeight: 600, color: '#111827' }}>
+            Quick Info
+          </h2>
+        </div>
+        <div style={{ padding: '20px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px' }}>
+            <div>
+              <div style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>Sync Type</div>
+              <div style={{ fontSize: '14px', color: '#111827', fontWeight: 600 }}>Incremental</div>
+            </div>
+            <div>
+              <div style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>Project Keys</div>
+              <div style={{ fontSize: '14px', color: '#111827', fontWeight: 600 }}>PRI, QAB</div>
+            </div>
+            <div>
+              <div style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>Status Filter</div>
+              <div style={{ fontSize: '14px', color: '#111827', fontWeight: 600 }}>
+                Resolved, Resolved-, Closed
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>Automatic Sync</div>
+              <div style={{ fontSize: '14px', color: '#111827', fontWeight: 600 }}>
+                Scheduled (Daily)
+              </div>
+            </div>
           </div>
         </div>
       </div>

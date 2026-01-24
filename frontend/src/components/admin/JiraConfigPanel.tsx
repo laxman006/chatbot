@@ -45,7 +45,7 @@ export default function JiraConfigPanel() {
   const loadConfig = async () => {
     try {
       const token = localStorage.getItem("authToken");
-      const response = await fetch("/api/proxy/jira/config", {
+      const response = await fetch("/api/proxy/api/jira/config", {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -89,7 +89,7 @@ export default function JiraConfigPanel() {
 
     try {
       const token = localStorage.getItem("authToken");
-      const response = await fetch("/api/proxy/jira/config/test", {
+      const response = await fetch("/api/proxy/api/jira/config/test", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -127,7 +127,7 @@ export default function JiraConfigPanel() {
 
     try {
       const token = localStorage.getItem("authToken");
-      const response = await fetch("/api/proxy/jira/config", {
+      const response = await fetch("/api/proxy/api/jira/config", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -167,171 +167,300 @@ export default function JiraConfigPanel() {
 
   if (isLoading) {
     return (
-      <div className="bg-white/10 backdrop-blur-lg rounded-lg p-6 text-white">
-        <p>Loading configuration...</p>
+      <div style={{ padding: '20px', backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '10px', color: '#1d4ed8', textAlign: 'center' }}>
+        Loading configuration...
       </div>
     );
   }
 
   return (
-    <div className="bg-white/10 backdrop-blur-lg rounded-lg p-6 space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold text-white mb-4">
+    <div
+      style={{
+        border: '1px solid #e5e7eb',
+        borderRadius: '12px',
+        overflow: 'hidden',
+        backgroundColor: 'white',
+      }}
+    >
+      <div
+        style={{
+          padding: '16px 20px',
+          backgroundColor: '#f9fafb',
+          borderBottom: '1px solid #e5e7eb',
+        }}
+      >
+        <h2 style={{ fontSize: '18px', fontWeight: 600, color: '#111827', marginBottom: '4px' }}>
           Jira Configuration
         </h2>
-        <p className="text-gray-300 text-sm">
-          Configure your Jira connection details. The API token will be
-          encrypted when saved.
+        <p style={{ fontSize: '14px', color: '#6b7280' }}>
+          Configure your Jira connection details. The API token will be encrypted when saved.
         </p>
       </div>
 
-      {/* Message */}
-      {message && (
-        <div
-          className={`p-4 rounded-lg ${
-            message.type === "success"
-              ? "bg-green-500/20 border border-green-500 text-green-100"
-              : message.type === "error"
-              ? "bg-red-500/20 border border-red-500 text-red-100"
-              : "bg-blue-500/20 border border-blue-500 text-blue-100"
-          }`}
-        >
-          {message.text}
-        </div>
-      )}
+      <div style={{ padding: '24px' }}>
+        {/* Message */}
+        {message && (
+          <div
+            style={{
+              padding: '12px 16px',
+              backgroundColor:
+                message.type === "success"
+                  ? '#f0fdf4'
+                  : message.type === "error"
+                  ? '#fef2f2'
+                  : '#eff6ff',
+              border: `1px solid ${
+                message.type === "success"
+                  ? '#bbf7d0'
+                  : message.type === "error"
+                  ? '#fecdd3'
+                  : '#bfdbfe'
+              }`,
+              borderRadius: '10px',
+              color:
+                message.type === "success"
+                  ? '#166534'
+                  : message.type === "error"
+                  ? '#b91c1c'
+                  : '#1d4ed8',
+              marginBottom: '24px',
+            }}
+          >
+            {message.text}
+          </div>
+        )}
 
-      {/* Form */}
-      <div className="space-y-4">
-        {/* Server URL */}
-        <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2">
-            Jira Server URL *
-          </label>
-          <input
-            type="url"
-            value={config.server}
-            onChange={(e) => setConfig({ ...config, server: e.target.value })}
-            placeholder="https://yourcompany.atlassian.net"
-            className="w-full px-4 py-2 bg-white/5 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
-            required
-          />
-        </div>
-
-        {/* Email */}
-        <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2">
-            Email *
-          </label>
-          <input
-            type="email"
-            value={config.email}
-            onChange={(e) => setConfig({ ...config, email: e.target.value })}
-            placeholder="user@example.com"
-            className="w-full px-4 py-2 bg-white/5 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
-            required
-          />
-        </div>
-
-        {/* API Token */}
-        <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2">
-            API Token *
-          </label>
-          <div className="relative">
+        {/* Form */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          {/* Server URL */}
+          <div>
+            <label style={{ display: 'block', fontSize: '14px', fontWeight: 600, color: '#111827', marginBottom: '8px' }}>
+              Jira Server URL *
+            </label>
             <input
-              type={showToken ? "text" : "password"}
-              value={config.api_token}
-              onChange={(e) =>
-                setConfig({ ...config, api_token: e.target.value })
-              }
-              placeholder={tokenPlaceholder}
-              className="w-full px-4 py-2 bg-white/5 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 pr-12"
+              type="url"
+              value={config.server}
+              onChange={(e) => setConfig({ ...config, server: e.target.value })}
+              placeholder="https://yourcompany.atlassian.net"
+              style={{
+                width: '100%',
+                padding: '10px 14px',
+                border: '1px solid #d1d5db',
+                borderRadius: '8px',
+                fontSize: '14px',
+                color: '#111827',
+                backgroundColor: 'white',
+              }}
               required
             />
-            <button
-              type="button"
-              onClick={() => setShowToken(!showToken)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-300"
-            >
-              {showToken ? "👁️" : "👁️‍🗨️"}
-            </button>
           </div>
-          <p className="text-xs text-gray-400 mt-1">
-            Get your API token from Jira: Account Settings → Security → API
-            Tokens
-          </p>
+
+          {/* Email */}
+          <div>
+            <label style={{ display: 'block', fontSize: '14px', fontWeight: 600, color: '#111827', marginBottom: '8px' }}>
+              Email *
+            </label>
+            <input
+              type="email"
+              value={config.email}
+              onChange={(e) => setConfig({ ...config, email: e.target.value })}
+              placeholder="user@example.com"
+              style={{
+                width: '100%',
+                padding: '10px 14px',
+                border: '1px solid #d1d5db',
+                borderRadius: '8px',
+                fontSize: '14px',
+                color: '#111827',
+                backgroundColor: 'white',
+              }}
+              required
+            />
+          </div>
+
+          {/* API Token */}
+          <div>
+            <label style={{ display: 'block', fontSize: '14px', fontWeight: 600, color: '#111827', marginBottom: '8px' }}>
+              API Token *
+            </label>
+            <div style={{ position: 'relative' }}>
+              <input
+                type={showToken ? "text" : "password"}
+                value={config.api_token}
+                onChange={(e) =>
+                  setConfig({ ...config, api_token: e.target.value })
+                }
+                placeholder={tokenPlaceholder}
+                style={{
+                  width: '100%',
+                  padding: '10px 14px',
+                  paddingRight: '48px',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                  color: '#111827',
+                  backgroundColor: 'white',
+                }}
+                required
+              />
+              <button
+                type="button"
+                onClick={() => setShowToken(!showToken)}
+                style={{
+                  position: 'absolute',
+                  right: '12px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: '18px',
+                  color: '#6b7280',
+                }}
+              >
+                {showToken ? "👁️" : "👁️‍🗨️"}
+              </button>
+            </div>
+            <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '6px' }}>
+              Get your API token from Jira: Account Settings → Security → API Tokens
+            </p>
+          </div>
+
+          {/* Project Keys */}
+          <div>
+            <label style={{ display: 'block', fontSize: '14px', fontWeight: 600, color: '#111827', marginBottom: '8px' }}>
+              Project Keys *
+            </label>
+            <input
+              type="text"
+              value={config.project_keys.join(", ")}
+              onChange={(e) => handleProjectKeysChange(e.target.value)}
+              placeholder="PRI, QAB"
+              style={{
+                width: '100%',
+                padding: '10px 14px',
+                border: '1px solid #d1d5db',
+                borderRadius: '8px',
+                fontSize: '14px',
+                color: '#111827',
+                backgroundColor: 'white',
+              }}
+              required
+            />
+            <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '6px' }}>
+              Comma-separated project keys (e.g., PRI, QAB)
+            </p>
+          </div>
+
+          {/* Max Issues */}
+          <div>
+            <label style={{ display: 'block', fontSize: '14px', fontWeight: 600, color: '#111827', marginBottom: '8px' }}>
+              Maximum Issues to Fetch
+            </label>
+            <input
+              type="number"
+              value={config.max_issues}
+              onChange={(e) =>
+                setConfig({ ...config, max_issues: parseInt(e.target.value) || 10000 })
+              }
+              style={{
+                width: '100%',
+                padding: '10px 14px',
+                border: '1px solid #d1d5db',
+                borderRadius: '8px',
+                fontSize: '14px',
+                color: '#111827',
+                backgroundColor: 'white',
+              }}
+            />
+          </div>
+
+          {/* Date Filter (Optional) */}
+          <div>
+            <label style={{ display: 'block', fontSize: '14px', fontWeight: 600, color: '#111827', marginBottom: '8px' }}>
+              Date Filter (Optional)
+            </label>
+            <input
+              type="text"
+              value={config.date_filter}
+              onChange={(e) =>
+                setConfig({ ...config, date_filter: e.target.value })
+              }
+              placeholder="Leave empty for all tickets"
+              style={{
+                width: '100%',
+                padding: '10px 14px',
+                border: '1px solid #d1d5db',
+                borderRadius: '8px',
+                fontSize: '14px',
+                color: '#111827',
+                backgroundColor: 'white',
+              }}
+            />
+            <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '6px' }}>
+              Example: "3months" - Leave empty to fetch all tickets
+            </p>
+          </div>
         </div>
 
-        {/* Project Keys */}
-        <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2">
-            Project Keys *
-          </label>
-          <input
-            type="text"
-            value={config.project_keys.join(", ")}
-            onChange={(e) => handleProjectKeysChange(e.target.value)}
-            placeholder="PRI, QAB"
-            className="w-full px-4 py-2 bg-white/5 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
-            required
-          />
-          <p className="text-xs text-gray-400 mt-1">
-            Comma-separated project keys (e.g., PRI, QAB)
-          </p>
+        {/* Buttons */}
+        <div style={{ display: 'flex', gap: '12px', marginTop: '24px', paddingTop: '24px', borderTop: '1px solid #e5e7eb' }}>
+          <button
+            onClick={handleTest}
+            disabled={isTesting || !config.server || !config.email || !config.api_token}
+            style={{
+              padding: '10px 20px',
+              borderRadius: '8px',
+              border: 'none',
+              background: isTesting || !config.server || !config.email || !config.api_token ? '#9ca3af' : '#0129ac',
+              color: 'white',
+              cursor: isTesting || !config.server || !config.email || !config.api_token ? 'not-allowed' : 'pointer',
+              fontWeight: 600,
+              fontSize: '14px',
+              transition: 'all 0.2s',
+            }}
+            onMouseEnter={(e) => {
+              if (!isTesting && config.server && config.email && config.api_token) {
+                e.currentTarget.style.background = '#011a8a';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!isTesting && config.server && config.email && config.api_token) {
+                e.currentTarget.style.background = '#0129ac';
+              }
+            }}
+          >
+            {isTesting ? "Testing..." : "Test Connection"}
+          </button>
+
+          <button
+            onClick={handleSave}
+            disabled={isSaving || !config.server || !config.email || !config.api_token}
+            style={{
+              padding: '10px 20px',
+              borderRadius: '8px',
+              border: 'none',
+              background: isSaving || !config.server || !config.email || !config.api_token ? '#9ca3af' : '#10b981',
+              color: 'white',
+              cursor: isSaving || !config.server || !config.email || !config.api_token ? 'not-allowed' : 'pointer',
+              fontWeight: 600,
+              fontSize: '14px',
+              transition: 'all 0.2s',
+            }}
+            onMouseEnter={(e) => {
+              if (!isSaving && config.server && config.email && config.api_token) {
+                e.currentTarget.style.background = '#059669';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!isSaving && config.server && config.email && config.api_token) {
+                e.currentTarget.style.background = '#10b981';
+              }
+            }}
+          >
+            {isSaving ? "Saving..." : "Save Configuration"}
+          </button>
         </div>
-
-        {/* Max Issues */}
-        <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2">
-            Maximum Issues to Fetch
-          </label>
-          <input
-            type="number"
-            value={config.max_issues}
-            onChange={(e) =>
-              setConfig({ ...config, max_issues: parseInt(e.target.value) || 10000 })
-            }
-            className="w-full px-4 py-2 bg-white/5 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
-          />
-        </div>
-
-        {/* Date Filter (Optional) */}
-        <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2">
-            Date Filter (Optional)
-          </label>
-          <input
-            type="text"
-            value={config.date_filter}
-            onChange={(e) =>
-              setConfig({ ...config, date_filter: e.target.value })
-            }
-            placeholder="Leave empty for all tickets"
-            className="w-full px-4 py-2 bg-white/5 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
-          />
-          <p className="text-xs text-gray-400 mt-1">
-            Example: "3months" - Leave empty to fetch all tickets
-          </p>
-        </div>
-      </div>
-
-      {/* Buttons */}
-      <div className="flex gap-4 pt-4">
-        <button
-          onClick={handleTest}
-          disabled={isTesting || !config.server || !config.email || !config.api_token}
-          className="px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg transition-colors font-semibold"
-        >
-          {isTesting ? "Testing..." : "Test Connection"}
-        </button>
-
-        <button
-          onClick={handleSave}
-          disabled={isSaving || !config.server || !config.email || !config.api_token}
-          className="px-6 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg transition-colors font-semibold"
-        >
-          {isSaving ? "Saving..." : "Save Configuration"}
-        </button>
       </div>
     </div>
   );
