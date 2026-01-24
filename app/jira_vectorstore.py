@@ -183,13 +183,18 @@ def add_jira_tickets_incrementally():
         print("[WARNING] No previous sync found. Use build_jira_vectorstore() for initial load.")
         return None
     
-    # Convert ISO timestamp to YYYY-MM-DD format for JQL
-    from datetime import datetime
+    # Convert ISO timestamp to datetime format for JQL
+    from datetime import datetime, timedelta
     last_sync_dt = datetime.fromisoformat(last_sync)
-    since_date = last_sync_dt.strftime('%Y-%m-%d')
+    # Subtract 1 minute to catch tickets updated at the exact sync time
+    # This ensures we don't miss tickets that were updated right when sync ran
+    since_datetime = last_sync_dt - timedelta(minutes=1)
+    # Format as YYYY-MM-DD HH:mm for Jira JQL (supports datetime format)
+    since_date = since_datetime.strftime('%Y-%m-%d %H:%M')
     
     print(f"[*] Last sync: {last_sync_dt.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"[*] Fetching tickets updated since {since_date}...")
+    print(f"[DEBUG] Query will look for tickets updated >= '{since_date}'")
     
     # Fetch only new/updated tickets
     from app.jira_processor import JiraProcessor
@@ -197,11 +202,19 @@ def add_jira_tickets_incrementally():
     new_tickets = processor.fetch_tickets_since(since_date, max_issues=1000)
     
     if not new_tickets:
-        print("[INFO] No new tickets found")
+        print("[INFO] No new tickets found in Jira (query returned 0 results)")
+        print(f"[DEBUG] This could mean:")
+        print(f"[DEBUG]   1. No tickets were updated since {since_date}")
+        print(f"[DEBUG]   2. JQL query might have an issue")
+        print(f"[DEBUG]   3. Jira API might be filtering results")
         update_last_sync_time(status="no_updates", documents_added=0)
         return None
     
-    print(f"[OK] Found {len(new_tickets)} new/updated tickets")
+    print(f"[OK] Found {len(new_tickets)} new/updated tickets from Jira")
+    # Log sample ticket keys for debugging
+    if len(new_tickets) > 0:
+        sample_keys = [t['key'] for t in new_tickets[:5]]
+        print(f"[DEBUG] Sample ticket keys: {', '.join(sample_keys)}")
     
     # Load existing vectorstore
     existing_vectorstore = load_jira_vectorstore()
@@ -238,6 +251,32 @@ def add_jira_tickets_incrementally():
     
     print(f"[INFO] New tickets: {len(truly_new_tickets)}, Updated tickets: {len(updated_tickets)}")
     
+    # For updated tickets, delete old documents first to avoid duplicates
+    if updated_tickets:
+        print(f"[*] Deleting old documents for {len(updated_tickets)} updated tickets...")
+        updated_ticket_keys = [ticket['key'] for ticket in updated_tickets]
+        
+        try:
+            # Get all document IDs for updated tickets
+            all_docs = existing_vectorstore.get()
+            ids_to_delete = []
+            
+            if all_docs and 'ids' in all_docs and 'metadatas' in all_docs:
+                for idx, metadata in enumerate(all_docs['metadatas']):
+                    if metadata and metadata.get('ticket_key') in updated_ticket_keys:
+                        ids_to_delete.append(all_docs['ids'][idx])
+            
+            if ids_to_delete:
+                print(f"[*] Found {len(ids_to_delete)} old document chunks to delete")
+                existing_vectorstore.delete(ids=ids_to_delete)
+                print(f"[OK] Deleted {len(ids_to_delete)} old document chunks")
+            else:
+                print(f"[WARNING] No old documents found to delete for updated tickets")
+        except Exception as e:
+            print(f"[WARNING] Could not delete old documents: {e}")
+            import traceback
+            traceback.print_exc()
+    
     # Process new tickets into documents
     all_new_docs = []
     
@@ -245,11 +284,13 @@ def add_jira_tickets_incrementally():
     for ticket in truly_new_tickets:
         field_docs = processor.format_ticket_documents(ticket)
         all_new_docs.extend(field_docs)
+        print(f"[DEBUG] Added {len(field_docs)} documents for new ticket {ticket['key']}")
     
-    # For updated tickets, we'll add them (ChromaDB handles updates by ID)
+    # Add updated tickets (old documents already deleted)
     for ticket in updated_tickets:
         field_docs = processor.format_ticket_documents(ticket)
         all_new_docs.extend(field_docs)
+        print(f"[DEBUG] Added {len(field_docs)} documents for updated ticket {ticket['key']}")
     
     if not all_new_docs:
         print("[INFO] No new documents to add")
@@ -264,13 +305,64 @@ def add_jira_tickets_incrementally():
     
     print(f"[OK] Processed into {len(chunks)} chunks after enhancement")
     
-    # Add to existing vectorstore
+    if len(chunks) == 0:
+        print("[WARNING] Enhanced pipeline returned 0 chunks - this might indicate an issue")
+        update_last_sync_time(status="no_updates", documents_added=0)
+        return existing_vectorstore
+    
+    # Add explicit IDs to chunks for proper updates
+    # Format: jira_{ticket_key}_{section}_{chunk_idx}
+    # Track chunk indices per ticket+section combination
+    chunk_counters = {}  # (ticket_key, section) -> counter
+    
+    chunks_with_ids = []
+    ids_list = []
+    
+    for chunk in chunks:
+        ticket_key = chunk.metadata.get('ticket_key', 'unknown')
+        section = chunk.metadata.get('section', 'unknown')
+        
+        # Get or initialize counter for this ticket+section
+        key = (ticket_key, section)
+        if key not in chunk_counters:
+            chunk_counters[key] = 0
+        else:
+            chunk_counters[key] += 1
+        
+        chunk_idx = chunk_counters[key]
+        doc_id = f"jira_{ticket_key}_{section}_{chunk_idx}"
+        
+        chunks_with_ids.append(chunk)
+        ids_list.append(doc_id)
+    
+    # Add to existing vectorstore in batches to avoid token limit (300k tokens max)
+    # Jira chunks average ~600 tokens each, so batch size of 250 = ~150k tokens (safe margin)
     try:
-        existing_vectorstore.add_documents(chunks)
-        print(f"[OK] Added {len(chunks)} chunks to existing vectorstore")
+        batch_size = 250
+        total_batches = (len(chunks_with_ids) + batch_size - 1) // batch_size
+        total_added = 0
+        
+        if len(chunks_with_ids) > batch_size:
+            print(f"[*] Adding {len(chunks_with_ids)} chunks in {total_batches} batches (to avoid token limit)...")
+        
+        for i in range(0, len(chunks_with_ids), batch_size):
+            batch_chunks = chunks_with_ids[i:i + batch_size]
+            batch_ids = ids_list[i:i + batch_size]
+            batch_num = (i // batch_size) + 1
+            
+            if len(chunks_with_ids) > batch_size:
+                print(f"   [*] Adding batch {batch_num}/{total_batches} ({len(batch_chunks)} chunks)...")
+            
+            existing_vectorstore.add_documents(
+                documents=batch_chunks,
+                ids=batch_ids
+            )
+            total_added += len(batch_chunks)
+        
+        print(f"[OK] Added {total_added} chunks to existing vectorstore")
         
         # Update sync time with success status
-        update_last_sync_time(status="success", documents_added=len(chunks))
+        update_last_sync_time(status="success", documents_added=total_added)
         
         # Get updated count
         total_docs = existing_vectorstore._collection.count()

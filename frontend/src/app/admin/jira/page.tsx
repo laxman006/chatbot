@@ -2,6 +2,9 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { getCurrentUser } from "@/lib/session-utils";
+import { isAdminEmail } from "@/constants/admins";
+import { User } from "@/types/chat";
 import JiraConfigPanel from "@/components/admin/JiraConfigPanel";
 import JiraSyncPanel from "@/components/admin/JiraSyncPanel";
 
@@ -9,106 +12,109 @@ export default function JiraAdminPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<"config" | "sync">("config");
   const [isLoading, setIsLoading] = useState(true);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authUser, setAuthUser] = useState<User | null>(null);
 
   useEffect(() => {
     // Check if user is admin
-    const checkAuth = async () => {
-      try {
-        const token = localStorage.getItem("authToken");
-        if (!token) {
-          router.push("/login");
-          return;
-        }
+    const user = getCurrentUser();
 
-        // Verify admin status
-        const response = await fetch("/api/proxy/verify-admin", {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
+    if (!user) {
+      router.replace("/login?error=admin_only");
+      return;
+    }
 
-        if (!response.ok) {
-          router.push("/login");
-          return;
-        }
+    if (!isAdminEmail(user.email)) {
+      router.replace("/login?error=admin_only");
+      return;
+    }
 
-        setIsAuthenticated(true);
-      } catch (error) {
-        console.error("Auth check failed:", error);
-        router.push("/login");
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    checkAuth();
+    setAuthUser(user);
+    setIsLoading(false);
   }, [router]);
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
-        <div className="text-white text-lg">Loading...</div>
+      <div style={{ padding: '40px', fontFamily: 'Inter, system-ui, sans-serif' }}>
+        <p style={{ color: '#6b7280' }}>Checking admin access...</p>
       </div>
     );
   }
 
-  if (!isAuthenticated) {
+  if (!authUser) {
     return null;
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 py-8 px-4">
-      <div className="max-w-6xl mx-auto">
-        {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold text-white mb-2">
+    <div style={{ padding: '32px', maxWidth: '1200px', margin: '0 auto', fontFamily: 'Inter, system-ui, sans-serif' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
+        <div>
+          <h1 style={{ fontSize: '28px', fontWeight: 700, marginBottom: '6px', color: '#111827' }}>
             Jira Integration Management
           </h1>
-          <p className="text-gray-300">
+          <p style={{ color: '#6b7280', fontSize: '14px' }}>
             Configure and manage Jira ticket synchronization
           </p>
         </div>
-
-        {/* Navigation Tabs */}
-        <div className="flex gap-4 mb-6 border-b border-gray-700">
+        <div style={{ display: 'flex', gap: '8px' }}>
           <button
-            onClick={() => setActiveTab("config")}
-            className={`px-6 py-3 font-semibold transition-colors ${
-              activeTab === "config"
-                ? "text-white border-b-2 border-purple-500"
-                : "text-gray-400 hover:text-gray-300"
-            }`}
+            onClick={() => router.push('/admin/dashboard')}
+            style={{
+              padding: '10px 14px',
+              borderRadius: '10px',
+              border: '1px solid #d1d5db',
+              background: 'white',
+              cursor: 'pointer',
+              color: '#111827',
+              fontWeight: 600,
+              fontSize: '14px',
+            }}
           >
-            Configuration
-          </button>
-          <button
-            onClick={() => setActiveTab("sync")}
-            className={`px-6 py-3 font-semibold transition-colors ${
-              activeTab === "sync"
-                ? "text-white border-b-2 border-purple-500"
-                : "text-gray-400 hover:text-gray-300"
-            }`}
-          >
-            Sync & Status
+            Back to Dashboard
           </button>
         </div>
+      </div>
 
-        {/* Content */}
-        <div className="space-y-6">
-          {activeTab === "config" && <JiraConfigPanel />}
-          {activeTab === "sync" && <JiraSyncPanel />}
-        </div>
+      {/* Navigation Tabs */}
+      <div style={{ display: 'flex', gap: '4px', marginBottom: '24px', borderBottom: '1px solid #e5e7eb' }}>
+        <button
+          onClick={() => setActiveTab("config")}
+          style={{
+            padding: '12px 24px',
+            border: 'none',
+            background: 'transparent',
+            cursor: 'pointer',
+            color: activeTab === "config" ? '#111827' : '#6b7280',
+            fontWeight: 600,
+            fontSize: '14px',
+            borderBottom: activeTab === "config" ? '2px solid #111827' : '2px solid transparent',
+            marginBottom: '-1px',
+          }}
+        >
+          Configuration
+        </button>
+        <button
+          onClick={() => setActiveTab("sync")}
+          style={{
+            padding: '12px 24px',
+            border: 'none',
+            background: 'transparent',
+            cursor: 'pointer',
+            color: activeTab === "sync" ? '#111827' : '#6b7280',
+            fontWeight: 600,
+            fontSize: '14px',
+            borderBottom: activeTab === "sync" ? '2px solid #111827' : '2px solid transparent',
+            marginBottom: '-1px',
+          }}
+        >
+          Sync & Status
+        </button>
+      </div>
 
-        {/* Back Button */}
-        <div className="mt-8">
-          <button
-            onClick={() => router.push("/admin/dashboard")}
-            className="px-6 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors"
-          >
-            ← Back to Dashboard
-          </button>
-        </div>
+      {/* Content */}
+      <div>
+        {activeTab === "config" && <JiraConfigPanel />}
+        {activeTab === "sync" && <JiraSyncPanel />}
       </div>
     </div>
   );
