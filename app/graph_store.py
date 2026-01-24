@@ -30,7 +30,9 @@ class GraphStore:
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
         
         # Initialize database
-        self.conn = sqlite3.connect(db_path)
+        # check_same_thread=False allows connection to be used from multiple threads
+        # SQLite handles thread safety internally with proper locking
+        self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row  # Enable dict-like access
         self.create_tables()
     

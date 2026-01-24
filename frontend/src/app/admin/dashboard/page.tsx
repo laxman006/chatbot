@@ -77,6 +77,13 @@ export default function AdminDashboardPage() {
   const [dateRange, setDateRange] = useState<DateRange>({ startDate: null, endDate: null });
   const [excludedUsers, setExcludedUsers] = useState<string[]>([]); // Default: no exclusions (opt-in)
 
+  // Jira sync states
+  const [jiraSyncing, setJiraSyncing] = useState<boolean>(false);
+  const [jiraSyncMessage, setJiraSyncMessage] = useState<{
+    type: "success" | "error" | "info";
+    text: string;
+  } | null>(null);
+
   // Verify admin access on mount
   useEffect(() => {
     const user = getCurrentUser();
@@ -342,6 +349,56 @@ export default function AdminDashboardPage() {
     }));
   }, [top10Users, hasSessionData, getSessionCount]);
 
+  // Trigger Jira sync handler
+  const handleTriggerJiraSync = useCallback(async () => {
+    if (!authUser || jiraSyncing) return;
+
+    setJiraSyncing(true);
+    setJiraSyncMessage(null);
+
+    try {
+      const token = localStorage.getItem("authToken");
+      const response = await fetch("/api/proxy/api/jira/sync", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || errorData.error || "Sync failed");
+      }
+
+      const data = await response.json();
+
+      if (data.status === "success") {
+        setJiraSyncMessage({
+          type: "success",
+          text: `✓ ${data.message}. Added ${data.new_tickets || 0} new tickets.`,
+        });
+      } else if (data.status === "no_updates") {
+        setJiraSyncMessage({
+          type: "info",
+          text: "ℹ No new tickets to sync. All tickets are up to date.",
+        });
+      } else {
+        setJiraSyncMessage({
+          type: "error",
+          text: `✗ Sync completed with status: ${data.status}`,
+        });
+      }
+    } catch (error: any) {
+      setJiraSyncMessage({
+        type: "error",
+        text: `✗ Sync failed: ${error.message}`,
+      });
+      console.error("Error triggering Jira sync:", error);
+    } finally {
+      setJiraSyncing(false);
+    }
+  }, [authUser, jiraSyncing]);
+
   if (loading) {
     return (
       <div style={{ padding: '40px', fontFamily: 'Inter, system-ui, sans-serif' }}>
@@ -474,6 +531,78 @@ export default function AdminDashboardPage() {
           <strong>Error:</strong> {error}
         </div>
       )}
+
+      {/* Trigger Jira Sync Button Section */}
+      <div
+        style={{
+          padding: '24px',
+          border: '2px solid #e5e7eb',
+          borderRadius: '12px',
+          marginBottom: '24px',
+          backgroundColor: '#f9fafb',
+        }}
+      >
+        <div style={{ marginBottom: '16px' }}>
+          <h2 style={{ fontSize: '20px', fontWeight: 600, color: '#111827', marginBottom: '8px' }}>
+            Trigger Jira Sync
+          </h2>
+          <p style={{ color: '#6b7280', fontSize: '14px' }}>
+            Manually trigger a Jira sync to fetch new and updated tickets from Jira.
+          </p>
+        </div>
+        {jiraSyncMessage && (
+          <div
+            style={{
+              padding: '12px',
+              borderRadius: '8px',
+              marginBottom: '12px',
+              backgroundColor:
+                jiraSyncMessage.type === "success"
+                  ? '#d1fae5'
+                  : jiraSyncMessage.type === "error"
+                  ? '#fee2e2'
+                  : '#dbeafe',
+              color:
+                jiraSyncMessage.type === "success"
+                  ? '#065f46'
+                  : jiraSyncMessage.type === "error"
+                  ? '#991b1b'
+                  : '#1e40af',
+              fontSize: '14px',
+            }}
+          >
+            {jiraSyncMessage.text}
+          </div>
+        )}
+        <button
+          onClick={handleTriggerJiraSync}
+          disabled={jiraSyncing}
+          style={{
+            padding: '14px 28px',
+            borderRadius: '10px',
+            border: 'none',
+            background: jiraSyncing ? '#9ca3af' : '#7c3aed',
+            color: 'white',
+            cursor: jiraSyncing ? 'not-allowed' : 'pointer',
+            fontWeight: 700,
+            fontSize: '16px',
+            minWidth: '200px',
+            transition: 'all 0.2s',
+          }}
+          onMouseEnter={(e) => {
+            if (!jiraSyncing) {
+              e.currentTarget.style.background = '#6d28d9';
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (!jiraSyncing) {
+              e.currentTarget.style.background = '#7c3aed';
+            }
+          }}
+        >
+          {jiraSyncing ? 'Syncing...' : 'Trigger Jira Sync'}
+        </button>
+      </div>
 
       {/* Helpful message when no data */}
       {!error && userStats.length === 0 && !fetching && (
