@@ -552,10 +552,9 @@ export default function ChatSidebar({
       dropdown.classList.remove('show');
     }
     setAdminSubmenuOpen(false);
-    // Use window.location for more reliable navigation
-    setTimeout(() => {
-      window.location.href = path;
-    }, 10);
+    // Use Next.js router for client-side navigation (no page reload)
+    router.push(path);
+    return false;
   };
 
   // Close dropdown when clicking outside
@@ -942,6 +941,32 @@ export default function ChatSidebar({
                         <path d="M8 7h8M8 11h8M8 15h4" />
                       </svg>
                       <span>Blog Management</span>
+                    </div>
+                    <div 
+                      className="dropdown-item admin-item" 
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.nativeEvent.stopImmediatePropagation();
+                        console.log('[Admin Nav] Jira Management clicked - mousedown');
+                        handleAdminNavigation('/admin/jira', e);
+                      }}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.nativeEvent.stopImmediatePropagation();
+                        console.log('[Admin Nav] Jira Management clicked - click');
+                        handleAdminNavigation('/admin/jira', e);
+                      }}
+                      style={{ cursor: 'pointer', pointerEvents: 'auto', position: 'relative', zIndex: 10000 }}
+                    >
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                        <rect x="3" y="4" width="18" height="16" rx="2" />
+                        <path d="M8 4v4M8 12v4M8 20v-4" />
+                        <path d="M16 4v4M16 12v4M16 20v-4" />
+                        <path d="M3 8h18M3 12h18M3 16h18" />
+                      </svg>
+                      <span>Jira Management</span>
                     </div>
                   </div>
                 )}

@@ -1303,11 +1303,13 @@ export function initializeChatApp(options: InitOptions = {}) {
             <button class="copy-button" data-action="copy-message" title="Copy message">
               <img src="/images/copy-icon.svg?v=2" alt="Copy" width="16" height="16">
             </button>
+            ${!isReadOnly ? `
             <button class="retry-button" data-action="retry-message" title="Regenerate response" data-trace-id="${msg.traceId || ''}">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M1 8a7 7 0 0 1 7-7v2M15 8a7 7 0 0 1-7 7v-2M8 1l2 2-2 2M8 15l-2-2 2-2"/>
               </svg>
             </button>
+            ` : ''}
             ${!isReadOnly ? `
             <button class="feedback-btn thumbs-up" data-action="feedback" data-rating="thumbs_up" title="Good response">
               <img src="/images/thumbs-up-icon.svg?v=2" alt="Thumbs up" width="16" height="16">
@@ -2138,17 +2140,21 @@ export function initializeChatApp(options: InitOptions = {}) {
           <button class="copy-button" data-action="copy-message" title="Copy message">
             <img src="/images/copy-icon.svg?v=2" alt="Copy" width="16" height="16">
           </button>
+          ${!isReadOnlyMode ? `
           <button class="retry-button" data-action="retry-message" title="Regenerate response" data-trace-id="${traceId || ''}">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M1 8a7 7 0 0 1 7-7v2M15 8a7 7 0 0 1-7 7v-2M8 1l2 2-2 2M8 15l-2-2 2-2"/>
             </svg>
           </button>
+          ` : ''}
+          ${!isReadOnlyMode ? `
           <button class="feedback-btn thumbs-up" data-action="feedback" data-rating="thumbs_up" title="Good response">
             <img src="/images/thumbs-up-icon.svg?v=2" alt="Thumbs up" width="16" height="16">
           </button>
           <button class="feedback-btn thumbs-down" data-action="feedback" data-rating="thumbs_down" title="Bad response">
             <img src="/images/thumbs-down-icon.svg?v=2" alt="Thumbs down" width="16" height="16">
           </button>
+          ` : ''}
           <span class="feedback-text"></span>
         </div>
       `;
@@ -2583,11 +2589,13 @@ export function initializeChatApp(options: InitOptions = {}) {
                     <button class="copy-button" data-action="copy-message" title="Copy message">
                       <img src="/images/copy-icon.svg?v=2" alt="Copy" width="16" height="16">
                     </button>
+                    ${!isReadOnlyMode ? `
                     <button class="retry-button" data-action="retry-message" title="Regenerate response" data-trace-id="${traceId || ''}">
                       <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M1 8a7 7 0 0 1 7-7v2M15 8a7 7 0 0 1-7 7v-2M8 1l2 2-2 2M8 15l-2-2 2-2"/>
                       </svg>
                     </button>
+                    ` : ''}
                     <button class="feedback-btn thumbs-up ${feedbackDisabledClass}" 
                             data-action="feedback" 
                             data-rating="thumbs_up"
@@ -2729,7 +2737,7 @@ export function initializeChatApp(options: InitOptions = {}) {
     }
   }
 
-  async function retryMessage(button: HTMLElement) {
+  async function retryMessage(button: HTMLButtonElement) {
     // ✅ PHASE-1: Check per-session state
     if (!sessionId || isSessionGenerating(sessionId)) {
       console.warn('[RETRY] Cannot retry - session is generating or no session ID');
@@ -4671,7 +4679,7 @@ export function initializeChatApp(options: InitOptions = {}) {
           copyUserMessage(button);
           break;
         case 'retry-message':
-          retryMessage(button);
+          retryMessage(button as HTMLButtonElement);
           break;
         case 'feedback':
           const rating = button.getAttribute('data-rating');

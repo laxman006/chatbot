@@ -295,7 +295,7 @@ def test_chromadb_loading():
                     print_info("Retrieving sample documents...")
                     sample = vectorstore._collection.get(
                         limit=min(5, count),
-                        include=['metadatas', 'documents', 'ids']
+                        include=['metadatas', 'documents']  # IDs are always returned automatically
                     )
                     
                     if sample and sample.get('ids'):
