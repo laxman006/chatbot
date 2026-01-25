@@ -21,12 +21,13 @@ from app.llm_factory import get_llm
 from app.vectorstore import retriever, vectorstore, bm25_retriever
 # Optional Jira vectorstore import - allows backend to start without jira package
 try:
-    from app.jira_vectorstore import jira_retriever, jira_vectorstore
+    from app.jira_vectorstore import jira_retriever, jira_vectorstore, _get_jira_vectorstore_cached
     JIRA_VECTORSTORE_AVAILABLE = True
 except ImportError as e:
     JIRA_VECTORSTORE_AVAILABLE = False
     jira_retriever = None
     jira_vectorstore = None
+    _get_jira_vectorstore_cached = None
     print(f"[WARNING] Jira vectorstore not available: {e}")
     print("[INFO] Jira features will be disabled. Install jira package with: pip install jira")
 from app.mongodb_memory import (
@@ -2339,19 +2340,23 @@ def perplexity_style_retrieve(
     
     # ---- 5. Add Jira candidates separately, properly normalized ----
     jira_pool = []
-    if k_jira > 0 and jira_vectorstore:
-        print(f"[RETRIEVAL] Retrieving Jira tickets for rerank pool (weight={jira_weight:.2f})...")
-        try:
-            # Get Jira tickets using similarity search (returns distance scores)
-            jira_docs_with_scores = jira_vectorstore.similarity_search_with_score(query, k=15)
-            # Jira vectorstore uses cosine distance (confirmed in jira_vectorstore.py:42)
-            jira_metric = "cosine"
-            for doc, dist in jira_docs_with_scores:
-                sim = normalize_distance_to_similarity(dist, metric=jira_metric)
-                jira_pool.append((doc, sim))
-            print(f"[RETRIEVAL] Retrieved {len(jira_pool)} Jira tickets for rerank pool")
-        except Exception as e:
-            print(f"[WARN] Jira retrieval failed: {e}")
+    if k_jira > 0:
+        # Load Jira vectorstore lazily if needed
+        if _get_jira_vectorstore_cached:
+            jira_vectorstore = _get_jira_vectorstore_cached()
+        if jira_vectorstore:
+            print(f"[RETRIEVAL] Retrieving Jira tickets for rerank pool (weight={jira_weight:.2f})...")
+            try:
+                # Get Jira tickets using similarity search (returns distance scores)
+                jira_docs_with_scores = jira_vectorstore.similarity_search_with_score(query, k=15)
+                # Jira vectorstore uses cosine distance (confirmed in jira_vectorstore.py:42)
+                jira_metric = "cosine"
+                for doc, dist in jira_docs_with_scores:
+                    sim = normalize_distance_to_similarity(dist, metric=jira_metric)
+                    jira_pool.append((doc, sim))
+                print(f"[RETRIEVAL] Retrieved {len(jira_pool)} Jira tickets for rerank pool")
+            except Exception as e:
+                print(f"[WARN] Jira retrieval failed: {e}")
     
     pool_candidates.extend(jira_pool)
     

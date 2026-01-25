@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Depends, Body
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
+import traceback
 
 from app.auth import require_admin
 from app.jira_vectorstore import add_jira_tickets_incrementally, load_jira_vectorstore
@@ -40,16 +41,46 @@ async def trigger_jira_sync(
         
         # Get pre-sync count
         vectorstore = load_jira_vectorstore()
-        pre_count = vectorstore._collection.count() if vectorstore else 0
+        if not vectorstore:
+            error_msg = "Jira vectorstore not found. Please build it first."
+            print(f"[API] ERROR: {error_msg}")
+            raise HTTPException(
+                status_code=500,
+                detail=error_msg
+            )
+        
+        try:
+            pre_count = vectorstore._collection.count()
+            print(f"[API] Pre-sync document count: {pre_count}")
+        except Exception as e:
+            error_msg = f"Failed to count documents: {str(e)}"
+            print(f"[API] ERROR: {error_msg}")
+            traceback.print_exc()
+            raise HTTPException(
+                status_code=500,
+                detail=error_msg
+            )
         
         # Run incremental sync
+        print("[API] Starting incremental sync...")
         result = add_jira_tickets_incrementally()
         
         if result:
-            post_count = result._collection.count()
-            new_tickets = post_count - pre_count
+            try:
+                post_count = result._collection.count()
+                new_tickets = post_count - pre_count
+            except Exception as e:
+                error_msg = f"Failed to count post-sync documents: {str(e)}"
+                print(f"[API] ERROR: {error_msg}")
+                traceback.print_exc()
+                raise HTTPException(
+                    status_code=500,
+                    detail=error_msg
+                )
             
             stats = get_sync_stats()
+            
+            print(f"[API] Sync completed successfully: {new_tickets} new tickets added")
             
             return SyncResponse(
                 status="success",
@@ -60,6 +91,7 @@ async def trigger_jira_sync(
             )
         else:
             stats = get_sync_stats()
+            print("[API] Sync returned no updates")
             return SyncResponse(
                 status="no_updates",
                 message="No new tickets to sync",
@@ -68,10 +100,16 @@ async def trigger_jira_sync(
                 new_tickets=0
             )
             
+    except HTTPException:
+        raise
     except Exception as e:
+        error_msg = str(e)
+        print(f"[API] Sync error: {error_msg}")
+        print(f"[API] Traceback:")
+        traceback.print_exc()
         raise HTTPException(
             status_code=500,
-            detail=f"Sync failed: {str(e)}"
+            detail=f"Sync failed: {error_msg}"
         )
 
 
@@ -83,7 +121,16 @@ async def get_sync_status(
     try:
         stats = get_sync_stats()
         vectorstore = load_jira_vectorstore()
-        total_docs = vectorstore._collection.count() if vectorstore else 0
+        
+        if vectorstore:
+            try:
+                total_docs = vectorstore._collection.count()
+            except Exception as e:
+                print(f"[API] Error counting documents in status endpoint: {e}")
+                traceback.print_exc()
+                total_docs = 0
+        else:
+            total_docs = 0
         
         # Get alerts
         alerts = get_sync_alerts()
@@ -101,9 +148,12 @@ async def get_sync_status(
             "alerts": alerts
         }
     except Exception as e:
+        error_msg = str(e)
+        print(f"[API] Status endpoint error: {error_msg}")
+        traceback.print_exc()
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to get status: {str(e)}"
+            detail=f"Failed to get status: {error_msg}"
         )
 
 
