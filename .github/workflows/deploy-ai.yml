@@ -1,0 +1,100 @@
+name: Deploy to Production Server
+
+# Trigger on push to before-agentic-rag branch
+on:
+  push:
+    branches:
+      - before-agentic-rag
+
+jobs:
+  deploy:
+    name: Deploy to ai.cloudfuze.com
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Deploy to server via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          port: 22
+          script: |
+            echo "========================================="
+            echo "Starting deployment to ai.cloudfuze.com"
+            echo "========================================="
+            
+            # Navigate to project directory
+            cd /opt/chatbot
+            
+            # Fix git permissions if needed
+            sudo chown -R $USER:$USER .git || true
+            
+            # Pull latest code
+            echo "Pulling latest code..."
+            git pull origin before-agentic-rag
+            
+            # Detect docker compose command
+            if docker compose version &> /dev/null; then
+                COMPOSE_CMD='docker compose'
+            else
+                COMPOSE_CMD='docker-compose'
+            fi
+            
+            # Stop services
+            echo "Stopping services..."
+            $COMPOSE_CMD -f docker-compose.ai.yml down
+            
+            # Rebuild images
+            echo "Building backend..."
+            $COMPOSE_CMD -f docker-compose.ai.yml build backend
+            
+            echo "Building frontend..."
+            $COMPOSE_CMD -f docker-compose.ai.yml build frontend
+            
+            # Start services
+            echo "Starting services..."
+            $COMPOSE_CMD -f docker-compose.ai.yml --env-file .env.ai up -d
+            
+            # Wait for services to start
+            echo "Waiting for services to start..."
+            sleep 30
+            
+            # Check service status
+            echo "========================================="
+            echo "Service Status"
+            echo "========================================="
+            $COMPOSE_CMD -f docker-compose.ai.yml ps
+            
+            # Health checks
+            echo ""
+            echo "========================================="
+            echo "Health Checks"
+            echo "========================================="
+            
+            # Check backend health
+            echo "Backend Health:"
+            docker exec slack2teams-backend-ai curl -s http://localhost:8002/health || echo "Backend not ready yet"
+            
+            # Check nginx
+            echo ""
+            echo "Nginx Config:"
+            docker exec slack2teams-nginx-ai nginx -t
+            
+            echo ""
+            echo "========================================="
+            echo "Deployment Complete!"
+            echo "========================================="
+      
+      - name: Notify on success
+        if: success()
+        run: |
+          echo "✅ Deployment successful to ai.cloudfuze.com"
+      
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "❌ Deployment failed to ai.cloudfuze.com"
