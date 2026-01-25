@@ -402,18 +402,24 @@ def get_jira_vectorstore():
     return None
 
 
-# Initialize Jira vectorstore
-jira_vectorstore = get_jira_vectorstore()
-
-# Create retriever for Jira tickets
+# Initialize Jira vectorstore (lazy loading - only when needed)
+# Don't load at module import time to avoid ChromaDB corruption issues
+jira_vectorstore = None
 jira_retriever = None
-if jira_vectorstore:
-    jira_retriever = jira_vectorstore.as_retriever(
-        search_type="similarity",
-        search_kwargs={
-            "k": 10,  # Return top 10 most relevant tickets for issue resolution
-        }
-    )
-    print("[OK] Jira retriever ready for issue resolution queries")
-else:
-    print("[INFO] No Jira vectorstore available - set INITIALIZE_JIRA_VECTORSTORE=true to create one")
+
+def _get_jira_vectorstore_cached():
+    """Get cached Jira vectorstore, loading it if needed."""
+    global jira_vectorstore, jira_retriever
+    if jira_vectorstore is None:
+        jira_vectorstore = get_jira_vectorstore()
+        if jira_vectorstore:
+            jira_retriever = jira_vectorstore.as_retriever(
+                search_type="similarity",
+                search_kwargs={
+                    "k": 10,  # Return top 10 most relevant tickets for issue resolution
+                }
+            )
+            print("[OK] Jira retriever ready for issue resolution queries")
+        else:
+            print("[INFO] No Jira vectorstore available - set INITIALIZE_JIRA_VECTORSTORE=true to create one")
+    return jira_vectorstore
