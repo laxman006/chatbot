@@ -292,6 +292,12 @@ BLOG_POLLING_ENABLED = os.getenv("BLOG_POLLING_ENABLED", "false").lower() == "tr
 BLOG_POLLING_INTERVAL = int(os.getenv("BLOG_POLLING_INTERVAL", "3600"))  # Polling interval in seconds (default: 1 hour)
 BLOG_LAST_POLL_FILE = os.getenv("BLOG_LAST_POLL_FILE", "./data/blog_last_poll.json")
 
+# Weekly Team Leaderboard Report Configuration
+WEEKLY_REPORT_ENABLED = os.getenv("WEEKLY_REPORT_ENABLED", "true").lower() == "true"
+WEEKLY_REPORT_SEND_HOUR = int(os.getenv("WEEKLY_REPORT_SEND_HOUR", "12"))  # Default: 12:00 PM (noon)
+WEEKLY_REPORT_SEND_MINUTE = int(os.getenv("WEEKLY_REPORT_SEND_MINUTE", "0"))  # Default: 0 minutes
+WEEKLY_REPORT_SENDER_EMAIL = os.getenv("WEEKLY_REPORT_SENDER_EMAIL", "")  # Email address to send reports from
+
 # Langfuse configuration for observability
 LANGFUSE_PUBLIC_KEY = os.getenv("LANGFUSE_PUBLIC_KEY")
 LANGFUSE_SECRET_KEY = os.getenv("LANGFUSE_SECRET_KEY")

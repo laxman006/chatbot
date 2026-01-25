@@ -122,6 +122,26 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"[STARTUP] ❌ Failed to start Jira sync scheduler: {e}", exc_info=True)
     
+    # Start Weekly Report scheduler
+    try:
+        from config import WEEKLY_REPORT_ENABLED, WEEKLY_REPORT_SEND_HOUR, WEEKLY_REPORT_SEND_MINUTE
+        
+        if WEEKLY_REPORT_ENABLED:
+            from app.weekly_reports_scheduler import scheduled_weekly_reports_sync
+            
+            scheduler.add_job(
+                func=scheduled_weekly_reports_sync,
+                trigger=CronTrigger(day_of_week='mon', hour=WEEKLY_REPORT_SEND_HOUR, minute=WEEKLY_REPORT_SEND_MINUTE),
+                id='weekly_report_job',
+                name='Weekly Team Leaderboard Report',
+                replace_existing=True
+            )
+            logger.info(f"[STARTUP] ✅ Weekly report scheduler started (runs every Monday at {WEEKLY_REPORT_SEND_HOUR:02d}:{WEEKLY_REPORT_SEND_MINUTE:02d})")
+        else:
+            logger.info("[STARTUP] Weekly report scheduler is disabled (WEEKLY_REPORT_ENABLED=false)")
+    except Exception as e:
+        logger.error(f"[STARTUP] ❌ Failed to start weekly report scheduler: {e}", exc_info=True)
+    
     yield
     
     # Shutdown
