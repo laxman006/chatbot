@@ -79,7 +79,8 @@ rank-bm25==0.2.2
 # - docx2txt==0.8                      # Alternative DOCX processor
 # - selenium==4.36.0                   # Browser automation (SharePoint fallback)
 # - webdriver-manager==4.0.2           # ChromeDriver management
-# - xlrd==2.0.1                        # Old Excel format support
+# - xlrd==2.0.1              
+          # Old Excel format support
 
 google-generativeai>=0.3.0
 langchain-google-genai>=0.1.0
@@ -87,3 +88,6 @@ jira>=3.5.0
 
 apscheduler>=3.10.0
 cryptography>=42.0.0
+
+reportlab>=4.0.0
+matplotlib>=3.8.0
