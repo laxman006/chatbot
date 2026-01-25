@@ -223,88 +223,45 @@ def add_jira_tickets_incrementally():
         print("[ERROR] Existing vectorstore not found. Run build_jira_vectorstore() first.")
         return None
     
-    # Check for duplicates by querying existing tickets
-    # Optimized: Only fetch metadata, not full documents, to avoid memory issues
-    existing_ticket_keys = set()
-    try:
-        print(f"[*] Checking for existing tickets in vectorstore (this may take a moment for large vectorstores)...")
-        # Only fetch metadata, not documents, to save memory
-        # Note: For very large vectorstores (50k+ docs), this might take 10-30 seconds
-        import time
-        start_time = time.time()
-        all_docs = existing_vectorstore.get(include=["metadatas"])
-        elapsed = time.time() - start_time
+    # Skip duplicate check - just process all tickets directly
+    # ChromaDB will handle duplicates via explicit document IDs (upsert behavior)
+    print(f"[INFO] Processing {len(new_tickets)} tickets directly (no duplicate check)")
+    
+    # For updated tickets, delete old documents first using ChromaDB's where filter
+    # This is much faster than loading all documents
+    ticket_keys = [ticket['key'] for ticket in new_tickets]
+    
+    if ticket_keys:
+        print(f"[*] Deleting old documents for {len(ticket_keys)} tickets (if they exist)...")
+        total_deleted = 0
+        for ticket_key in ticket_keys:
+            try:
+                # Use ChromaDB's where filter to find and delete documents by ticket_key
+                matching_docs = existing_vectorstore._collection.get(
+                    where={"ticket_key": ticket_key},
+                    include=["ids"]
+                )
+                if matching_docs and 'ids' in matching_docs and len(matching_docs['ids']) > 0:
+                    existing_vectorstore.delete(ids=matching_docs['ids'])
+                    total_deleted += len(matching_docs['ids'])
+            except Exception as e:
+                # If where filter fails, continue - documents will be added with explicit IDs
+                # ChromaDB will handle duplicates via ID matching
+                print(f"[DEBUG] Could not delete old documents for {ticket_key}: {e}")
         
-        if all_docs and 'metadatas' in all_docs:
-            print(f"[*] Processing {len(all_docs['metadatas'])} metadata entries...")
-            for metadata in all_docs['metadatas']:
-                if metadata and 'ticket_key' in metadata:
-                    existing_ticket_keys.add(metadata['ticket_key'])
-        
-        print(f"[INFO] Found {len(existing_ticket_keys)} unique existing tickets in vectorstore (took {elapsed:.1f}s)")
-    except Exception as e:
-        print(f"[WARNING] Could not check for duplicates: {e}")
-        import traceback
-        traceback.print_exc()
-        # Continue without duplicate check - will rely on document ID deduplication
-        print(f"[INFO] Continuing without duplicate check - will use document ID deduplication")
+        if total_deleted > 0:
+            print(f"[OK] Deleted {total_deleted} old document chunks")
+        else:
+            print(f"[INFO] No old documents found to delete (tickets may be new)")
     
-    # Filter out tickets that already exist
-    truly_new_tickets = [
-        ticket for ticket in new_tickets 
-        if ticket['key'] not in existing_ticket_keys
-    ]
-    
-    # For existing tickets that were updated, we need to remove old and add new
-    updated_tickets = [
-        ticket for ticket in new_tickets 
-        if ticket['key'] in existing_ticket_keys
-    ]
-    
-    print(f"[INFO] New tickets: {len(truly_new_tickets)}, Updated tickets: {len(updated_tickets)}")
-    
-    # For updated tickets, delete old documents first to avoid duplicates
-    if updated_tickets:
-        print(f"[*] Deleting old documents for {len(updated_tickets)} updated tickets...")
-        updated_ticket_keys = [ticket['key'] for ticket in updated_tickets]
-        
-        try:
-            # Get all document IDs for updated tickets
-            # Optimized: Only fetch IDs and metadata, not full documents
-            print(f"[*] Fetching document IDs for {len(updated_ticket_keys)} updated tickets...")
-            all_docs = existing_vectorstore.get(include=["metadatas"])
-            ids_to_delete = []
-            
-            if all_docs and 'ids' in all_docs and 'metadatas' in all_docs:
-                for idx, metadata in enumerate(all_docs['metadatas']):
-                    if metadata and metadata.get('ticket_key') in updated_ticket_keys:
-                        ids_to_delete.append(all_docs['ids'][idx])
-            
-            if ids_to_delete:
-                print(f"[*] Found {len(ids_to_delete)} old document chunks to delete")
-                existing_vectorstore.delete(ids=ids_to_delete)
-                print(f"[OK] Deleted {len(ids_to_delete)} old document chunks")
-            else:
-                print(f"[WARNING] No old documents found to delete for updated tickets")
-        except Exception as e:
-            print(f"[WARNING] Could not delete old documents: {e}")
-            import traceback
-            traceback.print_exc()
-    
-    # Process new tickets into documents
+    # Process all tickets into documents
     all_new_docs = []
     
-    # Add truly new tickets
-    for ticket in truly_new_tickets:
+    for ticket in new_tickets:
         field_docs = processor.format_ticket_documents(ticket)
         all_new_docs.extend(field_docs)
-        print(f"[DEBUG] Added {len(field_docs)} documents for new ticket {ticket['key']}")
     
-    # Add updated tickets (old documents already deleted)
-    for ticket in updated_tickets:
-        field_docs = processor.format_ticket_documents(ticket)
-        all_new_docs.extend(field_docs)
-        print(f"[DEBUG] Added {len(field_docs)} documents for updated ticket {ticket['key']}")
+    print(f"[OK] Processed {len(new_tickets)} tickets into {len(all_new_docs)} document chunks")
     
     if not all_new_docs:
         print("[INFO] No new documents to add")
