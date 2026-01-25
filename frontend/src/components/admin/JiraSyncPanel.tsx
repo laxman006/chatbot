@@ -102,9 +102,12 @@ export default function JiraSyncPanel() {
   };
 
   const formatDate = (dateString: string | null): string => {
-    if (!dateString) return 'Never';
+    if (!dateString || dateString === 'Never') return 'Never';
     try {
       const date = new Date(dateString);
+      if (isNaN(date.getTime())) {
+        return dateString; // Return original string if invalid date
+      }
       return date.toLocaleString('en-US', {
         year: 'numeric',
         month: 'short',
@@ -299,9 +302,9 @@ export default function JiraSyncPanel() {
             </h3>
             <div style={{ fontSize: '14px', color: '#6b7280', lineHeight: '1.6' }}>
               <div>
-                <strong>Time:</strong> {formatDate(syncStatus.last_sync)}
+                <strong>Time:</strong> {syncStatus.last_sync === 'Never' || !syncStatus.last_sync ? 'Never' : formatDate(syncStatus.last_sync)}
               </div>
-              {syncStatus.last_status && (
+              {syncStatus.last_status && syncStatus.last_status !== 'unknown' && (
                 <div style={{ marginTop: '8px' }}>
                   <strong>Status:</strong>{' '}
                   <span style={{ color: syncStatus.last_status === "success" ? '#10b981' : syncStatus.last_status === "no_updates" ? '#3b82f6' : '#ef4444' }}>
@@ -461,7 +464,7 @@ export default function JiraSyncPanel() {
             </div>
             <div>
               <div style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>Project Keys</div>
-              <div style={{ fontSize: '14px', color: '#111827', fontWeight: 600 }}>PRI, QAB</div>
+              <div style={{ fontSize: '14px', color: '#111827', fontWeight: 600 }}>PRI</div>
             </div>
             <div>
               <div style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>Status Filter</div>
