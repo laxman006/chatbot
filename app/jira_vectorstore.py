@@ -224,18 +224,30 @@ def add_jira_tickets_incrementally():
         return None
     
     # Check for duplicates by querying existing tickets
+    # Optimized: Only fetch metadata, not full documents, to avoid memory issues
     existing_ticket_keys = set()
     try:
-        # Get all ticket keys from vectorstore metadata
-        all_docs = existing_vectorstore.get()
+        print(f"[*] Checking for existing tickets in vectorstore (this may take a moment for large vectorstores)...")
+        # Only fetch metadata, not documents, to save memory
+        # Note: For very large vectorstores (50k+ docs), this might take 10-30 seconds
+        import time
+        start_time = time.time()
+        all_docs = existing_vectorstore.get(include=["metadatas"])
+        elapsed = time.time() - start_time
+        
         if all_docs and 'metadatas' in all_docs:
+            print(f"[*] Processing {len(all_docs['metadatas'])} metadata entries...")
             for metadata in all_docs['metadatas']:
                 if metadata and 'ticket_key' in metadata:
                     existing_ticket_keys.add(metadata['ticket_key'])
         
-        print(f"[INFO] Found {len(existing_ticket_keys)} existing tickets in vectorstore")
+        print(f"[INFO] Found {len(existing_ticket_keys)} unique existing tickets in vectorstore (took {elapsed:.1f}s)")
     except Exception as e:
         print(f"[WARNING] Could not check for duplicates: {e}")
+        import traceback
+        traceback.print_exc()
+        # Continue without duplicate check - will rely on document ID deduplication
+        print(f"[INFO] Continuing without duplicate check - will use document ID deduplication")
     
     # Filter out tickets that already exist
     truly_new_tickets = [
@@ -258,7 +270,9 @@ def add_jira_tickets_incrementally():
         
         try:
             # Get all document IDs for updated tickets
-            all_docs = existing_vectorstore.get()
+            # Optimized: Only fetch IDs and metadata, not full documents
+            print(f"[*] Fetching document IDs for {len(updated_ticket_keys)} updated tickets...")
+            all_docs = existing_vectorstore.get(include=["metadatas"])
             ids_to_delete = []
             
             if all_docs and 'ids' in all_docs and 'metadatas' in all_docs:
