@@ -1467,7 +1467,30 @@ def apply_section_based_reranking(
     reranked_base = cross_reranker.rerank(query, candidates, top_k=len(candidates))
     
     # Apply section-based boosting using dedicated function
-    boosted_results = apply_section_boosts(query, reranked_base, top_k=len(reranked_base))
+    boosted_results = apply_section_boosts(reranked_base)
+    
+    # Extract Jira and SharePoint docs from boosted results for troubleshooting queries
+    jira_docs = []
+    sharepoint_docs = []
+    other_docs = []
+    
+    for doc, score in boosted_results:
+        meta = doc.metadata or {}
+        source_type = (meta.get("source_type") or "").lower()
+        tag = (meta.get("tag") or "").lower()
+        
+        if "jira" in source_type or "jira" in tag:
+            jira_docs.append((doc, score))
+        elif "sharepoint" in source_type or "sharepoint" in tag:
+            sharepoint_docs.append((doc, score))
+        else:
+            other_docs.append((doc, score))
+    
+    # Check if this is a troubleshooting query (has fix/error/problem keywords)
+    query_lower = query.lower()
+    troubleshooting_keywords = ['fix', 'error', 'bug', 'failed', 'broken', 'not working', 
+                                'resolve', 'solution', 'problem', 'issue', 'troubleshoot']
+    is_troubleshooting = any(keyword in query_lower for keyword in troubleshooting_keywords)
     
     # For troubleshooting queries, ensure both Jira and SharePoint are included
     if is_troubleshooting and (jira_docs or sharepoint_docs):
@@ -1490,8 +1513,8 @@ def apply_section_based_reranking(
                 final_results.append((doc, score))
                 seen_docs.add(doc_id)
         
-        # Fill remaining slots with other top results
-        for doc, score in boosted_results:
+        # Fill remaining slots with other top results (non-Jira, non-SharePoint)
+        for doc, score in other_docs:
             doc_id = id(doc)
             if doc_id not in seen_docs and len(final_results) < top_k:
                 final_results.append((doc, score))

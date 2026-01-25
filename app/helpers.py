@@ -153,9 +153,11 @@ def fetch_latest_web_content(url: str, max_posts: int = 50, since_date: str = No
             if date_obj > today:
                 print(f"[WARN] Date {since_date} is in the future. Skipping date filter.")
             else:
-                # WordPress API expects date in YYYY-MM-DD format or ISO datetime
-                base_params["after"] = since_date
-                print(f"[*] Filtering posts after {since_date}...")
+                # WordPress API expects ISO 8601 datetime format (YYYY-MM-DDTHH:MM:SS)
+                # Convert date string to ISO datetime format
+                iso_datetime = f"{since_date}T00:00:00"
+                base_params["after"] = iso_datetime
+                print(f"[*] Filtering posts after {iso_datetime}...")
         except ValueError:
             # Invalid date format, skip the filter
             print(f"[WARN] Invalid date format '{since_date}'. Expected YYYY-MM-DD. Skipping date filter.")

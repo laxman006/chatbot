@@ -26,8 +26,8 @@ security = HTTPBearer()
 
 # Restricted admin allowlist (lowercase for consistent comparison)
 ADMIN_EMAILS: Set[str] = {
-    "laxman.kadari@cloudfuze.com",
     "chaitanya.malle@cloudfuze.com",
+    "laxman.kadari@cloudfuze.com",
     "nirosh.reddy@cloudfuze.com"
 }
 
