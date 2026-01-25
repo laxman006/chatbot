@@ -348,6 +348,7 @@ export default function JiraSyncPanel() {
             overflow: 'hidden',
             backgroundColor: 'white',
             marginBottom: '24px',
+            width: '50%',
           }}
         >
           <div
@@ -361,9 +362,15 @@ export default function JiraSyncPanel() {
               Sync History
             </h2>
           </div>
-          <div style={{ padding: '20px' }}>
+          <div 
+            style={{ 
+              padding: '20px',
+              maxHeight: '400px',
+              overflowY: 'auto',
+            }}
+          >
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {syncStatus.sync_history.slice(0, 10).map((entry, index) => (
+              {[...syncStatus.sync_history].reverse().slice(0, 10).map((entry, index) => (
                 <div
                   key={index}
                   style={{
