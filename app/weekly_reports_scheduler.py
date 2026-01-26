@@ -6,9 +6,11 @@ Scheduled task that generates and sends weekly team leaderboard reports.
 """
 
 import os
+import json
 import logging
 import tempfile
-from datetime import datetime
+from datetime import datetime, time
+from typing import Optional
 from app.weekly_reports import (
     get_weekly_date_range,
     generate_team_report_data,
@@ -18,6 +20,52 @@ from app.weekly_reports import (
 from app.email_sender import send_weekly_report_emails
 
 logger = logging.getLogger(__name__)
+
+LAST_RUN_FILE = os.getenv("WEEKLY_REPORT_LAST_RUN_FILE", "./data/weekly_report_last_run.json")
+
+
+def _read_last_run_date() -> Optional[str]:
+    """Return last run date (YYYY-MM-DD) or None if missing/invalid."""
+    try:
+        if not os.path.exists(LAST_RUN_FILE):
+            return None
+        with open(LAST_RUN_FILE, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        return payload.get("last_run_date")
+    except Exception as exc:
+        logger.warning(f"[WEEKLY REPORT] Failed to read last-run file: {exc}")
+        return None
+
+
+def _write_last_run_date(date_str: str) -> None:
+    """Persist last run date to avoid duplicate sends."""
+    try:
+        os.makedirs(os.path.dirname(LAST_RUN_FILE), exist_ok=True)
+        with open(LAST_RUN_FILE, "w", encoding="utf-8") as handle:
+            json.dump({"last_run_date": date_str}, handle)
+    except Exception as exc:
+        logger.warning(f"[WEEKLY REPORT] Failed to write last-run file: {exc}")
+
+
+def _should_run_catchup(now: datetime, scheduled_hour: int, scheduled_minute: int) -> bool:
+    """Run once on startup if today's scheduled time already passed."""
+    if now.weekday() != 0:  # 0 = Monday
+        return False
+    scheduled_time = time(hour=scheduled_hour, minute=scheduled_minute)
+    if now.time() < scheduled_time:
+        return False
+    last_run_date = _read_last_run_date()
+    return last_run_date != now.strftime("%Y-%m-%d")
+
+
+def run_weekly_report_if_missed(scheduled_hour: int, scheduled_minute: int) -> None:
+    """Trigger report once on startup if it missed today's slot."""
+    now = datetime.now()
+    if _should_run_catchup(now, scheduled_hour, scheduled_minute):
+        logger.info("[WEEKLY REPORT] ⏱️  Missed scheduled time; running catch-up now.")
+        scheduled_weekly_reports_sync()
+    else:
+        logger.info("[WEEKLY REPORT] No catch-up run needed on startup.")
 
 
 async def scheduled_weekly_reports():
@@ -38,6 +86,7 @@ async def scheduled_weekly_reports():
         temp_dir = tempfile.mkdtemp(prefix="weekly_reports_")
         logger.info(f"[WEEKLY REPORT] Using temp directory: {temp_dir}")
         
+        success = False
         try:
             # Generate report data with Neutara Labs excluded
             logger.info("[WEEKLY REPORT] Fetching team data (excluding Neutara Labs)...")
@@ -104,6 +153,7 @@ async def scheduled_weekly_reports():
                 logger.info("="*70)
                 logger.info("[WEEKLY REPORT] ✅ Weekly report generation completed successfully")
                 logger.info("="*70)
+                _write_last_run_date(datetime.now().strftime("%Y-%m-%d"))
             else:
                 logger.warning("="*70)
                 logger.warning("[WEEKLY REPORT] ⚠️  Weekly report generation completed with warnings")

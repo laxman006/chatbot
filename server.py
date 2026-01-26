@@ -127,7 +127,10 @@ async def lifespan(app: FastAPI):
         from config import WEEKLY_REPORT_ENABLED, WEEKLY_REPORT_SEND_HOUR, WEEKLY_REPORT_SEND_MINUTE
         
         if WEEKLY_REPORT_ENABLED:
-            from app.weekly_reports_scheduler import scheduled_weekly_reports_sync
+            from app.weekly_reports_scheduler import (
+                scheduled_weekly_reports_sync,
+                run_weekly_report_if_missed,
+            )
             
             scheduler.add_job(
                 func=scheduled_weekly_reports_sync,
@@ -137,6 +140,7 @@ async def lifespan(app: FastAPI):
                 replace_existing=True
             )
             logger.info(f"[STARTUP] ✅ Weekly report scheduler started (runs every Monday at {WEEKLY_REPORT_SEND_HOUR:02d}:{WEEKLY_REPORT_SEND_MINUTE:02d})")
+            run_weekly_report_if_missed(WEEKLY_REPORT_SEND_HOUR, WEEKLY_REPORT_SEND_MINUTE)
         else:
             logger.info("[STARTUP] Weekly report scheduler is disabled (WEEKLY_REPORT_ENABLED=false)")
     except Exception as e:
