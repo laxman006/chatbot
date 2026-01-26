@@ -680,6 +680,10 @@ def fetch_latest_sharepoint_limitations(max_items: int = 100) -> List[Document]:
         folder_path = doc.metadata.get('folder_tags', '').replace('sharepoint/', '') or 'Documents'
         doc.metadata['tag'] = f"sharepoint_limitations/{folder_path}"
         
+        # CRITICAL: Add doc_type for easy filtering (PRIMARY FILTER)
+        doc.metadata['doc_type'] = 'limitations'
+        doc.metadata['is_limitations_doc'] = True  # Explicit flag for fallback filtering
+        
         # Preserve and enhance Excel-specific metadata if it's an Excel file
         file_name = doc.metadata.get('file_name', '')
         if file_name and file_name.lower().endswith(('.xlsx', '.xls')):
@@ -688,6 +692,11 @@ def fetch_latest_sharepoint_limitations(max_items: int = 100) -> List[Document]:
             # Add Excel tag for better retrieval
             if 'excel_tag' not in doc.metadata:
                 doc.metadata['excel_tag'] = 'excel'
+            
+            # If filename contains "limitations" or "features", ensure it's marked
+            if 'limitations' in file_name.lower() or 'features' in file_name.lower():
+                doc.metadata['doc_type'] = 'limitations'
+                doc.metadata['is_limitations_doc'] = True
     
     print(f"[OK] Fetched {len(documents)} Limitations SharePoint documents")
     return documents

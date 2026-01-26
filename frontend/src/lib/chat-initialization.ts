@@ -178,6 +178,9 @@ export function initializeChatApp(options: InitOptions = {}) {
   // Session management
   // Only load from localStorage if we're on /chat/[sessionId] route (initialSessionId is explicitly undefined)
   let sessionId: string | null;
+  
+  // Response version tracking: Map<parentTraceId, Array<{version, content, model, isCurrent}>>
+  const responseVersions = new Map<string, Array<{version: number, content: string, model: string, isCurrent: boolean, traceId?: string}>>();
   if (initialSessionId === null) {
     // We're on /chat/new - don't load any existing session
     sessionId = null;
@@ -1284,6 +1287,12 @@ export function initializeChatApp(options: InitOptions = {}) {
           div.setAttribute('data-trace-id', msg.traceId);
         }
         
+        // Store parent_trace_id if available (for versioning)
+        const parentTraceId = (msg as any).parentTraceId || msg.traceId;
+        if (parentTraceId) {
+          div.dataset.parentTraceId = parentTraceId;
+        }
+        
         // Render markdown to HTML first, then make links clickable
         let formattedContent = msg.content;
         
@@ -1309,6 +1318,19 @@ export function initializeChatApp(options: InitOptions = {}) {
                 <path d="M1 8a7 7 0 0 1 7-7v2M15 8a7 7 0 0 1-7 7v-2M8 1l2 2-2 2M8 15l-2-2 2-2"/>
               </svg>
             </button>
+            <div class="version-navigation" style="display: none;">
+              <button class="version-nav-btn prev" data-action="prev-version" title="Previous version" disabled>
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M10 12L6 8l4-4"/>
+                </svg>
+              </button>
+              <span class="version-indicator">1/1</span>
+              <button class="version-nav-btn next" data-action="next-version" title="Next version" disabled>
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M6 12l4-4-4-4"/>
+                </svg>
+              </button>
+            </div>
             ` : ''}
             ${!isReadOnly ? `
             <button class="feedback-btn thumbs-up" data-action="feedback" data-rating="thumbs_up" title="Good response">
@@ -1323,6 +1345,109 @@ export function initializeChatApp(options: InitOptions = {}) {
           ${recommendedQuestionsHTML}
         `;
         messagesDiv!.appendChild(div);
+        
+        // Check version metadata and load correct current version before displaying
+        if (parentTraceId) {
+          // Lightweight check: fetch version metadata first to determine current version
+          (async () => {
+            try {
+              const response = await apiFetch(`/chat/response-versions?parent_trace_id=${encodeURIComponent(parentTraceId)}&metadata_only=true`, {
+                method: 'GET'
+              });
+              
+              if (response.ok) {
+                const data = await response.json();
+                const totalVersions = data.total_versions || 1;
+                
+                // If multiple versions exist, load all versions to get current content
+                if (totalVersions > 1) {
+                  // Load full versions to get current version content
+                  const fullResponse = await apiFetch(`/chat/response-versions?parent_trace_id=${encodeURIComponent(parentTraceId)}`, {
+                    method: 'GET'
+                  });
+                  
+                  if (fullResponse.ok) {
+                    const fullData = await fullResponse.json();
+                    const allVersions = fullData.versions || [];
+                    
+                    if (allVersions.length > 0) {
+                      const versionData = allVersions.map((v: { response_version: number; content: string; model_used?: string; is_current: boolean }) => ({
+                        version: v.response_version,
+                        content: v.content,
+                        model: v.model_used || 'gpt-4o-mini',
+                        isCurrent: v.is_current || false,
+                        traceId: msg.traceId
+                      }));
+                      responseVersions.set(parentTraceId, versionData);
+                      
+                      // Display current version content (not always version 1)
+                      const currentVersionData = versionData.find((v: { isCurrent: boolean }) => v.isCurrent) || versionData[versionData.length - 1];
+                      if (currentVersionData) {
+                        const messageContent = div.querySelector('.message-content') as HTMLElement;
+                        if (messageContent) {
+                          const renderedMarkdown = renderMarkdown(currentVersionData.content);
+                          const contentWithLinks = linkifyText(renderedMarkdown);
+                          messageContent.innerHTML = contentWithLinks;
+                        }
+                        
+                        // Show navigation UI with correct current version
+                        updateVersionNavigation(div, currentVersionData.version, allVersions.length);
+                      }
+                    }
+                  } else {
+                    // Fallback: store initial version if full load fails
+                    responseVersions.set(parentTraceId, [{
+                      version: 1,
+                      content: msg.content,
+                      model: 'gpt-4o-mini',
+                      isCurrent: true,
+                      traceId: msg.traceId
+                    }]);
+                  }
+                } else {
+                  // Only one version, store it
+                  responseVersions.set(parentTraceId, [{
+                    version: 1,
+                    content: msg.content,
+                    model: 'gpt-4o-mini',
+                    isCurrent: true,
+                    traceId: msg.traceId
+                  }]);
+                }
+              } else {
+                // Fallback: store initial version if metadata check fails
+                responseVersions.set(parentTraceId, [{
+                  version: 1,
+                  content: msg.content,
+                  model: 'gpt-4o-mini',
+                  isCurrent: true,
+                  traceId: msg.traceId
+                }]);
+              }
+            } catch (error) {
+              console.error('[VERSION] Failed to check version metadata:', error);
+              // Fallback: store initial version
+              responseVersions.set(parentTraceId, [{
+                version: 1,
+                content: msg.content,
+                model: 'gpt-4o-mini',
+                isCurrent: true,
+                traceId: msg.traceId
+              }]);
+            }
+          })();
+        } else {
+          // No parentTraceId, just store the message as-is
+          if (msg.traceId) {
+            responseVersions.set(msg.traceId, [{
+              version: 1,
+              content: msg.content,
+              model: 'gpt-4o-mini',
+              isCurrent: true,
+              traceId: msg.traceId
+            }]);
+          }
+        }
 
         // If feedback was already submitted, reflect it in the UI and disable buttons
         if (msg.feedbackSubmitted) {
@@ -2146,6 +2271,19 @@ export function initializeChatApp(options: InitOptions = {}) {
               <path d="M1 8a7 7 0 0 1 7-7v2M15 8a7 7 0 0 1-7 7v-2M8 1l2 2-2 2M8 15l-2-2 2-2"/>
             </svg>
           </button>
+          <div class="version-navigation" style="display: none;">
+            <button class="version-nav-btn prev" data-action="prev-version" title="Previous version" disabled>
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M10 12L6 8l4-4"/>
+              </svg>
+            </button>
+            <span class="version-indicator">1/1</span>
+            <button class="version-nav-btn next" data-action="next-version" title="Next version" disabled>
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M6 12l4-4-4-4"/>
+              </svg>
+            </button>
+          </div>
           ` : ''}
           ${!isReadOnlyMode ? `
           <button class="feedback-btn thumbs-up" data-action="feedback" data-rating="thumbs_up" title="Good response">
@@ -2535,6 +2673,21 @@ export function initializeChatApp(options: InitOptions = {}) {
                 const traceId = data.trace_id;
                 const recommendedQuestions = data.recommended_questions || [];
                 
+                // Store initial version (version 1) in responseVersions Map
+                if (traceId) {
+                  // Use traceId as parent_trace_id for initial response
+                  responseVersions.set(traceId, [{
+                    version: 1,
+                    content: fullResponse,
+                    model: 'gpt-4o-mini',
+                    isCurrent: true,
+                    traceId: traceId
+                  }]);
+                  
+                  // Store parent_trace_id on message div
+                  botDiv.dataset.parentTraceId = traceId;
+                }
+                
                 // Log trace_id status for debugging
                 if (traceId) {
                   console.log('[TRACE_ID] ✓ Received trace_id from backend:', traceId);
@@ -2595,6 +2748,19 @@ export function initializeChatApp(options: InitOptions = {}) {
                         <path d="M1 8a7 7 0 0 1 7-7v2M15 8a7 7 0 0 1-7 7v-2M8 1l2 2-2 2M8 15l-2-2 2-2"/>
                       </svg>
                     </button>
+                    <div class="version-navigation" style="display: none;">
+                      <button class="version-nav-btn prev" data-action="prev-version" title="Previous version" disabled>
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+                          <path d="M10 12L6 8l4-4"/>
+                        </svg>
+                      </button>
+                      <span class="version-indicator">1/1</span>
+                      <button class="version-nav-btn next" data-action="next-version" title="Next version" disabled>
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+                          <path d="M6 12l4-4-4-4"/>
+                        </svg>
+                      </button>
+                    </div>
                     ` : ''}
                     <button class="feedback-btn thumbs-up ${feedbackDisabledClass}" 
                             data-action="feedback" 
@@ -2790,16 +2956,25 @@ export function initializeChatApp(options: InitOptions = {}) {
       return;
     }
     
-    // Get retry attempt count from button or message
+    // Get parent trace ID to determine current version count
+    const parentTraceId = messageDiv.dataset.parentTraceId || traceId;
+    
+    // Calculate retry attempt based on existing versions
     let retryAttempt = 1;
-    const attemptAttr = button.getAttribute('data-retry-attempt');
-    if (attemptAttr) {
-      retryAttempt = parseInt(attemptAttr, 10) + 1;
+    if (parentTraceId && responseVersions.has(parentTraceId)) {
+      // Get current version count from existing versions
+      const existingVersions = responseVersions.get(parentTraceId)!;
+      retryAttempt = existingVersions.length; // Next retry will be this number
     } else {
-      // Check if this message has been retried before
-      const existingAttempt = messageDiv.dataset.retryAttempt;
-      if (existingAttempt) {
-        retryAttempt = parseInt(existingAttempt, 10) + 1;
+      // Fallback: check button or message attribute
+      const attemptAttr = button.getAttribute('data-retry-attempt');
+      if (attemptAttr) {
+        retryAttempt = parseInt(attemptAttr, 10) + 1;
+      } else {
+        const existingAttempt = messageDiv.dataset.retryAttempt;
+        if (existingAttempt) {
+          retryAttempt = parseInt(existingAttempt, 10) + 1;
+        }
       }
     }
     
@@ -2857,6 +3032,15 @@ export function initializeChatApp(options: InitOptions = {}) {
         throw new Error('Could not find message content area');
       }
       
+      // Get parent_trace_id (use traceId as parent for versioning)
+      const parentTraceId = traceId;
+      if (!parentTraceId) {
+        throw new Error('No parent trace ID found for versioning');
+      }
+      
+      // Store current version content before replacing
+      const currentContent = messageContent.textContent || messageContent.innerText || '';
+      
       // Clear existing content and show loading
       messageContent.innerHTML = '<div class="thinking">Regenerating response<span class="thinking-dots"><span></span><span></span><span></span></span></div>';
       
@@ -2865,6 +3049,8 @@ export function initializeChatApp(options: InitOptions = {}) {
       const decoder = new TextDecoder();
       let buffer = '';
       let newTraceId: string | null = null;
+      let parentTraceIdFromResponse: string | null = null;
+      let responseVersion: number = 1;
       let fullResponse = '';
       let isStreamingContent = false;
       
@@ -2902,13 +3088,55 @@ export function initializeChatApp(options: InitOptions = {}) {
                 // Complete
                 fullResponse = data.full_response || fullResponse;
                 newTraceId = data.trace_id || null;
+                parentTraceIdFromResponse = data.parent_trace_id || parentTraceId;
+                // Use response_version from backend (it's calculated correctly there)
+                responseVersion = data.response_version || (retryAttempt + 1);
+                
                 if (newTraceId) {
                   messageDiv.dataset.traceId = newTraceId;
+                  messageDiv.dataset.parentTraceId = parentTraceIdFromResponse || '';
                   // Update retry button trace ID
                   button.setAttribute('data-trace-id', newTraceId);
                 }
+                
+                // Convert null to undefined for traceId
+                const traceIdForVersion = newTraceId ?? undefined;
+                
+                // Store new version in responseVersions Map
+                if (parentTraceIdFromResponse) {
+                  if (!responseVersions.has(parentTraceIdFromResponse)) {
+                    // First version (initial response) - add it if not already stored
+                    responseVersions.set(parentTraceIdFromResponse, [{
+                      version: 1,
+                      content: currentContent,
+                      model: 'gpt-4o-mini',
+                      isCurrent: false,
+                      traceId: traceId
+                    }]);
+                  }
+                  
+                  // Add new version
+                  const versions = responseVersions.get(parentTraceIdFromResponse)!;
+                  // Mark all previous versions as not current
+                  versions.forEach(v => v.isCurrent = false);
+                  // Add new version with the version number from backend
+                  versions.push({
+                    version: responseVersion,
+                    content: fullResponse,
+                    model: 'gpt-4o',
+                    isCurrent: true,
+                    traceId: traceIdForVersion
+                  });
+                  
+                  // Update version navigation UI with correct version numbers
+                  // responseVersion is the new version number, versions.length is total count
+                  updateVersionNavigation(messageDiv, responseVersion, versions.length);
+                  
+                  console.log(`[RETRY] Version ${responseVersion}/${versions.length} saved. Total versions: ${versions.length}`);
+                }
+                
                 messageContent.innerHTML = renderMarkdown(fullResponse);
-                console.log('[RETRY] Retry completed successfully');
+                console.log('[RETRY] Retry completed successfully, version:', responseVersion);
               } else if (data.type === 'error') {
                 throw new Error(data.message || 'Retry failed');
               }
@@ -2934,6 +3162,226 @@ export function initializeChatApp(options: InitOptions = {}) {
       button.disabled = false;
       button.classList.remove('loading');
       button.innerHTML = originalHTML;
+    }
+  }
+  
+  // Version navigation functions
+  function updateVersionNavigation(messageDiv: HTMLElement, currentVersion: number, totalVersions: number) {
+    if (totalVersions <= 1) {
+      // Hide navigation if only one version
+      const nav = messageDiv.querySelector('.version-navigation');
+      if (nav) {
+        (nav as HTMLElement).style.display = 'none';
+      }
+      return;
+    }
+    
+    // Show navigation
+    let nav = messageDiv.querySelector('.version-navigation') as HTMLElement;
+    if (!nav) {
+      // Create navigation if it doesn't exist
+      const feedbackButtons = messageDiv.querySelector('.feedback-buttons');
+      if (feedbackButtons) {
+        nav = document.createElement('div');
+        nav.className = 'version-navigation';
+        const retryButton = feedbackButtons.querySelector('.retry-button');
+        if (retryButton && retryButton.nextSibling) {
+          feedbackButtons.insertBefore(nav, retryButton.nextSibling);
+        } else {
+          feedbackButtons.appendChild(nav);
+        }
+        
+        // Add navigation HTML
+        nav.innerHTML = `
+          <button class="version-nav-btn prev" data-action="prev-version" title="Previous version" disabled>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M10 12L6 8l4-4"/>
+            </svg>
+          </button>
+          <span class="version-indicator">1/1</span>
+          <button class="version-nav-btn next" data-action="next-version" title="Next version" disabled>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M6 12l4-4-4-4"/>
+            </svg>
+          </button>
+        `;
+      } else {
+        return;
+      }
+    }
+    
+    nav.style.display = 'flex';
+    
+    // Update indicator
+    const indicator = nav.querySelector('.version-indicator') as HTMLElement;
+    if (indicator) {
+      indicator.textContent = `${currentVersion}/${totalVersions}`;
+    }
+    
+    // Update button states
+    const prevBtn = nav.querySelector('.version-nav-btn.prev') as HTMLButtonElement;
+    const nextBtn = nav.querySelector('.version-nav-btn.next') as HTMLButtonElement;
+    
+    if (prevBtn) {
+      prevBtn.disabled = currentVersion === 1;
+    }
+    if (nextBtn) {
+      nextBtn.disabled = currentVersion === totalVersions;
+    }
+  }
+  
+  // Lazy load versions from backend if not already loaded
+  async function ensureVersionsLoaded(parentTraceId: string, messageDiv: HTMLElement): Promise<boolean> {
+    // Check if we already have versions loaded (more than just version 1)
+    const existingVersions = responseVersions.get(parentTraceId);
+    if (existingVersions && existingVersions.length > 1) {
+      return true; // Already loaded
+    }
+    
+    // Check if we're currently loading
+    const loadingKey = `loading_${parentTraceId}`;
+    if ((window as any)[loadingKey]) {
+      // Wait for existing load to complete
+      return new Promise((resolve) => {
+        const checkInterval = setInterval(() => {
+          const versions = responseVersions.get(parentTraceId);
+          if (versions && versions.length > 1) {
+            clearInterval(checkInterval);
+            delete (window as any)[loadingKey];
+            resolve(true);
+          } else if (!(window as any)[loadingKey]) {
+            clearInterval(checkInterval);
+            resolve(false);
+          }
+        }, 100);
+      });
+    }
+    
+    // Mark as loading and show loading state on navigation buttons
+    (window as any)[loadingKey] = true;
+    const nav = messageDiv.querySelector('.version-navigation') as HTMLElement;
+    if (nav) {
+      const prevBtn = nav.querySelector('.version-nav-btn.prev') as HTMLButtonElement;
+      const nextBtn = nav.querySelector('.version-nav-btn.next') as HTMLButtonElement;
+      if (prevBtn) prevBtn.disabled = true;
+      if (nextBtn) nextBtn.disabled = true;
+    }
+    
+    try {
+      const response = await apiFetch(`/chat/response-versions?parent_trace_id=${encodeURIComponent(parentTraceId)}`, {
+        method: 'GET'
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        const versions = data.versions || [];
+        
+        if (versions.length > 0) {
+          // Store versions in responseVersions Map
+          const versionData = versions.map((v: any) => ({
+            version: v.response_version,
+            content: v.content,
+            model: v.model_used || 'gpt-4o-mini',
+            isCurrent: v.is_current || false,
+            traceId: messageDiv.dataset.traceId
+          }));
+          responseVersions.set(parentTraceId, versionData);
+          
+          // Show navigation UI if multiple versions exist
+          if (versions.length > 1) {
+            const currentVersion = versions.find((v: any) => v.is_current) || versions[versions.length - 1];
+            const currentVersionNum = currentVersion.response_version || versions.length;
+            updateVersionNavigation(messageDiv, currentVersionNum, versions.length);
+          }
+          
+          delete (window as any)[loadingKey];
+          return true;
+        }
+      }
+      
+      delete (window as any)[loadingKey];
+      return false;
+    } catch (error) {
+      console.error('[VERSION] Failed to load versions from backend:', error);
+      delete (window as any)[loadingKey];
+      return false;
+    }
+  }
+  
+  async function showVersion(messageDiv: HTMLElement, versionNumber: number) {
+    const parentTraceId = messageDiv.dataset.parentTraceId;
+    if (!parentTraceId) {
+      console.error('[VERSION] No parent trace ID found');
+      return;
+    }
+    
+    // Lazy load versions if not already loaded
+    await ensureVersionsLoaded(parentTraceId, messageDiv);
+    
+    const versions = responseVersions.get(parentTraceId);
+    if (!versions || versions.length === 0) {
+      console.error('[VERSION] No versions found for parent trace ID');
+      return;
+    }
+    
+    const version = versions.find(v => v.version === versionNumber);
+    if (!version) {
+      console.error(`[VERSION] Version ${versionNumber} not found`);
+      return;
+    }
+    
+    // Update content with markdown rendering and linkify
+    const messageContent = messageDiv.querySelector('.message-content') as HTMLElement;
+    if (messageContent) {
+      const renderedMarkdown = renderMarkdown(version.content);
+      const contentWithLinks = linkifyText(renderedMarkdown);
+      messageContent.innerHTML = contentWithLinks;
+    }
+    
+    // Update current version flags
+    versions.forEach(v => v.isCurrent = (v.version === versionNumber));
+    
+    // Update navigation UI
+    updateVersionNavigation(messageDiv, versionNumber, versions.length);
+    
+    console.log(`[VERSION] Switched to version ${versionNumber}`);
+  }
+  
+  async function prevVersion(button: HTMLButtonElement) {
+    const messageDiv = button.closest('.message.bot') as HTMLElement;
+    if (!messageDiv) return;
+    
+    const parentTraceId = messageDiv.dataset.parentTraceId;
+    if (!parentTraceId) return;
+    
+    // Lazy load versions if not already loaded
+    await ensureVersionsLoaded(parentTraceId, messageDiv);
+    
+    const versions = responseVersions.get(parentTraceId);
+    if (!versions || versions.length === 0) return;
+    
+    const currentVersion = versions.find(v => v.isCurrent)?.version || versions.length;
+    if (currentVersion > 1) {
+      await showVersion(messageDiv, currentVersion - 1);
+    }
+  }
+  
+  async function nextVersion(button: HTMLButtonElement) {
+    const messageDiv = button.closest('.message.bot') as HTMLElement;
+    if (!messageDiv) return;
+    
+    const parentTraceId = messageDiv.dataset.parentTraceId;
+    if (!parentTraceId) return;
+    
+    // Lazy load versions if not already loaded
+    await ensureVersionsLoaded(parentTraceId, messageDiv);
+    
+    const versions = responseVersions.get(parentTraceId);
+    if (!versions || versions.length === 0) return;
+    
+    const currentVersion = versions.find(v => v.isCurrent)?.version || 1;
+    if (currentVersion < versions.length) {
+      await showVersion(messageDiv, currentVersion + 1);
     }
   }
 
@@ -4680,6 +5128,12 @@ export function initializeChatApp(options: InitOptions = {}) {
           break;
         case 'retry-message':
           retryMessage(button as HTMLButtonElement);
+          break;
+        case 'prev-version':
+          prevVersion(button as HTMLButtonElement);
+          break;
+        case 'next-version':
+          nextVersion(button as HTMLButtonElement);
           break;
         case 'feedback':
           const rating = button.getAttribute('data-rating');

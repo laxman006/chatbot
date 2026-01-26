@@ -297,6 +297,9 @@ WEEKLY_REPORT_ENABLED = os.getenv("WEEKLY_REPORT_ENABLED", "true").lower() == "t
 WEEKLY_REPORT_SEND_HOUR = int(os.getenv("WEEKLY_REPORT_SEND_HOUR", "12"))  # Default: 12:00 PM (noon)
 WEEKLY_REPORT_SEND_MINUTE = int(os.getenv("WEEKLY_REPORT_SEND_MINUTE", "0"))  # Default: 0 minutes
 WEEKLY_REPORT_SENDER_EMAIL = os.getenv("WEEKLY_REPORT_SENDER_EMAIL", "")  # Email address to send reports from
+# Scheduler timezone (e.g., "America/New_York", "America/Los_Angeles", "UTC", "Asia/Kolkata")
+# Default: Use system local timezone
+SCHEDULER_TIMEZONE = os.getenv("SCHEDULER_TIMEZONE", None)  # None = use system local timezone
 
 # Langfuse configuration for observability
 LANGFUSE_PUBLIC_KEY = os.getenv("LANGFUSE_PUBLIC_KEY")

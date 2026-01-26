@@ -11,6 +11,31 @@ from langchain_core.documents import Document
 from collections import defaultdict
 
 
+def chroma_where(**kwargs):
+    """
+    Helper function to create ChromaDB-compatible where filters.
+    
+    ChromaDB requires multi-field filters to use $and operator.
+    This function automatically formats filters correctly.
+    
+    Args:
+        **kwargs: Filter field-value pairs (e.g., source_type="web", tag="blog")
+    
+    Returns:
+        None if no filters provided, single field dict if one field, or $and dict if multiple fields
+    
+    Example:
+        chroma_where(source_type="web", tag="blog")
+        # Returns: {"$and": [{"source_type": "web"}, {"tag": "blog"}]}
+    """
+    items = [{k: v} for k, v in kwargs.items() if v is not None]
+    if len(items) == 0:
+        return None
+    if len(items) == 1:
+        return items[0]
+    return {"$and": items}
+
+
 def retrieve_from_source(
     vectorstore,
     query: str, 
@@ -42,9 +67,9 @@ def retrieve_from_source(
         # Try each strategy in order until we get results
         source_filter_strategies = {
             "blog": [
-                {"source_type": "web", "tag": "blog"},  # Primary: blog posts are tagged as "web"
-                {"tag": "blog"},                         # Fallback: tag only
-                {"source": "cloudfuze_blog"},           # Fallback: source field
+                chroma_where(source_type="web", tag="blog"),  # Primary: blog posts are tagged as "web"
+                chroma_where(tag="blog"),                      # Fallback: tag only
+                chroma_where(source="cloudfuze_blog"),        # Fallback: source field
             ],
             "sharepoint": [
                 {"source_type": "sharepoint"},           # Primary
@@ -163,6 +188,101 @@ def retrieve_from_jira(
         return []
 
 
+def retrieve_limitations_documents(
+    vectorstore,
+    query: str,
+    k: int = 4
+) -> List[Tuple[Document, float]]:
+    """
+    ALWAYS retrieve limitations documents regardless of query.
+    This ensures limitations/features/support questions get correct answers.
+    
+    Uses doc_type="limitations" as primary filter (most reliable).
+    
+    Args:
+        vectorstore: Main vectorstore instance
+        query: User query (used for semantic search, kept clean)
+        k: Number of limitations documents to retrieve (default: 4)
+    
+    Returns:
+        List of (document, score) tuples from limitations source
+    """
+    if not vectorstore or k == 0:
+        return []
+    
+    try:
+        # ✅ CHECK 2: Use strongest filter first (source_type is most reliable)
+        # PRIMARY: Filter by source_type (strongest, most reliable)
+        # FALLBACK: Try other metadata fields if source_type doesn't exist
+        filter_strategies = [
+            {"source_type": "sharepoint_limitations"},      # Primary: strongest filter
+            {"doc_type": "limitations"},                    # Fallback: doc_type
+            {"is_limitations_doc": True},                   # Fallback: explicit flag
+            chroma_where(tag="sharepoint_limitations"),      # Fallback: tag filter
+        ]
+        
+        results = []
+        search_query = query  # Keep query clean for semantic relevance
+        
+        # Try each filter strategy until we get results
+        for i, filter_dict in enumerate(filter_strategies):
+            try:
+                print(f"[LIMITATIONS] Trying filter strategy {i+1}/{len(filter_strategies)}: {filter_dict}")
+                results = vectorstore.similarity_search_with_score(
+                    search_query,
+                    k=k,
+                    filter=filter_dict
+                )
+                
+                if results:
+                    print(f"[LIMITATIONS] ✓ Strategy {i+1} succeeded: retrieved {len(results)} limitations documents")
+                    break
+                else:
+                    print(f"[LIMITATIONS] ✗ Strategy {i+1} returned 0 documents, trying next...")
+                    
+            except Exception as strategy_error:
+                print(f"[LIMITATIONS] ✗ Strategy {i+1} failed with error: {strategy_error}, trying next...")
+                continue
+        
+        # If no filtered results, try fallback query with post-filtering
+        if not results:
+            print("[LIMITATIONS] All filter strategies failed, trying fallback query with post-filtering...")
+            try:
+                # Use a stable fallback query for limitations topics
+                fallback_query = "limitations supported features not supported"
+                all_results = vectorstore.similarity_search_with_score(
+                    fallback_query, 
+                    k=k*3
+                )
+                
+                # Post-filter for limitations keywords in metadata or content
+                for doc, dist in all_results:
+                    metadata_str = " ".join(str(v).lower() for v in doc.metadata.values())
+                    content_str = doc.page_content.lower()
+                    
+                    keywords = ["limitations", "sharepoint_limitations", "features", "supported", "not supported"]
+                    if any(kw in metadata_str or kw in content_str for kw in keywords):
+                        results.append((doc, dist))
+                        if len(results) >= k:
+                            break
+                
+                if results:
+                    print(f"[LIMITATIONS] ✓ Post-filtering found {len(results)} limitations documents")
+                else:
+                    print(f"[LIMITATIONS] ✗ Post-filtering found no matches")
+                    
+            except Exception as post_error:
+                print(f"[LIMITATIONS] ✗ Post-filtering failed: {post_error}")
+        
+        return [(doc, float(dist)) for doc, dist in results]
+        
+    except Exception as e:
+        print(f"[ERROR] Limitations retrieval failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
+
+
 def deduplicate_by_content(
     candidates: List[Tuple[Document, float]],
     fingerprint_length: int = 400
@@ -233,39 +353,29 @@ def merge_source_results(
     source_priorities: Optional[Dict[str, float]] = None
 ) -> List[Tuple[Document, float]]:
     """
-    Merge results from multiple sources with optional priority weighting.
+    Merge results from multiple sources with priority weighting.
+    
+    Uses SIMPLE boost: only limitations docs get special boost (0.7x score).
+    All other sources keep original scores to avoid distortion.
     
     Args:
         results_by_source: Dictionary mapping source names to result lists
-        source_priorities: Optional dict mapping source names to priority weights (0-1)
+        source_priorities: Optional dict (not used in simple version, kept for compatibility)
         
     Returns:
         Merged and sorted list of (document, score) tuples
     """
     merged = []
     
-    # Default priorities if not provided
-    if source_priorities is None:
-        source_priorities = {
-            "jira": 1.0,      # Highest priority
-            "blog": 0.9,
-            "sharepoint": 0.85,
-            "pdfs": 0.8,
-            "transcripts": 0.7,
-            "excel": 0.75
-        }
-    
     for source_name, results in results_by_source.items():
-        priority = source_priorities.get(source_name, 0.8)
-        
-        # Apply priority boost by adjusting scores
-        # Lower score is better, so multiply by (2 - priority) to boost high-priority sources
-        # priority=1.0 → multiplier=1.0 (no change)
-        # priority=0.5 → multiplier=1.5 (higher distance, lower priority)
-        multiplier = 2.0 - priority
-        
         for doc, score in results:
-            adjusted_score = score * multiplier
+            # SIMPLE BOOST: Only limitations get special treatment
+            # Lower score = better, so 0.7x = boost (reduces distance)
+            if source_name == "limitations" or doc.metadata.get("source_type") == "sharepoint_limitations":
+                adjusted_score = score * 0.7  # Boost limitations docs
+            else:
+                adjusted_score = score  # Keep original score for all others
+            
             merged.append((doc, adjusted_score))
     
     # Sort by adjusted score (lower is better)
@@ -315,7 +425,8 @@ def intelligent_multi_source_retrieve(
     jira_vectorstore,
     query: str,
     routing_plan: Dict,
-    enable_deduplication: bool = True
+    enable_deduplication: bool = True,
+    always_include_limitations: bool = True  # NEW PARAMETER
 ) -> List[Tuple[Document, float]]:
     """
     Retrieve documents from multiple sources based on routing plan.
@@ -326,6 +437,7 @@ def intelligent_multi_source_retrieve(
         query: User query
         routing_plan: Routing plan from IntelligentQueryRouter
         enable_deduplication: Whether to deduplicate results
+        always_include_limitations: If True, always fetch limitations docs (default: True)
         
     Returns:
         List of (document, score) tuples (score is distance, lower=better)
@@ -336,6 +448,17 @@ def intelligent_multi_source_retrieve(
     
     # Track retrieval statistics
     retrieval_stats = defaultdict(int)
+    
+    # ============ PINNED LIMITATIONS RETRIEVAL (ALWAYS FIRST) ============
+    if always_include_limitations:
+        print(f"\n[RETRIEVAL] ━━━ PINNED: Fetching limitations documents (ALWAYS INCLUDED) ━━━")
+        limitations_docs = retrieve_limitations_documents(vectorstore, query, k=4)
+        if limitations_docs:
+            results_by_source["limitations"] = limitations_docs
+            retrieval_stats["limitations"] = len(limitations_docs)
+            print(f"[RETRIEVAL] ✓ Retrieved {len(limitations_docs)} limitations documents (PINNED)")
+        else:
+            print(f"[RETRIEVAL] ⚠ No limitations documents found (will continue with other sources)")
     
     # 1. Blog retrieval (from main vectorstore with source_type filter)
     blog_k = sources_plan.get("blog", {}).get("k", 0)

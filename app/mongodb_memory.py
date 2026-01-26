@@ -1299,14 +1299,29 @@ class MongoDBMemoryManager:
             logger.error(f"Error getting user profile for {user_id}: {e}")
             return None
     
-    async def save_message(self, session_id: str, role: str, content: str):
+    async def save_message(
+        self, 
+        session_id: str, 
+        role: str, 
+        content: str,
+        response_version: int = 1,
+        parent_trace_id: str = None,
+        model_used: str = None,
+        is_current: bool = True,
+        retry_attempt: int = None
+    ):
         """
-        Save a message to the chat_messages collection.
+        Save a message to the chat_messages collection with optional versioning support.
         
         Args:
             session_id: Session identifier
             role: Message role ("user" or "assistant")
             content: Message content
+            response_version: Version number (1 = initial, 2+ = retries)
+            parent_trace_id: Trace ID linking all versions of the same response
+            model_used: Model name used ("gpt-4o-mini" or "gpt-4o")
+            is_current: Whether this is the currently active version
+            retry_attempt: Retry attempt number (None for initial response)
         """
         await self.connect()
         
@@ -1320,8 +1335,19 @@ class MongoDBMemoryManager:
                 "created_at": datetime.utcnow()
             }
             
+            # Add versioning fields if provided (for assistant messages)
+            if role == "assistant":
+                message_doc["response_version"] = response_version
+                if parent_trace_id:
+                    message_doc["parent_trace_id"] = parent_trace_id
+                if model_used:
+                    message_doc["model_used"] = model_used
+                message_doc["is_current"] = is_current
+                if retry_attempt is not None:
+                    message_doc["retry_attempt"] = retry_attempt
+            
             await chat_messages_collection.insert_one(message_doc)
-            logger.debug(f"Saved {role} message for session {session_id[:8]}...")
+            logger.debug(f"Saved {role} message (version {response_version}) for session {session_id[:8]}...")
             
         except Exception as e:
             logger.error(f"Error saving message for session {session_id}: {e}")
@@ -1375,7 +1401,133 @@ class MongoDBMemoryManager:
         except Exception as e:
             logger.error(f"Error getting last messages for session {session_id}: {e}")
             return []
-
+    
+    async def get_response_versions(self, parent_trace_id: str) -> List[Dict]:
+        """
+        Get all response versions for a given parent_trace_id.
+        
+        Args:
+            parent_trace_id: Parent trace ID linking all versions
+            
+        Returns:
+            List of version documents ordered by response_version ascending
+        """
+        await self.connect()
+        
+        try:
+            chat_messages_collection = self.database["chat_messages"]
+            
+            cursor = chat_messages_collection.find(
+                {"parent_trace_id": parent_trace_id, "role": "assistant"}
+            ).sort("response_version", 1)
+            
+            versions = await cursor.to_list(length=None)
+            
+            # Convert ObjectId to string and format
+            formatted_versions = []
+            for version in versions:
+                formatted = {
+                    "response_version": version.get("response_version", 1),
+                    "content": version.get("content", ""),
+                    "model_used": version.get("model_used", "gpt-4o-mini"),
+                    "created_at": version.get("created_at").isoformat() if version.get("created_at") else None,
+                    "is_current": version.get("is_current", False),
+                    "retry_attempt": version.get("retry_attempt")
+                }
+                formatted_versions.append(formatted)
+            
+            logger.debug(f"Retrieved {len(formatted_versions)} versions for parent_trace_id {parent_trace_id[:8]}...")
+            return formatted_versions
+            
+        except Exception as e:
+            logger.error(f"Error getting response versions for {parent_trace_id}: {e}")
+            return []
+    
+    async def mark_all_versions_not_current(self, parent_trace_id: str):
+        """
+        Mark all existing versions as not current (used before saving a new version).
+        
+        Args:
+            parent_trace_id: Parent trace ID
+        """
+        await self.connect()
+        
+        try:
+            chat_messages_collection = self.database["chat_messages"]
+            
+            result = await chat_messages_collection.update_many(
+                {"parent_trace_id": parent_trace_id, "role": "assistant"},
+                {"$set": {"is_current": False}}
+            )
+            
+            if result.modified_count > 0:
+                logger.debug(f"Marked {result.modified_count} previous versions as not current for parent_trace_id {parent_trace_id[:8]}...")
+            
+        except Exception as e:
+            logger.error(f"Error marking versions as not current for {parent_trace_id}: {e}")
+    
+    async def set_current_version(self, parent_trace_id: str, response_version: int):
+        """
+        Mark a specific version as current and set all others to not current.
+        
+        Args:
+            parent_trace_id: Parent trace ID
+            response_version: Version number to mark as current
+        """
+        await self.connect()
+        
+        try:
+            chat_messages_collection = self.database["chat_messages"]
+            
+            # Set all versions to not current
+            await chat_messages_collection.update_many(
+                {"parent_trace_id": parent_trace_id, "role": "assistant"},
+                {"$set": {"is_current": False}}
+            )
+            
+            # Set the specified version as current
+            result = await chat_messages_collection.update_one(
+                {"parent_trace_id": parent_trace_id, "response_version": response_version, "role": "assistant"},
+                {"$set": {"is_current": True}}
+            )
+            
+            if result.modified_count > 0:
+                logger.debug(f"Set version {response_version} as current for parent_trace_id {parent_trace_id[:8]}...")
+            else:
+                logger.warning(f"Could not set version {response_version} as current - version not found")
+            
+        except Exception as e:
+            logger.error(f"Error setting current version for {parent_trace_id}: {e}")
+    
+    async def get_max_version(self, parent_trace_id: str) -> int:
+        """
+        Get the maximum version number for a given parent_trace_id.
+        
+        Args:
+            parent_trace_id: Parent trace ID
+            
+        Returns:
+            Maximum version number (0 if no versions found)
+        """
+        await self.connect()
+        
+        try:
+            chat_messages_collection = self.database["chat_messages"]
+            
+            result = await chat_messages_collection.find_one(
+                {"parent_trace_id": parent_trace_id, "role": "assistant"},
+                sort=[("response_version", -1)]
+            )
+            
+            if result and "response_version" in result:
+                return result["response_version"]
+            
+            return 0
+            
+        except Exception as e:
+            logger.error(f"Error getting max version for {parent_trace_id}: {e}")
+            return 0
+    
 # Global instance
 mongodb_memory = MongoDBMemoryManager()
 
@@ -1494,9 +1646,37 @@ async def migrate_existing_data_to_user_activity():
     return await mongodb_memory.migrate_existing_data_to_user_activity()
 
 # Conversational memory functions
-async def save_message(session_id: str, role: str, content: str):
-    """Save a message to the chat_messages collection."""
-    await mongodb_memory.save_message(session_id, role, content)
+async def save_message(
+    session_id: str, 
+    role: str, 
+    content: str,
+    response_version: int = 1,
+    parent_trace_id: str = None,
+    model_used: str = None,
+    is_current: bool = True,
+    retry_attempt: int = None
+):
+    """Save a message to the chat_messages collection with optional versioning support."""
+    await mongodb_memory.save_message(
+        session_id, role, content, response_version, parent_trace_id, 
+        model_used, is_current, retry_attempt
+    )
+
+async def get_response_versions(parent_trace_id: str) -> List[Dict]:
+    """Get all response versions for a given parent_trace_id."""
+    return await mongodb_memory.get_response_versions(parent_trace_id)
+
+async def set_current_version(parent_trace_id: str, response_version: int):
+    """Mark a specific version as current and set all others to not current."""
+    await mongodb_memory.set_current_version(parent_trace_id, response_version)
+
+async def get_max_version(parent_trace_id: str) -> int:
+    """Get the maximum version number for a given parent_trace_id."""
+    return await mongodb_memory.get_max_version(parent_trace_id)
+
+async def mark_all_versions_not_current(parent_trace_id: str):
+    """Mark all existing versions as not current."""
+    await mongodb_memory.mark_all_versions_not_current(parent_trace_id)
 
 async def get_last_messages(session_id: str, limit: int = 8) -> List[Dict[str, str]]:
     """Get the last N messages for a session, ordered from oldest to newest."""

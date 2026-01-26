@@ -14,6 +14,7 @@ import logging
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 import atexit
+import pytz
 
 # Configure logging
 logging.basicConfig(
@@ -23,8 +24,26 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Initialize scheduler for Jira sync
-scheduler = BackgroundScheduler()
+# Initialize scheduler for Jira sync with timezone support
+# Get timezone from config or use system local timezone
+from config import SCHEDULER_TIMEZONE
+scheduler_timezone = None
+
+if SCHEDULER_TIMEZONE:
+    try:
+        scheduler_timezone = pytz.timezone(SCHEDULER_TIMEZONE)
+        logger.info(f"[SCHEDULER] Using configured timezone: {SCHEDULER_TIMEZONE}")
+    except Exception as e:
+        logger.warning(f"[SCHEDULER] Invalid timezone '{SCHEDULER_TIMEZONE}', using UTC. Error: {e}")
+        scheduler_timezone = pytz.UTC
+        logger.info(f"[SCHEDULER] Defaulting to UTC timezone")
+else:
+    # Use UTC by default (can be overridden with SCHEDULER_TIMEZONE env var)
+    # Common timezones: 'America/New_York', 'America/Los_Angeles', 'Asia/Kolkata', 'Europe/London'
+    scheduler_timezone = pytz.UTC
+    logger.info(f"[SCHEDULER] Using UTC timezone (set SCHEDULER_TIMEZONE env var to change, e.g., 'America/New_York')")
+
+scheduler = BackgroundScheduler(timezone=scheduler_timezone)
 
 def scheduled_jira_sync():
     """
@@ -109,16 +128,17 @@ async def lifespan(app: FastAPI):
     # Start Jira sync scheduler (your feature)
     try:
         sync_hour = int(os.getenv("JIRA_SYNC_HOUR", "2"))  # Default: 2 AM
+        timezone_str = SCHEDULER_TIMEZONE if SCHEDULER_TIMEZONE else "system local timezone"
         
         scheduler.add_job(
             func=scheduled_jira_sync,
-            trigger=CronTrigger(hour=sync_hour, minute=0),  # Daily at specified hour
+            trigger=CronTrigger(hour=sync_hour, minute=0, timezone=scheduler_timezone),  # Daily at specified hour
             id='jira_sync_job',
             name='Daily Jira Ticket Sync',
             replace_existing=True
         )
         scheduler.start()
-        logger.info(f"[STARTUP] ✅ Jira sync scheduler started (runs daily at {sync_hour}:00 AM)")
+        logger.info(f"[STARTUP] ✅ Jira sync scheduler started (runs daily at {sync_hour}:00 {timezone_str})")
     except Exception as e:
         logger.error(f"[STARTUP] ❌ Failed to start Jira sync scheduler: {e}", exc_info=True)
     
@@ -129,14 +149,16 @@ async def lifespan(app: FastAPI):
         if WEEKLY_REPORT_ENABLED:
             from app.weekly_reports_scheduler import scheduled_weekly_reports_sync
             
+            # Use the same timezone as scheduler initialization
+            timezone_str = SCHEDULER_TIMEZONE if SCHEDULER_TIMEZONE else "system local timezone"
             scheduler.add_job(
                 func=scheduled_weekly_reports_sync,
-                trigger=CronTrigger(day_of_week='mon', hour=WEEKLY_REPORT_SEND_HOUR, minute=WEEKLY_REPORT_SEND_MINUTE),
+                trigger=CronTrigger(day_of_week='mon', hour=WEEKLY_REPORT_SEND_HOUR, minute=WEEKLY_REPORT_SEND_MINUTE, timezone=scheduler_timezone),
                 id='weekly_report_job',
                 name='Weekly Team Leaderboard Report',
                 replace_existing=True
             )
-            logger.info(f"[STARTUP] ✅ Weekly report scheduler started (runs every Monday at {WEEKLY_REPORT_SEND_HOUR:02d}:{WEEKLY_REPORT_SEND_MINUTE:02d})")
+            logger.info(f"[STARTUP] ✅ Weekly report scheduler started (runs every Monday at {WEEKLY_REPORT_SEND_HOUR:02d}:{WEEKLY_REPORT_SEND_MINUTE:02d} {timezone_str})")
         else:
             logger.info("[STARTUP] Weekly report scheduler is disabled (WEEKLY_REPORT_ENABLED=false)")
     except Exception as e:

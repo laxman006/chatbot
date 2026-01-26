@@ -65,8 +65,39 @@ class CrossEncoderReranker:
         # 2) Ensure base score is in [0, 1] (should already be normalized from hybrid fusion)
         base_prob = np.clip(np.array(base_scores, dtype=float), 0.0, 1.0)
 
-        # 3) Fuse: CE dominates, base is tie-breaker
-        final = 0.9 * ce_prob + 0.1 * base_prob
+        # ✅ FIX 3: Dynamic CE fusion using spread (more stable than variance)
+        # Use top1-top5 spread instead of variance for better stability with small candidate sets
+        sorted_ce = np.sort(ce_prob)[::-1]  # Descending order
+        ce_mean = np.mean(ce_prob)
+        
+        if len(sorted_ce) >= 5:
+            # Calculate spread: top1 - top5 (how much top doc stands out)
+            ce_spread = sorted_ce[0] - sorted_ce[4]
+        elif len(sorted_ce) >= 2:
+            # Fallback for small sets: top1 - top2
+            ce_spread = sorted_ce[0] - sorted_ce[1]
+        else:
+            ce_spread = 0.0
+        
+        # Normalize spread (typical range: 0.0-0.3 for sigmoid outputs)
+        # Spread < 0.05 = uncertain (flat scores), spread > 0.20 = confident (clear winner)
+        normalized_spread = min(ce_spread / 0.20, 1.0)  # Cap at 1.0
+        mean_component = ce_mean  # Already 0-1
+        
+        # Certainty: combination of spread and mean
+        # Spread is more important (70%) because it indicates clear winner
+        ce_certainty = 0.7 * normalized_spread + 0.3 * mean_component
+        
+        # Dynamic weight: more certain = more CE weight
+        # Range: 0.6 (uncertain, spread < 0.05) to 0.95 (very certain, spread > 0.20)
+        ce_weight = 0.6 + (0.35 * ce_certainty)
+        base_weight = 1.0 - ce_weight
+        
+        # Fuse with dynamic weights
+        final = ce_weight * ce_prob + base_weight * base_prob
+        
+        if len(candidates) > 5:  # Only log for larger batches
+            print(f"[RERANKER] Dynamic fusion: CE_weight={ce_weight:.3f}, base_weight={base_weight:.3f}, spread={ce_spread:.3f}, certainty={ce_certainty:.3f}")
 
         reranked = list(zip(docs, final.tolist()))
         reranked.sort(key=lambda x: x[1], reverse=True)

@@ -30,6 +30,10 @@ except ImportError as e:
     print(f"[WARNING] Jira vectorstore not available: {e}")
     print("[INFO] Jira features will be disabled. Install jira package with: pip install jira")
 from app.mongodb_memory import (
+    get_response_versions,
+    set_current_version,
+    get_max_version,
+    mark_all_versions_not_current,
     mongodb_memory,
     add_to_conversation, get_conversation_context, get_user_chat_history, 
     clear_user_chat_history, save_session, get_all_sessions, get_user_sessions, 
@@ -73,7 +77,119 @@ from collections import Counter, defaultdict
 
 # Intelligent Routing System
 from intelligent_router import IntelligentQueryRouter, get_routing_confidence
-from multi_source_retrieval import intelligent_multi_source_retrieve, normalize_scores
+from multi_source_retrieval import intelligent_multi_source_retrieve, normalize_scores, retrieve_limitations_documents
+
+
+# ============================================================================
+# 2-STAGE RETRIEVAL: SUPPORT QUESTION & CLAIM DETECTION
+# ============================================================================
+
+# Patterns for detecting support/limitations questions
+SUPPORT_Q_PATTERNS = [
+    r"\blimitation(s)?\b",
+    r"\bsupported\b",
+    r"\bnot supported\b",
+    r"\bunsupported\b",
+    r"\bcan we\b",
+    r"\bcan i\b",
+    r"\bis it possible\b",
+    r"\bdoes it support\b",
+    r"\bcapabilit(y|ies)\b",
+    r"\brestriction(s)?\b",
+    r"\bwhat are the limitations\b",
+    r"\bwhat features\b",
+    r"\bis.*supported\b",
+    r"\bcan.*be migrated\b",
+    r"\bdoes.*support\b",
+]
+
+# Patterns for detecting support claims in answers
+SUPPORT_CLAIM_PATTERNS = [
+    r"\bsupported\b",
+    r"\bnot supported\b",
+    r"\bdoes not support\b",
+    r"\bcan be migrated\b",
+    r"\bcannot be migrated\b",
+    r"\bcan't be migrated\b",
+    r"\bpossible\b",
+    r"\bnot possible\b",
+    r"\bisn't possible\b",
+    r"\bwe support\b",
+    r"\bnot available\b",
+    r"\bis available\b",
+]
+
+def is_support_question(query: str) -> bool:
+    """
+    Detect if user question is about support/limitations/capabilities.
+    
+    Args:
+        query: User query string
+        
+    Returns:
+        True if query is about support/limitations, False otherwise
+    """
+    q = query.lower().strip()
+    return any(re.search(p, q) for p in SUPPORT_Q_PATTERNS)
+
+def has_support_claim(answer: str) -> bool:
+    """
+    Detect if draft answer contains support claims (supported/not supported/etc).
+    
+    Args:
+        answer: Draft answer text
+        
+    Returns:
+        True if answer contains support claims, False otherwise
+    """
+    a = answer.lower()
+    return any(re.search(p, a) for p in SUPPORT_CLAIM_PATTERNS)
+
+def merge_stage1_with_limitations(
+    stage1_docs: List[Tuple[Document, float]],
+    limitations_docs: List[Tuple[Document, float]],
+    max_limitations: int = 3
+) -> List[Tuple[Document, float]]:
+    """
+    Merge Stage 1 docs with limitations docs, keeping procedural docs dominant.
+    
+    Strategy:
+    - Keep all Stage 1 docs (procedural/how-to)
+    - Append top N limitations docs at the end
+    - Deduplicate by content to avoid repeats
+    
+    Args:
+        stage1_docs: Stage 1 retrieved documents with scores
+        limitations_docs: Stage 2 limitations documents with scores
+        max_limitations: Maximum number of limitations docs to include
+        
+    Returns:
+        Merged list of (document, score) tuples
+    """
+    merged = []
+    
+    # Keep stage1 docs first (procedural/docs)
+    merged.extend(stage1_docs)
+    
+    # Add limitations but capped
+    merged.extend(limitations_docs[:max_limitations])
+    
+    # Deduplicate by content (simple fingerprint)
+    seen = set()
+    unique = []
+    for d, s in merged:
+        # Create fingerprint from content + metadata
+        content_preview = (d.page_content[:200] if d.page_content else "")
+        file_name = str(d.metadata.get("file_name", ""))
+        source_type = str(d.metadata.get("source_type", ""))
+        key = f"{content_preview}_{file_name}_{source_type}"
+        
+        if key not in seen:
+            unique.append((d, s))
+            seen.add(key)
+    
+    print(f"[2-STAGE] Merged {len(stage1_docs)} Stage 1 docs + {min(len(limitations_docs), max_limitations)} limitations docs → {len(unique)} unique docs")
+    return unique
 
 
 # ============================================================================
@@ -925,30 +1041,67 @@ async def rewrite_query_with_context(question: str, conversation_history: list, 
     Rewrite user question into a standalone query using conversation history.
     Example: "What are its features?" → "What are CloudFuze Manage's features?"
     
+    ✅ FIX: Preserves explicit migration direction (from/to, →, etc.) to prevent direction distortion.
+    
     Args:
         question: The user's current question
         conversation_history: List of previous messages with "role" and "content" keys
         llm: LLM instance for rewriting
         
     Returns:
-        Rewritten query that is standalone and explicit
+        Rewritten query that is standalone and explicit, with direction preserved
     """
     if not conversation_history:
         return question
+
+    # ✅ FIX: Extract direction BEFORE rewriting to preserve it
+    direction_info = extract_migration_direction(question)
+    has_explicit_direction = direction_info.get("direction_detected", False)
+    source_platform = direction_info.get("source_platform")
+    target_platform = direction_info.get("target_platform")
+    
+    # Extract direction keywords/phrases from original query
+    direction_phrases = []
+    if has_explicit_direction and source_platform and target_platform:
+        # Find direction patterns in original query
+        import re
+        direction_patterns = [
+            r"from\s+[^,\s]+(?:\s+[^,\s]+)*?\s+to\s+[^,\s]+(?:\s+[^,\s]+)*?",
+            r"[^,\s]+(?:\s+[^,\s]+)*?\s+to\s+[^,\s]+(?:\s+[^,\s]+)*?\s+migration",
+            r"migrat(?:e|ing|ion)\s+[^,\s]+(?:\s+[^,\s]+)*?\s+to\s+[^,\s]+(?:\s+[^,\s]+)*?",
+            r"[^,\s]+(?:\s+[^,\s]+)*?\s*(?:→|->|-)\s*[^,\s]+(?:\s+[^,\s]+)*?",
+        ]
+        for pattern in direction_patterns:
+            matches = re.findall(pattern, question, re.IGNORECASE)
+            if matches:
+                direction_phrases.extend(matches)
+                break  # Use first match found
 
     # Get last 4 messages for context (enough to understand current topic)
     recent = conversation_history[-4:] if len(conversation_history) > 4 else conversation_history
 
     # Build messages using LangChain message objects
+    system_prompt = (
+        "You are a query rewriter for a CloudFuze chatbot.\n"
+        "Rewrite the user's latest question into a standalone, explicit query for document retrieval.\n"
+        "Rules:\n"
+        "1) Replace pronouns (it, its, this, that, they) with the correct entity name from history.\n"
+        "2) Expand short questions like 'features?' into a complete question.\n"
+        "3) Output ONLY the rewritten query. No explanation."
+    )
+    
+    # ✅ FIX: Add direction preservation instruction if direction is explicit
+    if has_explicit_direction and direction_phrases:
+        direction_text = " OR ".join(direction_phrases[:2])  # Use first 2 phrases
+        system_prompt += (
+            f"\n\nCRITICAL: The query contains explicit migration direction: '{direction_text}'\n"
+            f"DO NOT change, generalize, or remove this direction phrase.\n"
+            f"Preserve it exactly as: {source_platform} → {target_platform} (or the exact phrase used).\n"
+            f"Only rewrite other parts of the query, keep the direction intact."
+        )
+
     messages = [
-        SystemMessage(content=(
-            "You are a query rewriter for a CloudFuze chatbot.\n"
-            "Rewrite the user's latest question into a standalone, explicit query for document retrieval.\n"
-            "Rules:\n"
-            "1) Replace pronouns (it, its, this, that, they) with the correct entity name from history.\n"
-            "2) Expand short questions like 'features?' into a complete question.\n"
-            "3) Output ONLY the rewritten query. No explanation."
-        ))
+        SystemMessage(content=system_prompt)
     ]
 
     # Add conversation history as context
@@ -964,6 +1117,25 @@ async def rewrite_query_with_context(question: str, conversation_history: list, 
     try:
         rewritten = llm.invoke(messages).content.strip()
         if rewritten:
+            # ✅ FIX: Verify direction is preserved after rewrite
+            rewritten_direction = extract_migration_direction(rewritten)
+            if has_explicit_direction:
+                # Check if direction was lost or changed
+                if not rewritten_direction.get("direction_detected") or \
+                   rewritten_direction.get("source_platform") != source_platform or \
+                   rewritten_direction.get("target_platform") != target_platform:
+                    # Direction was lost/changed - inject it back
+                    logger.warning(f"[REWRITE] Direction lost in rewrite, restoring: '{question}' → '{rewritten}'")
+                    # Try to inject direction phrase back
+                    if direction_phrases:
+                        # Find where to inject (usually at the end or after main verb)
+                        direction_phrase = direction_phrases[0]
+                        # Check if direction phrase is missing
+                        if direction_phrase.lower() not in rewritten.lower():
+                            # Inject direction phrase
+                            rewritten = f"{rewritten} {direction_phrase}"
+                            logger.info(f"[REWRITE] Injected direction phrase: '{direction_phrase}'")
+            
             logger.info(f"[REWRITE] Original: '{question}' → Rewritten: '{rewritten}'")
             return rewritten
     except Exception as e:
@@ -982,35 +1154,55 @@ def extract_migration_direction(text: str) -> dict:
     
     text_lower = text.lower()
     
-    # Platform name mappings (normalize variations)
+    # ✅ FIXED: Platform patterns with word boundaries and proper separation
+    # Suites only contain suite-level terms, not individual services/apps
     platform_patterns = {
+        # --- Suites (only suite-level terms) ---
         "google_workspace": [
-            r"google\s+workspace", r"g\s+suite", r"gmail", r"google\s+drive",
-            r"google\s+shared\s+drive", r"gsuite"
+            r"\bgoogle\s+workspace\b",
+            r"\bg\s*suite\b",
+            r"\bgsuite\b",
         ],
         "microsoft_365": [
-            r"microsoft\s+365", r"office\s+365", r"m365", r"o365",
-            r"outlook", r"onedrive", r"sharepoint\s+online", r"microsoft\s+teams"
+            r"\bmicrosoft\s+365\b",
+            r"\boffice\s+365\b",
+            r"\bm365\b",
+            r"\bo365\b",
         ],
-        "slack": [r"slack"],
-        "teams": [r"microsoft\s+teams", r"teams"],
-        "dropbox": [r"dropbox"],
-        "box": [r"box"],
+        
+        # --- Collaboration Apps ---
+        "slack": [
+            r"\bslack\b",
+        ],
+        "teams": [
+            r"\bmicrosoft\s+teams\b",
+            r"\bteams\b",
+        ],
         "google_chat": [
-        r"google\s+chat", r"gchat", r"g\s+chat",
-        r"^chat\s+to", r"chat\s+migration",  # Add: "chat to teams" = Google Chat
-    ],
-        "egnyte": [r"egnyte"],
-        "amazon_s3": [r"amazon\s+s3"],
-        "google_drive": [r"google\s+drive"],
-        "gmail": [r"gmail"],
-        "outlook": [r"outlook"],
-        "sharepoint": [r"sharepoint"],
-        "onedrive": [r"onedrive"],
-        "sharefile": [r"sharefile", r"citrix\s+sharefile"],
+            r"\bgoogle\s+chat\b",
+            r"\bgchat\b",
+            r"\bg\s*chat\b",
+            r"^chat\s+to",  # "chat to teams" = Google Chat
+            r"chat\s+migration",  # "chat migration" = Google Chat
+        ],
         
+        # --- Services ---
+        "google_drive": [
+            r"\bgoogle\s+drive\b",
+            r"\bgoogle\s+shared\s+drive\b",
+            r"\bshared\s+drive\b",
+        ],
+        "gmail": [r"\bgmail\b"],
+        "outlook": [r"\boutlook\b"],
+        "sharepoint": [r"\bsharepoint\b", r"\bsharepoint\s+online\b"],
+        "onedrive": [r"\bonedrive\b"],
         
-       
+        # --- Storage ---
+        "dropbox": [r"\bdropbox\b"],
+        "box": [r"\bbox\b"],
+        "egnyte": [r"\begnyte\b"],
+        "amazon_s3": [r"\bamazon\s+s3\b", r"\bs3\b"],
+        "sharefile": [r"\bsharefile\b", r"\bcitrix\s+sharefile\b"],
     }
     
     # Compile patterns
@@ -1024,19 +1216,20 @@ def extract_migration_direction(text: str) -> dict:
         if pattern.search(text_lower):
             mentioned_platforms.append(platform)
     
-    # Try to extract direction using common patterns
-    direction_patterns = [
-        # "from X to Y"
+    # ✅ CRITICAL FIX: Explicit direction patterns with priority order
+    # More specific patterns first, then general ones
+    explicit_direction_patterns = [
+        # "from X to Y" - highest priority, most explicit
         (r"from\s+([^,\s]+(?:\s+[^,\s]+)*?)\s+to\s+([^,\s]+(?:\s+[^,\s]+)*?)", True),
-        # "X to Y migration"
-        (r"([^,\s]+(?:\s+[^,\s]+)*?)\s+to\s+([^,\s]+(?:\s+[^,\s]+)*?)\s+migration", True),
+        # "X to Y migration" / "X to Y JSON migration" - explicit migration context
+        (r"([^,\s]+(?:\s+[^,\s]+)*?)\s+to\s+([^,\s]+(?:\s+[^,\s]+)*?)\s+(?:json\s+)?migration", True),
         # "migrate X to Y"
         (r"migrat(?:e|ing|ion)\s+([^,\s]+(?:\s+[^,\s]+)*?)\s+to\s+([^,\s]+(?:\s+[^,\s]+)*?)", True),
         # "transfer X to Y"
         (r"transfer(?:ring)?\s+([^,\s]+(?:\s+[^,\s]+)*?)\s+to\s+([^,\s]+(?:\s+[^,\s]+)*?)", True),
         # "move X to Y"
         (r"mov(?:e|ing)\s+([^,\s]+(?:\s+[^,\s]+)*?)\s+to\s+([^,\s]+(?:\s+[^,\s]+)*?)", True),
-        # "X → Y" or "X -> Y" or "X - Y"
+        # "X → Y" or "X -> Y" or "X - Y" - explicit arrow notation
         (r"([^,\s]+(?:\s+[^,\s]+)*?)\s*(?:→|->|-)\s*([^,\s]+(?:\s+[^,\s]+)*?)", True),
     ]
     
@@ -1044,38 +1237,71 @@ def extract_migration_direction(text: str) -> dict:
     target_platform = None
     direction_detected = False
     
-    for pattern, is_directional in direction_patterns:
+    # ✅ PRIORITY 1: Try explicit direction patterns first (prevents reversal)
+    for pattern, is_directional in explicit_direction_patterns:
         match = re.search(pattern, text_lower)
         if match:
             source_text = match.group(1).strip()
             target_text = match.group(2).strip()
             
-            # Map text to normalized platform names
-            source_normalized = None
-            target_normalized = None
+            # ✅ CRITICAL FIX: Normalize with priority order
+            # Check specific platforms BEFORE general ones to prevent misclassification
+            # Example: "teams" should match "teams" NOT "microsoft_365"
+            platform_priority = [
+                # Collaboration apps (most specific)
+                "teams",        # Check before microsoft_365
+                "slack",
+                "google_chat",
+                # Services (specific)
+                "gmail",
+                "outlook",
+                "google_drive",
+                "sharepoint",
+                "onedrive",
+                # Storage (specific)
+                "dropbox",
+                "box",
+                "egnyte",
+                "amazon_s3",
+                "sharefile",
+                # Suites (general, check last)
+                "google_workspace",
+                "microsoft_365",
+            ]
             
-            for platform, pattern_regex in platform_regex.items():
-                if pattern_regex.search(source_text):
-                    source_normalized = platform
-                if pattern_regex.search(target_text):
-                    target_normalized = platform
+            # Normalize source platform (stop at first match)
+            source_normalized = None
+            for platform in platform_priority:
+                if platform in platform_regex:
+                    if platform_regex[platform].search(source_text):
+                        source_normalized = platform
+                        break
+            
+            # Normalize target platform (stop at first match)
+            target_normalized = None
+            for platform in platform_priority:
+                if platform in platform_regex:
+                    if platform_regex[platform].search(target_text):
+                        target_normalized = platform
+                        break
             
             if source_normalized and target_normalized:
                 source_platform = source_normalized
                 target_platform = target_normalized
                 direction_detected = True
+                print(f"[DIRECTION DETECTION] ✅ Explicit match: '{source_text}' → '{target_text}' → {source_normalized} → {target_normalized}")
                 break
     
-    # If no explicit direction found but platforms mentioned, try to infer from context
+    # ✅ PRIORITY 2: If no explicit direction found but platforms mentioned, try to infer
     if not direction_detected and len(mentioned_platforms) >= 2:
         # Look for migration keywords that might indicate direction
-        # This is less reliable but better than nothing
         migration_keywords = ["migrate", "transfer", "move", "from", "to"]
         if any(kw in text_lower for kw in migration_keywords):
             # Use first two platforms as source -> target (heuristic)
             source_platform = mentioned_platforms[0]
             target_platform = mentioned_platforms[1]
             direction_detected = False  # Mark as inferred, not explicit
+            print(f"[DIRECTION DETECTION] ⚠️ Inferred (not explicit): {source_platform} → {target_platform}")
     
     return {
         "source_platform": source_platform,
@@ -1178,15 +1404,31 @@ def filter_by_direction(
             # Unknown direction - keep but don't boost
             unknown_docs.append((doc, score, "unknown"))
     
+    # ✅ AUTO-STRICT MODE: If mismatches dominate, automatically switch to strict
+    total_docs = len(matched_docs) + len(unknown_docs) + len(mismatched_docs)
+    mismatch_ratio = len(mismatched_docs) / max(total_docs, 1) if total_docs > 0 else 0
+    
+    # Auto-strict rule: if mismatch_ratio >= 0.6 and matches <= 2, enable strict mode
+    auto_strict_triggered = False
+    if not strict_mode and mismatch_ratio >= 0.6 and len(matched_docs) <= 2 and len(mismatched_docs) > 0:
+        auto_strict_triggered = True
+        strict_mode = True
+        print(f"[DIRECTION GATING] 🚨 AUTO-STRICT: mismatch_ratio={mismatch_ratio:.2f}, matches={len(matched_docs)}, mismatches={len(mismatched_docs)} → enabling STRICT MODE")
+    
     # Reconstruct results: matched first, then unknown, then mismatched
     if strict_mode:
         # Strict: only matched + unknown
         filtered_results = matched_docs + unknown_docs
-        print(f"[DIRECTION GATING] STRICT MODE: Kept {len(matched_docs)} matched, {len(unknown_docs)} unknown, removed {len(mismatched_docs)} mismatched")
+        mode_str = "AUTO-STRICT" if auto_strict_triggered else "STRICT"
+        print(f"[DIRECTION GATING] {mode_str} MODE: Kept {len(matched_docs)} matched, {len(unknown_docs)} unknown, removed {len(mismatched_docs)} mismatched")
     else:
         # Lenient: all docs but penalized mismatches
         filtered_results = matched_docs + unknown_docs + mismatched_docs
         print(f"[DIRECTION GATING] LENIENT MODE: {len(matched_docs)} matched, {len(unknown_docs)} unknown, {len(mismatched_docs)} mismatched (penalized)")
+    
+    # ✅ DEBUG: Log strict mode status for verification
+    if auto_strict_triggered:
+        print(f"[DIRECTION GATING] 🚨 AUTO-STRICT triggered: mismatch_ratio={mismatch_ratio:.2f}, matches={len(matched_docs)}, mismatches={len(mismatched_docs)}")
     
     # Re-sort by score (higher is better)
     filtered_results.sort(key=lambda x: x[1], reverse=True)
@@ -1395,6 +1637,131 @@ def merge_retrieval_results(main_results: List, jira_results: List = None, max_d
 # SECTION-BASED RERANKING
 # ============================================================================
 
+def pack_context_by_direction(
+    doc_results: List[Tuple[Document, float]],
+    query_intent: dict,
+    k_final: int
+) -> List[Tuple[Document, float]]:
+    """
+    ✅ FIX 1: Direction-aware context packing.
+    
+    Packs documents in priority order:
+    1. Matched direction docs first (all of them)
+    2. Unknown direction docs next (all of them)
+    3. Mismatched docs last (max 1-2 only, even in lenient mode)
+    
+    This guarantees the LLM doesn't see too many wrong-direction docs.
+    """
+    if not query_intent.get("source_platform") or not query_intent.get("target_platform"):
+        # No direction detected - return as-is
+        return doc_results[:k_final]
+    
+    query_source = query_intent["source_platform"]
+    query_target = query_intent["target_platform"]
+    
+    matched_docs = []
+    unknown_docs = []
+    mismatched_docs = []
+    
+    for doc, score in doc_results:
+        meta = doc.metadata or {}
+        meta_blob = " ".join([
+            str(meta.get("tag", "")),
+            str(meta.get("source_type", "")),
+            str(meta.get("folder_path", "") or meta.get("folder", "")),
+            str(meta.get("filename", "") or meta.get("file_name", "")),
+            str(meta.get("page_url", "")),
+            str(meta.get("title", "") or meta.get("post_title", "")),
+        ])
+        content_preview = doc.page_content[:1500] if doc.page_content else ''
+        doc_text = f"{meta_blob} {content_preview}"
+        
+        doc_direction = extract_migration_direction(doc_text)
+        doc_source = doc_direction.get("source_platform")
+        doc_target = doc_direction.get("target_platform")
+        
+        if doc_source and doc_target:
+            if doc_source == query_source and doc_target == query_target:
+                matched_docs.append((doc, score))
+            else:
+                mismatched_docs.append((doc, score))
+        else:
+            unknown_docs.append((doc, score))
+    
+    # ✅ FIX 2: Improved direction packing with recall protection
+    # When matched docs are too few, allow more mismatched BUT only those with strong query keyword match
+    packed = []
+    packed.extend(matched_docs)
+    packed.extend(unknown_docs)
+    
+    # Determine how many mismatched to allow
+    max_mismatched = 2  # Default: max 2
+    mismatched_to_add = []
+    
+    if len(matched_docs) < 2:
+        # Low matched count - allow more mismatched but filter by query relevance
+        max_mismatched = 3
+        # Filter mismatched docs: only keep those with ≥2 query keywords
+        query_keywords = set()
+        if query_intent.get("source_platform"):
+            query_keywords.add(query_intent["source_platform"].lower())
+        if query_intent.get("target_platform"):
+            query_keywords.add(query_intent["target_platform"].lower())
+        if query_intent.get("mentioned_platforms"):
+            query_keywords.update([p.lower() for p in query_intent["mentioned_platforms"]])
+        
+        # Also extract important keywords from platforms
+        import re
+        for platform in [query_intent.get("source_platform", ""), query_intent.get("target_platform", "")]:
+            if platform:
+                # Extract words from platform name (e.g., "microsoft_365" -> ["microsoft", "365"])
+                words = re.findall(r'\b\w+\b', platform.lower())
+                query_keywords.update(words)
+        
+        filtered_mismatched = []
+        for doc, score in mismatched_docs:
+            # Check if doc contains query keywords
+            doc_text_lower = f"{doc.page_content[:500]} {str(doc.metadata)}".lower()
+            keyword_matches = sum(1 for kw in query_keywords if kw and kw in doc_text_lower)
+            if keyword_matches >= 2:  # At least 2 query keywords present
+                filtered_mismatched.append((doc, score))
+        
+        # Use filtered mismatched if available, otherwise use top mismatched
+        if filtered_mismatched:
+            mismatched_to_add = filtered_mismatched[:max_mismatched]
+            print(f"[CONTEXT PACKING] Low matched ({len(matched_docs)}), allowing {len(mismatched_to_add)} keyword-filtered mismatched (from {len(filtered_mismatched)} candidates)")
+        else:
+            mismatched_to_add = mismatched_docs[:max_mismatched]
+            print(f"[CONTEXT PACKING] Low matched ({len(matched_docs)}), allowing {len(mismatched_to_add)} mismatched (no keyword filter match)")
+    else:
+        # Normal case: max 2 mismatched
+        mismatched_to_add = mismatched_docs[:max_mismatched]
+    
+    packed.extend(mismatched_to_add)
+    
+    # Limit to k_final
+    packed = packed[:k_final]
+    
+    # ✅ DEBUG: Log final context breakdown
+    final_sources = {}
+    for doc, _ in packed[:10]:  # Top 10
+        source_type = (doc.metadata.get("source_type") or "").lower()
+        tag = (doc.metadata.get("tag") or "").lower()
+        if "jira" in source_type or "jira" in tag:
+            final_sources["jira"] = final_sources.get("jira", 0) + 1
+        elif "sharepoint" in source_type or "sharepoint" in tag:
+            final_sources["sharepoint"] = final_sources.get("sharepoint", 0) + 1
+        elif "blog" in tag or (source_type == "web" and "blog" in tag):
+            final_sources["blog"] = final_sources.get("blog", 0) + 1
+        else:
+            final_sources["other"] = final_sources.get("other", 0) + 1
+    
+    print(f"[CONTEXT PACKING] Final: {len(matched_docs)} matched, {len(unknown_docs)} unknown, {len(mismatched_to_add)} mismatched")
+    print(f"[CONTEXT PACKING] Top 10 sources: {final_sources}")
+    
+    return packed
+
+
 def apply_section_boosts(
     reranked_results: List[Tuple[Document, float]]
 ) -> List[Tuple[Document, float]]:
@@ -1423,15 +1790,47 @@ def apply_section_boosts(
         "comment": 0.0,
     }
     
+    # ✅ FIX 2: Source authority weighting AFTER rerank
+    # Internal docs > marketing content (enterprise truth rule)
+    SOURCE_MULT = {
+        "jira": 1.08,           # +8% (highest authority)
+        "sharepoint": 1.05,     # +5% (internal docs)
+        "pdf": 1.05,            # +5% (technical docs)
+        "blog": 0.90,           # -10% (marketing content)
+        "web": 0.90,            # -10% (if tag is blog)
+    }
+    
     boosted_results = []
     for doc, score in reranked_results:
-        section = doc.metadata.get("section", "unknown")
-        mult = 1.0 + SECTION_MULT.get(section, 0.0)
-        boosted_score = score * mult
+        meta = doc.metadata or {}
+        section = meta.get("section", "unknown")
+        source_type = (meta.get("source_type") or "").lower()
+        tag = (meta.get("tag") or "").lower()
+        
+        # Section boost
+        section_mult = 1.0 + SECTION_MULT.get(section, 0.0)
+        
+        # Source authority boost
+        source_mult = 1.0
+        if "jira" in source_type or "jira" in tag:
+            source_mult = SOURCE_MULT["jira"]
+        elif "sharepoint" in source_type or "sharepoint" in tag:
+            source_mult = SOURCE_MULT["sharepoint"]
+        elif "pdf" in source_type or "pdf" in tag:
+            source_mult = SOURCE_MULT["pdf"]
+        elif ("blog" in tag or (source_type == "web" and "blog" in tag)):
+            source_mult = SOURCE_MULT["blog"]
+        elif source_type == "web":
+            source_mult = SOURCE_MULT["web"]
+        
+        # Apply both boosts
+        boosted_score = score * section_mult * source_mult
         boosted_results.append((doc, boosted_score))
         
         if section in SECTION_MULT and SECTION_MULT[section] > 0:
-            print(f"[RERANK] Section '{section}': base={score:.4f}, mult={mult:.3f}, final={boosted_score:.4f}")
+            print(f"[RERANK] Section '{section}': base={score:.4f}, section_mult={section_mult:.3f}, source_mult={source_mult:.3f}, final={boosted_score:.4f}")
+        elif source_mult != 1.0:
+            print(f"[RERANK] Source '{source_type}': base={score:.4f}, source_mult={source_mult:.3f}, final={boosted_score:.4f}")
     
     boosted_results.sort(key=lambda x: x[1], reverse=True)
     return boosted_results
@@ -2404,20 +2803,19 @@ def perplexity_style_retrieve(
     print(f"[POOL] Final pool for rerank: {len(deduped_pool)} candidates (after dedup, max {MAX_POOL})")
     
     # ---- 6.5. DIRECTION GATING (BEFORE CROSS-ENCODER RERANK) ----
-    # CRITICAL FIX #2: Apply direction gating BEFORE rerank to prevent wrong-direction docs from being locked in
+    # ✅ SINGLE POINT: Apply direction gating BEFORE rerank to prevent wrong-direction docs from being locked in
+    # Auto-strict mode will activate automatically if mismatches dominate (handled inside filter_by_direction)
     query_intent = extract_migration_direction(query)
     
     if query_intent.get("source_platform") and query_intent.get("target_platform"):
         print(f"[DIRECTION GATING] Query direction: {query_intent['source_platform']} → {query_intent['target_platform']}")
         
-        # Apply direction filtering BEFORE cross-encoder rerank
-        # Use lenient mode to avoid dropping too many docs, but heavily penalize mismatches
-        DIRECTION_STRICT_MODE = False  # Set to True for strict filtering (removes mismatched)
-        
+        # Start with lenient mode - filter_by_direction will auto-switch to strict if needed
+        # Auto-strict triggers when: mismatch_ratio >= 0.6 AND matches <= 2
         deduped_pool = filter_by_direction(
             doc_results=deduped_pool,
             query_intent=query_intent,
-            strict_mode=DIRECTION_STRICT_MODE
+            strict_mode=False  # Auto-strict will activate if mismatches dominate
         )
         
         print(f"[DIRECTION GATING] After filtering: {len(deduped_pool)} documents (before rerank)")
@@ -2441,13 +2839,83 @@ def perplexity_style_retrieve(
     pre_boost_docs = [(d, s) for d, s in reranked if s >= STRICT_SCORE_THRESHOLD][:k_final]
     
     # ---- 9. Apply section boosts ONLY to passed docs (for final ordering) ----
+    # ✅ ORDER VERIFIED: Rerank → Authority boost → Direction pack → Final topK
     if pre_boost_docs:
-        final_docs = apply_section_boosts(pre_boost_docs)
+        final_docs = apply_section_boosts(pre_boost_docs)  # Authority weighting applied here (after rerank)
         print(f"[RERANK] {len(final_docs)} docs passed strict threshold {STRICT_SCORE_THRESHOLD}")
     else:
         # Fallback: return top-3 with low confidence
         final_docs = apply_section_boosts(reranked[:min(3, k_final)])
         print(f"[RERANK] No docs above threshold {STRICT_SCORE_THRESHOLD}, returning top {len(final_docs)} with low confidence")
+    
+    # ✅ FIX 1: Direction-aware context packing (after authority boost)
+    # Pack matched direction docs first, then unknown, then max 1-2 mismatched (or 3 if matched < 2)
+    final_docs = pack_context_by_direction(final_docs, query_intent, k_final)
+    
+    # ✅ DEBUG: Final context summary for verification (as requested)
+    if query_intent.get("source_platform") and query_intent.get("target_platform"):
+        # Count direction matches in final context
+        matched_count = 0
+        unknown_count = 0
+        mismatched_count = 0
+        sources_breakdown = {"jira": 0, "sharepoint": 0, "blog": 0, "other": 0}
+        
+        for doc, score in final_docs[:10]:
+            meta = doc.metadata or {}
+            meta_blob = " ".join([
+                str(meta.get("tag", "")),
+                str(meta.get("source_type", "")),
+                str(meta.get("filename", "") or meta.get("file_name", "")),
+            ])
+            content_preview = doc.page_content[:500] if doc.page_content else ''
+            doc_text = f"{meta_blob} {content_preview}"
+            doc_dir = extract_migration_direction(doc_text)
+            
+            # Count direction matches
+            if doc_dir.get("source_platform") == query_intent["source_platform"] and \
+               doc_dir.get("target_platform") == query_intent["target_platform"]:
+                matched_count += 1
+            elif doc_dir.get("source_platform") and doc_dir.get("target_platform"):
+                mismatched_count += 1
+            else:
+                unknown_count += 1
+            
+            # Count sources
+            source_type = (meta.get("source_type") or "").lower()
+            tag = (meta.get("tag") or "").lower()
+            if "jira" in source_type or "jira" in tag:
+                sources_breakdown["jira"] += 1
+            elif "sharepoint" in source_type or "sharepoint" in tag:
+                sources_breakdown["sharepoint"] += 1
+            elif "blog" in tag or (source_type == "web" and "blog" in tag):
+                sources_breakdown["blog"] += 1
+            else:
+                sources_breakdown["other"] += 1
+        
+        # Calculate confidence from final scores (using the function defined in this file)
+        final_scores = [score for _, score in final_docs[:10]] if final_docs else []
+        confidence = None
+        if final_scores and len(final_scores) >= 2:
+            # Use the same confidence calculation logic
+            sorted_scores = sorted(final_scores, reverse=True)
+            top_1 = sorted_scores[0]
+            top_2 = sorted_scores[1] if len(sorted_scores) > 1 else top_1
+            top1_component = min(top_1, 1.0)
+            gap = max(0, top_1 - top_2)
+            gap_component = min(gap * 2.0, 1.0)
+            from config import MIN_SCORE_THRESHOLD
+            threshold = MIN_SCORE_THRESHOLD
+            support_count = sum(1 for s in sorted_scores[:10] if s >= threshold)
+            support_component = min(support_count / 5.0, 1.0)
+            confidence = (top1_component * 0.4 + gap_component * 0.3 + support_component * 0.3)
+            confidence = min(max(confidence, 0.0), 1.0)
+        
+        print(f"[FINAL CONTEXT] ✅ Top 10 breakdown:")
+        print(f"  • Direction: {matched_count} matched, {unknown_count} unknown, {mismatched_count} mismatched")
+        print(f"  • Sources: {sources_breakdown}")
+        print(f"  • Query direction: {query_intent['source_platform']} → {query_intent['target_platform']}")
+        if confidence is not None:
+            print(f"  • Confidence: {confidence:.3f}")
     
     return final_docs  # list of (doc, final_score)
 
@@ -2531,7 +2999,8 @@ def intelligent_route_and_retrieve(
         jira_vectorstore=jira_vectorstore,
         query=query,
         routing_plan=routing_plan,
-        enable_deduplication=ROUTING_ENABLE_DEDUPLICATION
+        enable_deduplication=ROUTING_ENABLE_DEDUPLICATION,
+        always_include_limitations=False  # ✅ STAGE 1: No pinned limitations (2-stage retrieval)
     )
     
     if not all_candidates:
@@ -2809,26 +3278,8 @@ Answer clearly and correctly based on the provided context and knowledge base.""
                 
                 print(f"[HYBRID RANKING] Reranked {len(doc_results)} documents with semantic + keyword scores")
                 
-                # ============ DIRECTION GATING (MANDATORY) ============
-                # Extract query intent for direction filtering
-                query_intent = extract_migration_direction(enhanced_query)
-                
-                if query_intent.get("source_platform") and query_intent.get("target_platform"):
-                    print(f"[DIRECTION GATING] Query direction: {query_intent['source_platform']} → {query_intent['target_platform']}")
-                    
-                    # Apply direction filtering
-                    # Use lenient mode to avoid dropping too many docs, but heavily penalize mismatches
-                    DIRECTION_STRICT_MODE = False  # Set to True for strict filtering (removes mismatched)
-                    
-                    doc_results = filter_by_direction(
-                        doc_results=doc_results,
-                        query_intent=query_intent,
-                        strict_mode=DIRECTION_STRICT_MODE
-                    )
-                    
-                    print(f"[DIRECTION GATING] After filtering: {len(doc_results)} documents")
-                else:
-                    print(f"[DIRECTION GATING] No direction detected in query - skipping direction filter")
+                # ✅ REMOVED: Direction gating is now applied only once before rerank in perplexity_style_retrieve
+                # This prevents duplicate filtering and ensures consistency
                 
                 # ============ DOCUMENT DIVERSITY ============
                 # Calculate diversity metrics for retrieved documents
@@ -2853,8 +3304,55 @@ Answer clearly and correctly based on the provided context and knowledge base.""
                     for doc in final_docs
                 )
                 
-                # Build enhanced system prompt with guardrails if transcripts are present
-                enhanced_system_prompt = SYSTEM_PROMPT
+                # Build enhanced system prompt with guardrails
+                # ALWAYS-ON guardrail for limitations (even if no limitations docs retrieved)
+                # This ensures consistent behavior if retrieval fails
+                limitations_guardrail_base = """
+
+IMPORTANT - LIMITATIONS & SUPPORTED FEATURES HANDLING:
+- If the user asks about feature support, limitations, or migration capabilities, answer carefully
+- Only state that a feature is supported if you have explicit confirmation in the context
+- If unsure, say "Not specified in available documentation" rather than guessing"""
+
+                # Check if limitations documents are in the retrieved context
+                has_limitations_sources = any(
+                    doc.metadata.get("source_type") == "sharepoint_limitations" 
+                    or doc.metadata.get("doc_type") == "limitations"
+                    or doc.metadata.get("is_limitations_doc") == True
+                    or "limitations" in str(doc.metadata.get("tag", "")).lower()
+                    or "limitations" in str(doc.metadata.get("file_name", "")).lower()
+                    for doc in final_docs
+                )
+
+                enhanced_system_prompt = SYSTEM_PROMPT + limitations_guardrail_base
+
+                if has_limitations_sources:
+                    # Enhanced guardrail when limitations docs are present
+                    limitations_guardrail_enhanced = """
+
+CRITICAL - LIMITATIONS & SUPPORTED FEATURES DOCUMENT (SOURCE OF TRUTH):
+- You have access to the Limitations & Supported Features document (sharepoint_limitations source)
+- This document is the DEFINITIVE source of truth for:
+  * What features ARE supported
+  * What features are NOT supported
+  * Migration capabilities and limitations
+  * Workarounds for unsupported features
+- **ALWAYS prioritize information from limitations documents over other sources**
+- If limitations document says "NOT SUPPORTED", you MUST answer that it's not supported
+- If limitations document says "SUPPORTED", you can confidently say it's supported
+- If other sources conflict with limitations document, the limitations document WINS
+- When answering about support/limitations:
+  ✅ Use format: "Support: [Yes/No/Partial]"
+  ✅ Include: "Reason: [explanation from limitations doc]"
+  ✅ If not supported: "Workaround: [if available in limitations doc]"
+  ✅ Always cite: "Source: Limitations document"
+- NEVER say a feature is supported if limitations document says it's NOT SUPPORTED
+- If limitations document doesn't mention a feature, say "Not specified in limitations document" rather than guessing"""
+                    enhanced_system_prompt = enhanced_system_prompt + limitations_guardrail_enhanced
+                    print("[GUARDRAIL] ✓ Enhanced limitations guardrail instructions added (limitations docs detected)")
+                else:
+                    print("[GUARDRAIL] ✓ Base limitations guardrail added (no limitations docs in context)")
+
                 if has_transcript_sources:
                     guardrail_instruction = """
 
@@ -2867,7 +3365,7 @@ IMPORTANT - TRANSCRIPT SOURCES DETECTED:
 - DO NOT use definitive language like "CloudFuze guarantees..." or "CloudFuze officially supports..."
 - If transcript information conflicts with official documentation, ALWAYS prefer official knowledge base content
 - Transcripts are contextual and may contain discussions, not official commitments"""
-                    enhanced_system_prompt = SYSTEM_PROMPT + guardrail_instruction
+                    enhanced_system_prompt = enhanced_system_prompt + guardrail_instruction
                 
                 # ✅ CONVERSATIONAL MEMORY: Build messages with history
                 # Use SystemMessage for system prompt and message objects for history to avoid template parsing issues
@@ -3343,6 +3841,12 @@ Answer clearly and correctly based on the provided context and knowledge base.""
                 yield f"data: {json.dumps({'type': 'status', 'status': 'retrieving_docs', 'message': 'Searching knowledge base'})}\n\n"
                 await asyncio.sleep(0.05)
                 
+                # ====== 2-STAGE RETRIEVAL: STAGE 1 PREPARATION ======
+                # Check if query is support question (for Stage 2 decision)
+                is_support_q = is_support_question(enhanced_query)
+                if is_support_q:
+                    print(f"[2-STAGE] ✓ Support question detected - Stage 2 will verify after draft")
+                
                 # ====== INTELLIGENT ROUTING OR PERPLEXITY-STYLE RAG ======
                 
                 # Choose retrieval strategy based on configuration
@@ -3567,35 +4071,57 @@ Answer clearly and correctly based on the provided context and knowledge base.""
             
             def retrieval_confidence(scores: List[float]) -> float:
                 """
-                Measures how concentrated relevance is at the top.
-                Stable for enterprise KBs where similar docs naturally cluster.
+                ✅ FIX 3: Fixed confidence metric (0-1 range).
                 
-                Returns:
-                    - High (>1.25): One standout document (high confidence)
-                    - Medium (1.05-1.25): Moderate concentration (medium confidence)
-                    - Low (<1.05): Similar docs (low confidence, but still valid)
+                Uses:
+                - top1 score (normalized to 0-1)
+                - gap between top1 and top2 (concentration)
+                - support count (docs above threshold)
+                
+                Returns: 0.0 to 1.0 (never > 1.0)
                 """
-                if len(scores) < 3:
-                    return 1.0
+                if not scores or len(scores) < 2:
+                    return 0.5  # Default medium confidence
                 
                 sorted_scores = sorted(scores, reverse=True)
                 top_1 = sorted_scores[0]
-                top_5_avg = sum(sorted_scores[:5]) / min(5, len(sorted_scores))
+                top_2 = sorted_scores[1] if len(sorted_scores) > 1 else top_1
                 
-                # Avoid division by zero
-                return top_1 / (top_5_avg + 1e-6)
+                # Component 1: Top score (0-1, assuming scores are already normalized)
+                top1_component = min(top_1, 1.0)  # Cap at 1.0
+                
+                # Component 2: Gap between top1 and top2 (concentration)
+                gap = max(0, top_1 - top_2)
+                gap_component = min(gap * 2.0, 1.0)  # Scale gap, cap at 1.0
+                
+                # Component 3: Support count (how many docs are above 0.5 threshold)
+                from config import MIN_SCORE_THRESHOLD
+                threshold = MIN_SCORE_THRESHOLD
+                support_count = sum(1 for s in sorted_scores[:10] if s >= threshold)
+                support_component = min(support_count / 5.0, 1.0)  # 5+ docs = full support
+                
+                # Weighted combination (0-1 range)
+                confidence = (
+                    top1_component * 0.4 +      # 40% weight on top score
+                    gap_component * 0.3 +       # 30% weight on concentration
+                    support_component * 0.3      # 30% weight on support count
+                )
+                
+                # Ensure 0-1 range
+                return min(max(confidence, 0.0), 1.0)
             
             if final_docs_with_scores:
                 scores = [score for _, score in final_docs_with_scores]
                 max_score = max(scores)
                 avg_score = sum(scores) / len(scores)
                 
-                # STEP 1: Use percentile-based confidence instead of margin
+                # STEP 1: Use fixed 0-1 confidence metric
                 confidence = retrieval_confidence(scores)
                 
-                if confidence < 1.05:
+                # Map 0-1 confidence to levels
+                if confidence < 0.4:
                     confidence_level = "low"
-                elif confidence < 1.25:
+                elif confidence < 0.7:
                     confidence_level = "medium"
                 else:
                     confidence_level = "high"
@@ -3673,33 +4199,13 @@ Answer clearly and correctly based on the provided context and knowledge base.""
                     pass
                 print(f"[RETRIEVAL BASELINE] {json.dumps(retrieval_log, indent=2, default=str)}")
             
-            # ===== DIRECTION GATING (MANDATORY) =====
-            # Extract query intent for direction filtering
-            query_intent = extract_migration_direction(enhanced_query)
-            
-            if query_intent.get("source_platform") and query_intent.get("target_platform"):
-                print(f"[DIRECTION GATING] Query direction: {query_intent['source_platform']} → {query_intent['target_platform']}")
-                
-                # Apply direction filtering to final_docs_with_scores
-                # Use lenient mode to avoid dropping too many docs, but heavily penalize mismatches
-                DIRECTION_STRICT_MODE = False  # Set to True for strict filtering (removes mismatched)
-                
-                filtered_with_scores = filter_by_direction(
-                    doc_results=final_docs_with_scores,
-                    query_intent=query_intent,
-                    strict_mode=DIRECTION_STRICT_MODE
-                )
-                
-                if len(filtered_with_scores) < len(final_docs_with_scores):
-                    print(f"[DIRECTION GATING] Filtered from {len(final_docs_with_scores)} to {len(filtered_with_scores)} documents")
-                    final_docs_with_scores = filtered_with_scores
-                    final_docs = [doc for doc, score in filtered_with_scores]
-                else:
-                    print(f"[DIRECTION GATING] No documents filtered (all matched or unknown direction)")
-            else:
-                print(f"[DIRECTION GATING] No direction detected in query - skipping direction filter")
+            # ✅ REMOVED: Direction gating is now applied only once before rerank in perplexity_style_retrieve
+            # This prevents duplicate filtering and ensures consistency
+            # Auto-strict mode will activate automatically if mismatches dominate
             
             # ===== DIRECTIONALITY DIAGNOSTIC LOGGING =====
+            # Extract query intent for diagnostic logging (reuse if already extracted)
+            query_intent = extract_migration_direction(enhanced_query)
             # Extract query intent (migration direction from user query) - reuse from above
             if 'query_intent' not in locals():
                 query_intent = extract_migration_direction(enhanced_query)
@@ -3718,10 +4224,19 @@ Answer clearly and correctly based on the provided context and knowledge base.""
                 direction_unknown = 0
                 
                 for idx, (doc, score) in enumerate(final_docs_with_scores[:10], 1):  # Analyze top 10
-                    # Get document text (title + content preview)
-                    title = doc.metadata.get('title', '') or doc.metadata.get('post_title', '') or ''
-                    content_preview = doc.page_content[:500] if doc.page_content else ''
-                    doc_text = f"{title} {content_preview}"
+                    # ✅ FIXED: Use richer context for direction detection (same as filter_by_direction)
+                    # Include metadata + filename + folder + tag + longer content
+                    meta = doc.metadata or {}
+                    meta_blob = " ".join([
+                        str(meta.get("tag", "")),
+                        str(meta.get("source_type", "")),
+                        str(meta.get("folder_path", "") or meta.get("folder", "")),
+                        str(meta.get("filename", "") or meta.get("file_name", "")),
+                        str(meta.get("page_url", "")),
+                        str(meta.get("title", "") or meta.get("post_title", "")),
+                    ])
+                    content_preview = doc.page_content[:1500] if doc.page_content else ''
+                    doc_text = f"{meta_blob} {content_preview}"
                     
                     doc_direction = extract_migration_direction(doc_text)
                     
@@ -3957,8 +4472,16 @@ Answer clearly and correctly based on the provided context and knowledge base.""
                 for doc in final_docs
             )
             
-            # Build enhanced system prompt with guardrails if transcripts are present
+            # ====== 2-STAGE RETRIEVAL: GUARDRAILS ONLY IN STAGE 2 ======
+            # Stage 1: No limitations guardrails (keeps answers process-focused)
+            # Stage 2: Add guardrails only when verifying support claims
+            
+            # Base system prompt (no limitations guardrail in Stage 1)
             enhanced_system_prompt = SYSTEM_PROMPT
+            
+            # Note: Limitations guardrail will be added in Stage 2 if needed
+            print("[GUARDRAIL] Stage 1: No limitations guardrail (process-focused answers)")
+
             if has_transcript_sources:
                 guardrail_instruction = """
 
@@ -3971,7 +4494,7 @@ IMPORTANT - TRANSCRIPT SOURCES DETECTED:
 - DO NOT use definitive language like "CloudFuze guarantees..." or "CloudFuze officially supports..."
 - If transcript information conflicts with official documentation, ALWAYS prefer official knowledge base content
 - Transcripts are contextual and may contain discussions, not official commitments"""
-                enhanced_system_prompt = SYSTEM_PROMPT + guardrail_instruction
+                enhanced_system_prompt = enhanced_system_prompt + guardrail_instruction
             
             # RISK 3 FIX: Add confidence-aware instructions to guide answer quality
             # confidence_level is set earlier in score filtering section
@@ -4054,19 +4577,149 @@ User Question:
                 except Exception as e:
                     print(f"[WARNING] Failed to start synthesis: {e}")
             
-            # Stream the response with real-time streaming
-            full_response = ""
-            # messages already created above based on forced_no_context
-            async for chunk in llm.astream(messages):
-                if hasattr(chunk, 'content'):
-                    token = chunk.content
-                    full_response += token
-                    yield f"data: {json.dumps({'token': token, 'type': 'token'})}\n\n"
-                    # Removed sleep for faster streaming
+            # ====== 2-STAGE RETRIEVAL: STAGE 1 - GENERATE DRAFT ANSWER ======
+            # Store Stage 1 docs for potential Stage 2 merge
+            stage1_docs_with_scores = doc_results if doc_results else []
+            stage1_docs = final_docs if final_docs else []
+            
+            # ✅ CHECK 3: Generate Stage-1 draft first (collect, don't stream yet)
+            # This ensures we only stream the final verified answer
+            print(f"[2-STAGE] Generating Stage-1 draft answer...")
+            draft_response = llm.invoke(messages)
+            draft_answer = draft_response.content if hasattr(draft_response, 'content') else str(draft_response)
             
             # Record LLM generation time
             llm_time_ms = int((time.time() - llm_start_time) * 1000)
-            streaming_time_ms = llm_time_ms  # In streaming mode, these are the same
+            
+            # ====== 2-STAGE RETRIEVAL: STAGE 2 - VERIFY IF NEEDED ======
+            # ✅ CHECK 1: Prevent infinite loop - only run Stage-2 once
+            stage2_verifying = False  # Flag to prevent re-triggering
+            
+            # Check if Stage 2 verification is needed
+            need_verify = (is_support_q or has_support_claim(draft_answer)) and not stage2_verifying
+            
+            if need_verify:
+                stage2_verifying = True  # Set flag to prevent re-triggering
+                print(f"[2-STAGE] ⚠️ Stage 2 verification triggered (support_q={is_support_q}, has_claim={has_support_claim(draft_answer)})")
+                print(f"[2-STAGE] Retrieving limitations documents for verification...")
+                
+                try:
+                    # ✅ CHECK 2: Retrieve limitations documents with strongest filter
+                    # Use source_type filter first (most reliable)
+                    print(f"[2-STAGE] Retrieving limitations documents (using strongest filter)...")
+                    limitations_docs = retrieve_limitations_documents(vectorstore, enhanced_query, k=4)
+                    
+                    if limitations_docs:
+                        print(f"[2-STAGE] ✓ Retrieved {len(limitations_docs)} limitations documents")
+                        
+                        # Merge Stage 1 docs with limitations docs
+                        merged_docs_with_scores = merge_stage1_with_limitations(
+                            stage1_docs_with_scores,
+                            limitations_docs,
+                            max_limitations=3
+                        )
+                        merged_docs = [doc for doc, score in merged_docs_with_scores]
+                        
+                        # Update final_docs for context formatting
+                        final_docs = merged_docs
+                        doc_results = merged_docs_with_scores
+                        
+                        # Re-format context with merged docs
+                        from app.llm import format_docs
+                        formatted_docs = format_docs(merged_docs)
+                        context_text_stage2 = "\n\n".join([f"Document {i+1}:\n{formatted_doc}" for i, formatted_doc in enumerate(formatted_docs)])
+                        
+                        # Build enhanced prompt with limitations guardrail (ONLY in Stage 2)
+                        limitations_guardrail_enhanced = """
+
+CRITICAL - LIMITATIONS & SUPPORTED FEATURES DOCUMENT (SOURCE OF TRUTH):
+- You have access to the Limitations & Supported Features document (sharepoint_limitations source)
+- This document is the DEFINITIVE source of truth for:
+  * What features ARE supported
+  * What features are NOT supported
+  * Migration capabilities and limitations
+  * Workarounds for unsupported features
+- **ALWAYS prioritize information from limitations documents over other sources**
+- If limitations document says "NOT SUPPORTED", you MUST answer that it's not supported
+- If limitations document says "SUPPORTED", you can confidently say it's supported
+- If other sources conflict with limitations document, the limitations document WINS
+- When answering about support/limitations, use this CLEAR format:
+  ✅ Start with direct answer: "Yes, [feature] is supported" OR "No, [feature] is not supported"
+  ✅ If there's a reason, add it naturally: "No, [feature] is not supported because [reason from limitations doc]"
+  ✅ If not supported and workaround exists: "No, [feature] is not supported. However, [workaround from limitations doc]"
+  ✅ Keep it conversational and clear - no need to mention "Source: Limitations document"
+  ✅ If limitations document doesn't mention a feature, say "The limitations document does not specify support for this feature" rather than guessing
+- NEVER say a feature is supported if limitations document says it's NOT SUPPORTED
+- **If you claim 'supported/not supported', you MUST cite limitations doc snippet. If no evidence, say 'The limitations document does not specify support for this feature.'**"""
+                        
+                        enhanced_system_prompt_stage2 = SYSTEM_PROMPT + limitations_guardrail_enhanced
+                        
+                        # Re-generate answer with Stage 2 context and guardrail
+                        print(f"[2-STAGE] Regenerating answer with limitations guardrail...")
+                        
+                        # Build messages for Stage 2
+                        stage2_messages = [SystemMessage(content=enhanced_system_prompt_stage2)]
+                        
+                        # Add conversation history if available
+                        if conversation_history:
+                            for msg in conversation_history:
+                                if msg["role"] == "user":
+                                    stage2_messages.append(HumanMessage(content=msg["content"]))
+                                elif msg["role"] == "assistant":
+                                    stage2_messages.append(AIMessage(content=msg["content"]))
+                        
+                        # Add context and query
+                        if forced_no_context:
+                            stage2_messages.append(HumanMessage(content=f"Question: {enhanced_query}"))
+                        else:
+                            stage2_messages.append(HumanMessage(content=f"""Use the following context to answer.
+
+<context>
+{context_text_stage2}
+</context>
+
+User Question:
+{enhanced_query}
+""".strip()))
+                        
+                        # Generate Stage 2 answer (non-streaming)
+                        stage2_llm = get_llm(streaming=False, temperature=0.1, max_tokens=1500)
+                        stage2_response = stage2_llm.invoke(stage2_messages)
+                        full_response = stage2_response.content if hasattr(stage2_response, 'content') else str(stage2_response)
+                        
+                        print(f"[2-STAGE] ✓ Stage 2 answer generated (length: {len(full_response)} chars)")
+                        
+                        # ✅ CHECK 1: Ensure Stage-2 answer doesn't re-trigger (shouldn't happen, but safety check)
+                        if has_support_claim(full_response):
+                            print(f"[2-STAGE] ⚠️ Stage-2 answer contains support claims (expected - this is the verified answer)")
+                        
+                    else:
+                        # ✅ CHECK 2: If limitations docs not found, keep Stage-1 answer
+                        print(f"[2-STAGE] ⚠️ No limitations documents found - keeping Stage-1 answer")
+                        full_response = draft_answer
+                        
+                except Exception as e:
+                    print(f"[2-STAGE] ✗ Stage 2 verification failed: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    print(f"[2-STAGE] Keeping Stage 1 answer")
+                    full_response = draft_answer
+            else:
+                # No Stage-2 needed, use Stage-1 draft
+                full_response = draft_answer
+                print(f"[2-STAGE] ✓ Stage 1 answer sufficient (no support question/claims detected)")
+            
+            # ✅ CHECK 3: Stream only the final verified answer
+            # Now stream the final answer (either Stage-1 draft or Stage-2 verified)
+            streaming_time_ms = 0
+            stream_start_time = time.time()
+            for char in full_response:
+                yield f"data: {json.dumps({'token': char, 'type': 'token'})}\n\n"
+                await asyncio.sleep(0.01)  # Small delay for smooth streaming
+            streaming_time_ms = int((time.time() - stream_start_time) * 1000)
+            
+            # Update LLM time to include streaming
+            llm_time_ms += streaming_time_ms
             
             # ===== QUALITY DETECTION (Retrieval + Answer Level) =====
             retrieval_quality = calculate_retrieval_quality(doc_results) if doc_results else {"quality": "low", "avg_score": 0.0, "confidence": 0.0, "min_score": 0.0, "max_score": 0.0, "doc_count": 0}
@@ -4088,11 +4741,11 @@ User Question:
                 logger.debug(f"Failed to track message event: {e}")
             
             # ✅ CONVERSATIONAL MEMORY: Save messages to chat_messages collection
+            # Note: trace_id will be set later, we'll update the message after trace completion
             try:
                 await save_message(session_id, "user", question)
-                await save_message(session_id, "assistant", full_response)
             except Exception as e:
-                logger.warning(f"Failed to save messages to chat_messages: {e}")
+                logger.warning(f"Failed to save user message: {e}")
             
             # Add both user question and bot response to conversation AFTER processing (legacy)
             await add_to_conversation(conversation_id, "user", question)
@@ -4316,8 +4969,38 @@ User Question:
                         user_email=user_email,
                         metadata=comprehensive_metadata
                     )
+                
+                # Save assistant message with version 1 metadata (initial response)
+                # Use trace_id as parent_trace_id for versioning
+                try:
+                    await save_message(
+                        session_id,
+                        "assistant",
+                        full_response,
+                        response_version=1,
+                        parent_trace_id=trace_id if trace_id else None,
+                        model_used="gpt-4o-mini",  # Default model for initial response
+                        is_current=True,
+                        retry_attempt=None
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to save assistant message with versioning: {e}")
             except Exception as e:
                 print(f"[WARNING] Langfuse logging failed: {e}")
+                # Still try to save message even if trace failed
+                try:
+                    await save_message(
+                        session_id,
+                        "assistant",
+                        full_response,
+                        response_version=1,
+                        parent_trace_id=None,  # No trace_id available
+                        model_used="gpt-4o-mini",
+                        is_current=True,
+                        retry_attempt=None
+                    )
+                except Exception as save_error:
+                    logger.warning(f"Failed to save assistant message: {save_error}")
             
             # Generate recommended questions using RAG-based approach
             recommended_questions = []
@@ -4554,7 +5237,8 @@ Answer clearly and correctly based on the provided context and knowledge base.""
             from langchain_core.prompts import ChatPromptTemplate
             from langchain_core.messages import SystemMessage, HumanMessage
             
-            llm = get_llm(temperature=0.3, max_tokens=1500)
+            # Use gpt-4o-mini for retry attempts (same as initial response)
+            llm = get_llm(model_name="gpt-4o-mini", temperature=0.3, max_tokens=1500)
             
             messages = [
                 SystemMessage(content=SYSTEM_PROMPT),
@@ -4618,10 +5302,31 @@ Answer clearly and correctly based on the provided context and knowledge base.""
             
             print(f"[RETRY QUALITY] Retrieval: {retrieval_quality['quality']}, Answer: {answer_quality['quality']}, Combined: {combined_quality['quality']}")
             
-            # Save messages
+            # Version management: Get parent_trace_id and determine new version number
+            parent_trace_id = previous_trace_id  # Use previous trace_id as parent
+            max_version = await get_max_version(parent_trace_id) if parent_trace_id else 0
+            new_version = max_version + 1
+            
+            # Mark all previous versions as not current (before saving new version)
+            if parent_trace_id:
+                try:
+                    await mark_all_versions_not_current(parent_trace_id)
+                except Exception as e:
+                    logger.warning(f"Failed to mark previous versions as not current: {e}")
+            
+            # Save messages with versioning metadata (new version will be marked as current)
             try:
                 await save_message(session_id, "user", question)
-                await save_message(session_id, "assistant", full_response)
+                await save_message(
+                    session_id, 
+                    "assistant", 
+                    full_response,
+                    response_version=new_version,
+                    parent_trace_id=parent_trace_id,
+                    model_used="gpt-4o-mini",
+                    is_current=True,  # This will be the current version
+                    retry_attempt=retry_attempt
+                )
             except Exception as e:
                 logger.warning(f"Failed to save messages: {e}")
             
@@ -4667,8 +5372,8 @@ Answer clearly and correctly based on the provided context and knowledge base.""
             except Exception as e:
                 print(f"[WARNING] Langfuse logging failed: {e}")
             
-            # Send completion
-            yield f"data: {json.dumps({'type': 'done', 'full_response': full_response, 'trace_id': trace_id})}\n\n"
+            # Send completion with version metadata
+            yield f"data: {json.dumps({'type': 'done', 'full_response': full_response, 'trace_id': trace_id, 'parent_trace_id': parent_trace_id, 'response_version': new_version})}\n\n"
             
         except Exception as e:
             print(f"[ERROR] ERROR in retry stream: {e}")
@@ -4685,6 +5390,58 @@ Answer clearly and correctly based on the provided context and knowledge base.""
             "Content-Type": "text/event-stream",
         }
     )
+
+@router.get("/chat/response-versions")
+async def get_response_versions_endpoint(
+    parent_trace_id: str,
+    metadata_only: bool = Query(False, description="If true, only return version count and current version metadata"),
+    auth_user: dict = Depends(require_auth)
+):
+    """
+    Get all response versions for a given parent_trace_id.
+    
+    Args:
+        parent_trace_id: Parent trace ID linking all versions
+        metadata_only: If true, only return count and current version info (no content)
+        
+    Returns:
+        List of version documents with version number, content, model, etc.
+    """
+    try:
+        if metadata_only:
+            # Lightweight query: only get count and current version
+            from app.mongodb_memory import mongodb_memory
+            await mongodb_memory.connect()
+            chat_messages_collection = mongodb_memory.database["chat_messages"]
+            
+            # Count total versions
+            total_count = await chat_messages_collection.count_documents(
+                {"parent_trace_id": parent_trace_id, "role": "assistant"}
+            )
+            
+            # Get current version
+            current_version_doc = await chat_messages_collection.find_one(
+                {"parent_trace_id": parent_trace_id, "role": "assistant", "is_current": True},
+                {"response_version": 1, "model_used": 1}
+            )
+            
+            return {
+                "parent_trace_id": parent_trace_id,
+                "total_versions": total_count,
+                "current_version": current_version_doc.get("response_version", 1) if current_version_doc else 1,
+                "current_model": current_version_doc.get("model_used", "gpt-4o-mini") if current_version_doc else "gpt-4o-mini",
+                "versions": []  # Empty for metadata_only
+            }
+        else:
+            versions = await get_response_versions(parent_trace_id)
+            return {
+                "parent_trace_id": parent_trace_id,
+                "versions": versions,
+                "total_versions": len(versions)
+            }
+    except Exception as e:
+        logger.error(f"Error getting response versions: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve versions: {str(e)}")
 
 # ---------------- User Chat History Endpoints ----------------
 
@@ -5954,7 +6711,7 @@ async def trigger_blog_poll(
             return {
                 "success": True,
                 "message": "Blog poll completed successfully",
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat()
             }
         else:
             raise HTTPException(

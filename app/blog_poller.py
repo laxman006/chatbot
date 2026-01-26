@@ -10,7 +10,7 @@ import json
 import time
 import signal
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Set
 from langchain_core.documents import Document
 
@@ -46,7 +46,11 @@ class BlogPoller:
                 data = json.load(f)
                 timestamp_str = data.get("last_poll_time")
                 if timestamp_str:
-                    return datetime.fromisoformat(timestamp_str)
+                    dt = datetime.fromisoformat(timestamp_str)
+                    # Ensure timezone-aware (assume UTC if naive)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    return dt
         except Exception as e:
             print(f"[WARN] Could not load last poll time: {e}")
         
@@ -56,6 +60,10 @@ class BlogPoller:
         """Save the last poll timestamp to file."""
         os.makedirs(os.path.dirname(BLOG_LAST_POLL_FILE), exist_ok=True)
         try:
+            # Ensure timezone-aware datetime (UTC)
+            if poll_time.tzinfo is None:
+                poll_time = poll_time.replace(tzinfo=timezone.utc)
+            
             with open(BLOG_LAST_POLL_FILE, 'w') as f:
                 json.dump({
                     "last_poll_time": poll_time.isoformat(),
@@ -177,7 +185,7 @@ class BlogPoller:
         print("=" * 60)
         print(f"BLOG POLL #{self.poll_count + 1}")
         print("=" * 60)
-        print(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"Time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
         
         try:
             # Get last processed post date from metadata
@@ -202,7 +210,7 @@ class BlogPoller:
             
             if not all_posts:
                 print("[INFO] No new posts found")
-                self.last_poll_time = datetime.now()
+                self.last_poll_time = datetime.now(timezone.utc)
                 self.save_last_poll_time(self.last_poll_time)
                 return True
             
@@ -228,7 +236,7 @@ class BlogPoller:
             
             if not new_posts:
                 print("[INFO] No new posts found (all posts already in vectorstore)")
-                self.last_poll_time = datetime.now()
+                self.last_poll_time = datetime.now(timezone.utc)
                 self.save_last_poll_time(self.last_poll_time)
                 return True
             
@@ -247,7 +255,7 @@ class BlogPoller:
             else:
                 print("[ERROR] Poll completed with errors")
             
-            self.last_poll_time = datetime.now()
+            self.last_poll_time = datetime.now(timezone.utc)
             self.poll_count += 1
             self.save_last_poll_time(self.last_poll_time)
             
@@ -278,7 +286,7 @@ class BlogPoller:
             if latest_date:
                 metadata["last_blog_post_date"] = latest_date
             
-            metadata["last_blog_poll"] = datetime.now().isoformat()
+            metadata["last_blog_poll"] = datetime.now(timezone.utc).isoformat()
             
             # Count blog posts in vectorstore
             try:
@@ -330,7 +338,7 @@ class BlogPoller:
         # Load last poll time
         self.last_poll_time = self.load_last_poll_time()
         if self.last_poll_time:
-            print(f"Last poll: {self.last_poll_time.strftime('%Y-%m-%d %H:%M:%S')}")
+            print(f"Last poll: {self.last_poll_time.strftime('%Y-%m-%d %H:%M:%S UTC')}")
         else:
             print("No previous poll found - this will be the first poll")
         
