@@ -2518,10 +2518,10 @@ def intelligent_route_and_retrieve(
                 "query_type": "general",
                 "query_intent": "General query",
                 "sources": {
-                    "blog": {"k": 20, "relevance": 0.6},
-                    "jira": {"k": 15, "relevance": 0.5},
-                    "sharepoint": {"k": 8, "relevance": 0.3},
-                    "pdfs": {"k": 5, "relevance": 0.3},
+                    "sharepoint": {"k": 20, "relevance": 0.7},
+                    "jira": {"k": 15, "relevance": 0.6},
+                    "pdfs": {"k": 10, "relevance": 0.5},
+                    "blog": {"k": 2, "relevance": 0.2},
                     "transcripts": {"k": 2, "relevance": 0.2},
                     "excel": {"k": 0, "relevance": 0.0}
                 },
@@ -4462,15 +4462,33 @@ Answer clearly and correctly based on the provided context and knowledge base.""
             
             retrieval_start_time = time.time()
             
-            # Retrieve with retry mode (uses step-up retrieval)
-            doc_results = perplexity_style_retrieve(
-                query=enhanced_query,
-                retry_mode=True,
-                retry_attempt=retry_attempt,
-                use_expansion=RETRY_FORCE_EXPANSION or ENABLE_QUERY_EXPANSION,
-            )
+            # ====== INTELLIGENT ROUTING OR PERPLEXITY-STYLE RAG (RETRY MODE) ======
+            # Choose retrieval strategy based on configuration (same as regular chat)
+            if ENABLE_INTELLIGENT_ROUTING and intelligent_router:
+                print("[RETRY] Using Intelligent Routing strategy")
+                
+                # Use intelligent LLM-based routing (respects source priorities, reduces blog usage)
+                doc_results = intelligent_route_and_retrieve(
+                    query=enhanced_query,
+                    k_final=ROUTING_FINAL_K,
+                    use_routing=True
+                )
+                
+                final_docs = [doc for doc, score in doc_results]
+                print(f"[RETRY] Retrieved {len(final_docs)} docs using Intelligent Routing")
+            else:
+                print("[RETRY] Using Perplexity-Style (Option E) strategy")
+                
+                # Retrieve with retry mode (uses step-up retrieval)
+                doc_results = perplexity_style_retrieve(
+                    query=enhanced_query,
+                    retry_mode=True,
+                    retry_attempt=retry_attempt,
+                    use_expansion=RETRY_FORCE_EXPANSION or ENABLE_QUERY_EXPANSION,
+                )
+                
+                final_docs = [doc for doc, score in doc_results]
             
-            final_docs = [doc for doc, score in doc_results]
             retrieval_time_ms = int((time.time() - retrieval_start_time) * 1000)
             
             print(f"[RETRY] Retrieved {len(final_docs)} docs (attempt {retry_attempt})")

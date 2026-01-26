@@ -145,7 +145,8 @@ Analyze the user query and determine:
 - Queries about changing/modifying files, configs, settings during migration need SharePoint + Jira (not blog)
 - If query mentions specific error messages or failures, prioritize Jira
 - Be generous with k values for internal sources - better to over-retrieve than return 0 results
-- **Blog should rarely get k > 5** - only when internal sources truly don't have the information
+- **Blog should rarely get k > 3** - only when internal sources truly don't have the information
+- **Default blog allocation should be k=0-2** - only allocate if query is clearly about marketing/public content
 
 **🎯 JIRA-SPECIFIC PATTERNS (HIGH PRIORITY):**
 Queries MUST route primarily to Jira (relevance ≥ 0.8, k ≥ 25) if they contain:
@@ -284,7 +285,7 @@ Analyze this query and determine the optimal retrieval strategy. Consider:
                 "sharepoint": {"relevance": 0.7, "k": 20, "reasoning": "Fallback - SharePoint is primary internal documentation source"},
                 "jira": {"relevance": 0.6, "k": 15, "reasoning": "Fallback - check for known issues and workarounds"},
                 "pdfs": {"relevance": 0.5, "k": 10, "reasoning": "Fallback - technical documentation"},
-                "blog": {"relevance": 0.3, "k": 5, "reasoning": "Fallback - low priority marketing content, use sparingly"},
+                "blog": {"relevance": 0.2, "k": 2, "reasoning": "Fallback - low priority marketing content, use sparingly"},
                 "transcripts": {"relevance": 0.0, "k": 0, "reasoning": "Fallback - skip transcripts"},
                 "excel": {"relevance": 0.0, "k": 0, "reasoning": "Fallback - skip structured data"}
             },
