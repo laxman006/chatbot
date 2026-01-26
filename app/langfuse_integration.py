@@ -52,6 +52,10 @@ class LangfuseTracker:
         try:
             # Build metadata (using UTC for consistency)
             trace_metadata = {**(metadata or {}), "timestamp": datetime.now(timezone.utc).isoformat()}
+            if user_name and "user_name" not in trace_metadata:
+                trace_metadata["user_name"] = user_name
+            if user_email and "user_email" not in trace_metadata:
+                trace_metadata["user_email"] = user_email
             
             trace = self.client.trace(
                 name="chat_interaction",
@@ -163,6 +167,10 @@ class LangfuseTracker:
         try:
             # Build metadata (using UTC for consistency)
             trace_metadata = {**(metadata or {}), "timestamp": datetime.now(timezone.utc).isoformat()}
+            if user_name and "user_name" not in trace_metadata:
+                trace_metadata["user_name"] = user_name
+            if user_email and "user_email" not in trace_metadata:
+                trace_metadata["user_email"] = user_email
             
             trace = self.client.trace(
                 name="chat_interaction",
