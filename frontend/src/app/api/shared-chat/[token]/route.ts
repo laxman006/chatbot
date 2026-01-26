@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const BACKEND_BASE =
-  process.env.NEXT_PUBLIC_BACKEND_URL ||
-  process.env.NEXT_PUBLIC_API_URL ||
-  'http://localhost:8002';
+const ENV_BACKEND_BASE =
+  process.env.NEXT_PUBLIC_BACKEND_URL || process.env.NEXT_PUBLIC_API_URL;
 
-function buildBackendUrl(token: string) {
-  const base = BACKEND_BASE.replace(/\/$/, '');
+function buildBackendUrl(token: string, request: NextRequest) {
+  const baseFromEnv = ENV_BACKEND_BASE;
+  const requestUrl = new URL(request.url);
+  const base =
+    (baseFromEnv && baseFromEnv.replace(/\/$/, '')) ||
+    `${requestUrl.protocol}//${requestUrl.host}`;
   return `${base}/chat/shared/${token}`;
 }
 
@@ -42,7 +44,7 @@ function getCorsHeaders(origin: string | null, request?: NextRequest) {
 }
 
 async function proxySharedChatRequest(token: string, request: NextRequest) {
-  const backendUrl = buildBackendUrl(token);
+  const backendUrl = buildBackendUrl(token, request);
   const origin = request.headers.get('origin');
 
   const headers = new Headers();
