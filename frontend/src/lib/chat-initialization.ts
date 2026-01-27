@@ -218,6 +218,9 @@ export function initializeChatApp(options: InitOptions = {}) {
   // Track if we're in read-only mode (viewing others' chats)
   let isReadOnlyMode = false;
   
+  // Guard flag to prevent multiple simultaneous executions of continueInThisThread
+  let isContinuingThread = false;
+  
   // Initialize or create session (only auto-create if not provided explicitly)
   // Don't navigate immediately - wait for first message
   if (!initialSessionId) {
@@ -842,7 +845,14 @@ export function initializeChatApp(options: InitOptions = {}) {
   
   // Continue in this thread - copy others' chat to user's own chats
   function continueInThisThread() {
+    // Guard: Prevent multiple simultaneous executions
+    if (isContinuingThread) {
+      console.log('[CONTINUE] Already processing, ignoring duplicate request');
+      return;
+    }
+    
     try {
+      isContinuingThread = true; // Set guard flag
       console.log('[CONTINUE] Starting continue in thread functionality');
       
       // Get current messages from the DOM
@@ -904,18 +914,51 @@ export function initializeChatApp(options: InitOptions = {}) {
       if (messages.length === 0) {
         console.error('[CONTINUE] No messages found to copy');
         showToast('No messages to copy', 'error', 3000);
+        isContinuingThread = false; // Clear guard flag
         return;
       }
-      
-      // Create new session ID
-      const newSessionId = createNewSession();
-      console.log('[CONTINUE] Created new session ID:', newSessionId);
       
       // Get the title from the current session (use first user message if no title)
       const firstUserMessage = messages.find(m => m.role === 'user');
       const sessionTitle = firstUserMessage 
         ? firstUserMessage.content.substring(0, 50) + (firstUserMessage.content.length > 50 ? '...' : '')
         : 'Copied Chat';
+      
+      // Check if a session with the same title already exists
+      const sessions = getAllSessions();
+      
+      // 🔒 CRITICAL FIX: Defensive check before unshift
+      if (!Array.isArray(sessions)) {
+        console.error('[SESSION] Sessions is not an array:', sessions);
+        isContinuingThread = false; // Clear guard flag
+        return;
+      }
+      
+      // Check for duplicate session with same title and message count
+      const existingSession = sessions.find(s => 
+        s.title === sessionTitle && 
+        s.messages && 
+        s.messages.length === messages.length
+      );
+      
+      if (existingSession) {
+        console.log('[CONTINUE] Session with same title already exists, navigating to:', existingSession.id);
+        isContinuingThread = false; // Clear guard flag
+        isReadOnlyMode = false;
+        
+        // Navigate to existing session instead of creating new one
+        if (router) {
+          router.push(`/chat/${existingSession.id}`);
+        } else {
+          loadSession(existingSession, false);
+          showToast('Chat already exists, opening existing session.', 'success', 4000);
+        }
+        return;
+      }
+      
+      // Create new session ID
+      const newSessionId = createNewSession();
+      console.log('[CONTINUE] Created new session ID:', newSessionId);
       
       // Create new session object
       const now = Date.now();
@@ -926,15 +969,6 @@ export function initializeChatApp(options: InitOptions = {}) {
         createdAt: now,
         messages: messages
       };
-      
-      // Save to localStorage
-      const sessions = getAllSessions();
-      
-      // 🔒 CRITICAL FIX: Defensive check before unshift
-      if (!Array.isArray(sessions)) {
-        console.error('[SESSION] Sessions is not an array:', sessions);
-        return;
-      }
       
       sessions.unshift(newSession);
       
@@ -964,6 +998,8 @@ export function initializeChatApp(options: InitOptions = {}) {
     } catch (error) {
       console.error('[CONTINUE] Failed to continue in thread:', error);
       showToast('Failed to copy chat. Please try again.', 'error', 4000);
+    } finally {
+      isContinuingThread = false; // Always clear guard flag
     }
   }
   
