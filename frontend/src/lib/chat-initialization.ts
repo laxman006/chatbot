@@ -1166,14 +1166,19 @@ export function initializeChatApp(options: InitOptions = {}) {
     // Skip if URL already has utm_source parameter
     if (url.includes('utm_source=')) return url;
     
+    // Only process absolute URLs (http:// or https://)
+    // Skip relative URLs (they should not get UTM parameters and shouldn't be modified)
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      return url; // Return relative URLs as-is (don't corrupt them)
+    }
+    
     try {
       const urlObj = new URL(url);
       urlObj.searchParams.set('utm_source', 'ai.cloudfuze.com');
       return urlObj.toString();
     } catch {
-      // If URL parsing fails, try simple string append
-      const separator = url.includes('?') ? '&' : '?';
-      return `${url}${separator}utm_source=ai.cloudfuze.com`;
+      // If URL parsing fails, return as-is (don't corrupt it)
+      return url;
     }
   }
 
