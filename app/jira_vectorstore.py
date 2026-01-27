@@ -6,6 +6,7 @@ Used for issue resolution queries - supplements main vectorstore
 
 import os
 import shutil
+import time
 from typing import List, Optional
 from langchain_openai import OpenAIEmbeddings
 from langchain_chroma import Chroma
@@ -160,18 +161,82 @@ def build_jira_vectorstore(use_cache: bool = True):
     return vectorstore
 
 
+class SyncLock:
+    """File-based lock to prevent concurrent sync operations that could corrupt ChromaDB."""
+    LOCK_FILE = "./data/jira_sync.lock"
+    LOCK_TIMEOUT = 300  # 5 minutes max lock time
+    
+    @staticmethod
+    def acquire():
+        """
+        Acquire sync lock. Returns True if acquired, False if already locked.
+        
+        Prevents concurrent syncs that could corrupt the ChromaDB database.
+        """
+        try:
+            os.makedirs("./data", exist_ok=True)
+            
+            # Check if lock file exists and is stale
+            if os.path.exists(SyncLock.LOCK_FILE):
+                lock_age = time.time() - os.path.getmtime(SyncLock.LOCK_FILE)
+                if lock_age > SyncLock.LOCK_TIMEOUT:
+                    print(f"[WARN] Stale lock file detected (age: {lock_age:.0f}s), removing...")
+                    try:
+                        os.remove(SyncLock.LOCK_FILE)
+                    except Exception as e:
+                        print(f"[WARN] Could not remove stale lock: {e}")
+                        return False
+                else:
+                    # Lock is active - another sync is running
+                    return False
+            
+            # Create lock file with PID
+            try:
+                with open(SyncLock.LOCK_FILE, 'w') as f:
+                    f.write(str(os.getpid()))
+                    f.flush()
+                    # Force write to disk (Unix/Linux)
+                    if hasattr(os, 'fsync'):
+                        os.fsync(f.fileno())
+                return True
+            except Exception as e:
+                print(f"[WARN] Could not create lock file: {e}")
+                return False
+        except Exception as e:
+            print(f"[WARN] Could not acquire sync lock: {e}")
+            return False
+    
+    @staticmethod
+    def release():
+        """Release sync lock by removing lock file."""
+        try:
+            if os.path.exists(SyncLock.LOCK_FILE):
+                os.remove(SyncLock.LOCK_FILE)
+        except Exception as e:
+            print(f"[WARN] Could not release sync lock: {e}")
+
+
 def add_jira_tickets_incrementally():
     """
     Add new/updated Jira tickets to existing vectorstore (incremental update).
     Only fetches tickets updated since last sync.
+    
+    Uses file-based locking to prevent concurrent syncs that could corrupt ChromaDB.
     """
     if not JIRA_PROCESSOR_AVAILABLE:
         print("[ERROR] Cannot sync Jira tickets: Jira processor not available")
         return None
     
-    print("=" * 60)
-    print("INCREMENTAL JIRA VECTORSTORE UPDATE")
-    print("=" * 60)
+    # Acquire lock to prevent concurrent syncs
+    if not SyncLock.acquire():
+        print("[WARN] Another sync is already running. Skipping this sync to prevent database corruption.")
+        print("[INFO] If no sync is actually running, delete ./data/jira_sync.lock and try again.")
+        return None
+    
+    try:
+        print("=" * 60)
+        print("INCREMENTAL JIRA VECTORSTORE UPDATE")
+        print("=" * 60)
     
     # Import sync tracker
     from app.jira_sync_tracker import get_last_sync_time, update_last_sync_time
@@ -350,6 +415,9 @@ def add_jira_tickets_incrementally():
         # Record failure
         update_last_sync_time(status="failed", documents_added=0, error_message=error_msg)
         return None
+    finally:
+        # Always release lock, even if sync fails
+        SyncLock.release()
 
 
 def get_jira_vectorstore():

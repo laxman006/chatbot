@@ -122,6 +122,22 @@ INTENT_BRANCHES = {
         "require_keywords": [["slack", "teams"], ["slack-to-teams"]],
         "query_expansion": ["channel migration", "workspace transfer", "conversation history"]
     },
+    "teams_chat_migration": {
+        "description": "Teams to Chat (Microsoft Teams to Google Chat) migration specific questions",
+        "keywords": ["teams", "chat", "teams to chat", "microsoft teams", "google chat", "teams to google chat"],
+        "include_tags": ["blog", "sharepoint"],
+        "require_keywords": [["teams", "chat"], ["teams-to-chat"], ["microsoft teams", "google chat"]],
+        "exclude_keywords": ["slack"],  # Exclude Slack to avoid confusion
+        "query_expansion": ["channel migration", "conversation history", "user mentions migration"]
+    },
+    "chat_teams_migration": {
+        "description": "Chat to Teams (Google Chat to Microsoft Teams) migration specific questions",
+        "keywords": ["chat", "teams", "chat to teams", "google chat", "microsoft teams", "google chat to teams"],
+        "include_tags": ["blog", "sharepoint"],
+        "require_keywords": [["chat", "teams"], ["chat-to-teams"], ["google chat", "microsoft teams"]],
+        "exclude_keywords": ["slack"],  # Exclude Slack to avoid confusion
+        "query_expansion": ["space migration", "conversation history", "user mentions migration"]
+    },
     "sharepoint_docs": {
         "description": "SharePoint documents, certificates, policies",
         "keywords": ["certificate", "download", "policy", "document", "soc", "compliance", "security"],
@@ -196,6 +212,22 @@ def classify_intent(query: str) -> dict:
         if any(word in query_lower for word in ["certificate", "compliance", "security", "policy"]):
             return {"intent": "sharepoint_docs", "confidence": 0.85, "method": "keyword"}
     
+    # CRITICAL FIX: Check for Teams to Chat and Chat to Teams BEFORE Slack to Teams
+    # to avoid misclassification
+    if ("teams" in query_lower and "chat" in query_lower) or ("microsoft teams" in query_lower and "google chat" in query_lower):
+        # Determine direction: Teams to Chat or Chat to Teams
+        if ("teams to chat" in query_lower or "teams-to-chat" in query_lower or 
+            ("microsoft teams" in query_lower and "google chat" in query_lower and 
+             query_lower.index("teams") < query_lower.index("chat"))):
+            return {"intent": "teams_chat_migration", "confidence": 0.90, "method": "keyword"}
+        elif ("chat to teams" in query_lower or "chat-to-teams" in query_lower or
+              ("google chat" in query_lower and "microsoft teams" in query_lower and
+               query_lower.index("chat") < query_lower.index("teams"))):
+            return {"intent": "chat_teams_migration", "confidence": 0.90, "method": "keyword"}
+        else:
+            # Ambiguous - default to Teams to Chat (more common)
+            return {"intent": "teams_chat_migration", "confidence": 0.75, "method": "keyword"}
+    
     if "slack" in query_lower and "teams" in query_lower:
         return {"intent": "slack_teams_migration", "confidence": 0.90, "method": "keyword"}
     
@@ -216,6 +248,8 @@ CRITICAL RULES:
 - If query asks about emails, conversations, threads, or discusses what was said in emails → "email_conversations"
 - If query asks about general business value, benefits, or "what is CloudFuze" WITHOUT mentioning specific platforms → "general_business"
 - If query mentions BOTH "Slack" AND "Teams" → "slack_teams_migration"
+- If query mentions "Teams to Chat" or "Microsoft Teams to Google Chat" → "teams_chat_migration"
+- If query mentions "Chat to Teams" or "Google Chat to Microsoft Teams" → "chat_teams_migration"
 - If query asks about general migration (without specific platforms) → "migration_general"
 - If query asks for certificates, documents, or policies → "sharepoint_docs"
 - If query asks about pricing or costs → "pricing"
@@ -305,6 +339,43 @@ def retrieve_with_branch_filter(query: str, intent: str, k: int = 50):
                 tag_match = False
             if "teams" not in doc_content and "teams" not in doc_title:
                 tag_match = False
+            # Exclude Teams to Chat documents
+            if "teams to chat" in doc_title or "teams-to-chat" in doc_title:
+                tag_match = False
+        
+        # For teams_chat_migration: prioritize Teams to Chat content
+        elif intent == "teams_chat_migration":
+            # Must have both teams and chat keywords
+            if "teams" not in doc_content and "teams" not in doc_title:
+                tag_match = False
+            if ("chat" not in doc_content and "chat" not in doc_title and 
+                "google chat" not in doc_content.lower() and "google chat" not in doc_title.lower()):
+                tag_match = False
+            # CRITICAL: Exclude Slack to Teams documents to prevent confusion
+            if "slack to teams" in doc_title or "slack-to-teams" in doc_title:
+                tag_match = False
+            if "slack" in doc_content.lower() and "teams" in doc_content.lower():
+                # If document mentions both Slack and Teams, it's likely Slack to Teams, not Teams to Chat
+                slack_teams_count = doc_content.lower().count("slack") + doc_content.lower().count("teams")
+                if slack_teams_count >= 3:  # Multiple mentions suggest Slack to Teams
+                    tag_match = False
+        
+        # For chat_teams_migration: prioritize Chat to Teams content
+        elif intent == "chat_teams_migration":
+            # Must have both chat and teams keywords
+            if ("chat" not in doc_content and "chat" not in doc_title and 
+                "google chat" not in doc_content.lower() and "google chat" not in doc_title.lower()):
+                tag_match = False
+            if "teams" not in doc_content and "teams" not in doc_title:
+                tag_match = False
+            # CRITICAL: Exclude Slack to Teams documents to prevent confusion
+            if "slack to teams" in doc_title or "slack-to-teams" in doc_title:
+                tag_match = False
+            if "slack" in doc_content.lower() and "teams" in doc_content.lower():
+                # If document mentions both Slack and Teams, it's likely Slack to Teams, not Chat to Teams
+                slack_teams_count = doc_content.lower().count("slack") + doc_content.lower().count("teams")
+                if slack_teams_count >= 3:  # Multiple mentions suggest Slack to Teams
+                    tag_match = False
         
         # For sharepoint_docs: prioritize SharePoint source
         elif intent == "sharepoint_docs":
@@ -998,9 +1069,10 @@ def extract_migration_direction(text: str) -> dict:
         "dropbox": [r"dropbox"],
         "box": [r"box"],
         "google_chat": [
-        r"google\s+chat", r"gchat", r"g\s+chat",
-        r"^chat\s+to", r"chat\s+migration",  # Add: "chat to teams" = Google Chat
-    ],
+            r"google\s+chat", r"gchat", r"g\s+chat",
+            # Note: "chat to teams" pattern removed - handled explicitly in direction patterns
+            # Only match explicit "google chat" references, not generic "chat"
+        ],
         "egnyte": [r"egnyte"],
         "amazon_s3": [r"amazon\s+s3"],
         "google_drive": [r"google\s+drive"],
@@ -1009,10 +1081,43 @@ def extract_migration_direction(text: str) -> dict:
         "sharepoint": [r"sharepoint"],
         "onedrive": [r"onedrive"],
         "sharefile": [r"sharefile", r"citrix\s+sharefile"],
-        
-        
-       
     }
+    
+    # CRITICAL FIX: Handle ambiguous "chat" patterns BEFORE general direction matching
+    # Check for explicit "Teams to Chat" or "Chat to Teams" patterns first
+    teams_to_chat_patterns = [
+        r"teams\s+to\s+chat",
+        r"teams\s+to\s+google\s+chat",
+        r"microsoft\s+teams\s+to\s+chat",
+        r"microsoft\s+teams\s+to\s+google\s+chat",
+    ]
+    
+    chat_to_teams_patterns = [
+        r"chat\s+to\s+teams",
+        r"google\s+chat\s+to\s+teams",
+        r"chat\s+to\s+microsoft\s+teams",
+        r"google\s+chat\s+to\s+microsoft\s+teams",
+    ]
+    
+    # Check for explicit Teams to Chat pattern
+    for pattern in teams_to_chat_patterns:
+        if re.search(pattern, text_lower, re.IGNORECASE):
+            return {
+                "source_platform": "teams",
+                "target_platform": "google_chat",
+                "direction_detected": True,
+                "mentioned_platforms": ["teams", "google_chat"]
+            }
+    
+    # Check for explicit Chat to Teams pattern
+    for pattern in chat_to_teams_patterns:
+        if re.search(pattern, text_lower, re.IGNORECASE):
+            return {
+                "source_platform": "google_chat",
+                "target_platform": "teams",
+                "direction_detected": True,
+                "mentioned_platforms": ["google_chat", "teams"]
+            }
     
     # Compile patterns
     platform_regex = {}
@@ -1026,7 +1131,11 @@ def extract_migration_direction(text: str) -> dict:
             mentioned_platforms.append(platform)
     
     # Try to extract direction using common patterns
+    # IMPORTANT: Order matters - more specific patterns first
     direction_patterns = [
+        # Explicit "Teams to Chat" variations (already handled above, but keep for completeness)
+        (r"teams\s+to\s+(?:google\s+)?chat", True),
+        (r"(?:google\s+)?chat\s+to\s+teams", True),
         # "from X to Y"
         (r"from\s+([^,\s]+(?:\s+[^,\s]+)*?)\s+to\s+([^,\s]+(?:\s+[^,\s]+)*?)", True),
         # "X to Y migration"
@@ -1060,6 +1169,14 @@ def extract_migration_direction(text: str) -> dict:
                     source_normalized = platform
                 if pattern_regex.search(target_text):
                     target_normalized = platform
+            
+            # CRITICAL FIX: Handle ambiguous "chat" in target position
+            # If target is "chat" and source is "teams", assume Google Chat
+            if target_text.strip().lower() == "chat" and source_normalized == "teams":
+                target_normalized = "google_chat"
+            # If source is "chat" and target is "teams", assume Google Chat as source
+            elif source_text.strip().lower() == "chat" and target_normalized == "teams":
+                source_normalized = "google_chat"
             
             if source_normalized and target_normalized:
                 source_platform = source_normalized
@@ -1153,6 +1270,29 @@ def filter_by_direction(
         doc_source = doc_direction.get("source_platform")
         doc_target = doc_direction.get("target_platform")
         
+        # CRITICAL FIX: Prevent cross-contamination between similar combinations
+        # If query is "Teams to Chat", strongly penalize "Slack to Teams" docs
+        # If query is "Slack to Teams", strongly penalize "Teams to Chat" docs
+        is_similar_but_wrong = False
+        if query_source == "teams" and query_target == "google_chat":
+            # Query is Teams to Chat - penalize Slack to Teams docs
+            if doc_source == "slack" and doc_target == "teams":
+                is_similar_but_wrong = True
+                if strict_mode:
+                    continue  # Remove Slack to Teams docs when query is Teams to Chat
+                else:
+                    # Heavily penalize: reduce score by 80%
+                    score = score * 0.2
+        elif query_source == "slack" and query_target == "teams":
+            # Query is Slack to Teams - penalize Teams to Chat docs
+            if doc_source == "teams" and doc_target == "google_chat":
+                is_similar_but_wrong = True
+                if strict_mode:
+                    continue  # Remove Teams to Chat docs when query is Slack to Teams
+                else:
+                    # Heavily penalize: reduce score by 80%
+                    score = score * 0.2
+        
         # Determine match status
         if doc_source and doc_target:
             # Document has explicit direction
@@ -1172,8 +1312,8 @@ def filter_by_direction(
                 if strict_mode:
                     continue  # Remove different direction docs
                 else:
-                    # Penalize: reduce score by 50%
-                    penalized_score = score * 0.5
+                    # Penalize: reduce score by 50% (or use already penalized score if similar_but_wrong)
+                    penalized_score = score * 0.5 if not is_similar_but_wrong else score
                     mismatched_docs.append((doc, penalized_score, "different"))
         else:
             # Unknown direction - keep but don't boost
@@ -2531,9 +2671,14 @@ def intelligent_route_and_retrieve(
     # ============ STEP 2: MULTI-SOURCE RETRIEVAL ============
     print(f"\n[RETRIEVAL] Retrieving from sources based on routing plan...")
     
+    # Load Jira vectorstore lazily if needed
+    jira_vs = jira_vectorstore
+    if _get_jira_vectorstore_cached:
+        jira_vs = _get_jira_vectorstore_cached()
+    
     all_candidates = intelligent_multi_source_retrieve(
         vectorstore=vectorstore,
-        jira_vectorstore=jira_vectorstore,
+        jira_vectorstore=jira_vs,
         query=query,
         routing_plan=routing_plan,
         enable_deduplication=ROUTING_ENABLE_DEDUPLICATION

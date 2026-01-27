@@ -7,6 +7,8 @@ from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
 import traceback
+import os
+import time
 
 from app.auth import require_admin
 from app.jira_vectorstore import add_jira_tickets_incrementally, load_jira_vectorstore
@@ -38,6 +40,25 @@ async def trigger_jira_sync(
     """
     try:
         print("[API] Manual Jira sync triggered by admin")
+        
+        # Check if sync is already running (lock file exists)
+        lock_file = "./data/jira_sync.lock"
+        if os.path.exists(lock_file):
+            lock_age = time.time() - os.path.getmtime(lock_file)
+            if lock_age < 300:  # Less than 5 minutes (lock timeout)
+                error_msg = f"Sync is already running (lock age: {lock_age:.0f}s). Please wait for it to complete."
+                print(f"[API] ERROR: {error_msg}")
+                raise HTTPException(
+                    status_code=409,  # Conflict
+                    detail=error_msg
+                )
+            else:
+                # Stale lock - remove it
+                print(f"[API] WARN: Stale lock file detected (age: {lock_age:.0f}s), removing...")
+                try:
+                    os.remove(lock_file)
+                except Exception as e:
+                    print(f"[API] WARN: Could not remove stale lock: {e}")
         
         # Get pre-sync count
         vectorstore = load_jira_vectorstore()
@@ -132,6 +153,14 @@ async def get_sync_status(
         else:
             total_docs = 0
         
+        # Check for active lock
+        lock_file = "./data/jira_sync.lock"
+        sync_locked = False
+        lock_age_seconds = None
+        if os.path.exists(lock_file):
+            lock_age_seconds = time.time() - os.path.getmtime(lock_file)
+            sync_locked = lock_age_seconds < 300  # Active if less than 5 minutes old
+        
         # Get alerts
         alerts = get_sync_alerts()
         has_alerts = has_sync_alerts()
@@ -145,7 +174,9 @@ async def get_sync_status(
             "sync_history": stats.get('sync_history', []),
             "consecutive_failures": stats.get('consecutive_failures', 0),
             "has_alerts": has_alerts,
-            "alerts": alerts
+            "alerts": alerts,
+            "sync_locked": sync_locked,
+            "lock_age_seconds": lock_age_seconds
         }
     except Exception as e:
         error_msg = str(e)

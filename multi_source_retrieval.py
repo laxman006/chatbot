@@ -366,7 +366,11 @@ def intelligent_multi_source_retrieve(
     jira_k = sources_plan.get("jira", {}).get("k", 0)
     if jira_k > 0:
         print(f"\n[RETRIEVAL] ━━━ Fetching {jira_k} docs from Jira ━━━")
-        jira_docs = retrieve_from_jira(jira_vectorstore, query, k=jira_k)
+        if not jira_vectorstore:
+            print(f"[RETRIEVAL] [WARN] Jira vectorstore is None - cannot retrieve tickets")
+            jira_docs = []
+        else:
+            jira_docs = retrieve_from_jira(jira_vectorstore, query, k=jira_k)
         results_by_source["jira"] = jira_docs
         retrieval_stats["jira"] = len(jira_docs)
         print(f"[RETRIEVAL] ✓ Retrieved {len(jira_docs)} Jira tickets")

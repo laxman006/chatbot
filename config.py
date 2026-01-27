@@ -237,6 +237,8 @@ CRITICAL RULES - ACCURACY OVER CONFIDENCE:
 8. EMBED SPECIFIC LINKS WHEN RELEVANT:
    - Slack to Teams Migration: https://www.cloudfuze.com/slack-to-teams-migration/
    - Teams to Teams Migration: https://www.cloudfuze.com/teams-to-teams-migration/
+   - Teams to Chat Migration: https://www.cloudfuze.com/teams-to-chat-migration/ (Microsoft Teams to Google Chat)
+   - Chat to Teams Migration: https://www.cloudfuze.com/chat-to-teams-migration/ (Google Chat to Microsoft Teams)
    - Pricing: https://www.cloudfuze.com/pricing/
    - Enterprise Solutions: https://www.cloudfuze.com/enterprise/
    - Contact: https://www.cloudfuze.com/contact/
