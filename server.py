@@ -13,6 +13,7 @@ import os
 import logging
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import atexit
 
 # Configure logging
@@ -23,8 +24,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+def _resolve_scheduler_timezone():
+    tz_name = os.getenv("SCHEDULER_TIMEZONE", "UTC")
+    try:
+        tz = ZoneInfo(tz_name)
+        logger.info("[SCHEDULER] Using timezone: %s", tz_name)
+        return tz
+    except ZoneInfoNotFoundError:
+        logger.warning("[SCHEDULER] Invalid timezone '%s', defaulting to UTC", tz_name)
+        return ZoneInfo("UTC")
+
+
+SCHEDULER_TIMEZONE = _resolve_scheduler_timezone()
+
 # Initialize scheduler for Jira sync
-scheduler = BackgroundScheduler()
+scheduler = BackgroundScheduler(timezone=SCHEDULER_TIMEZONE)
 
 def scheduled_jira_sync():
     """
@@ -112,7 +126,7 @@ async def lifespan(app: FastAPI):
         
         scheduler.add_job(
             func=scheduled_jira_sync,
-            trigger=CronTrigger(hour=sync_hour, minute=0),  # Daily at specified hour
+            trigger=CronTrigger(hour=sync_hour, minute=0, timezone=SCHEDULER_TIMEZONE),  # Daily at specified hour
             id='jira_sync_job',
             name='Daily Jira Ticket Sync',
             replace_existing=True
@@ -134,7 +148,12 @@ async def lifespan(app: FastAPI):
             
             scheduler.add_job(
                 func=scheduled_weekly_reports_sync,
-                trigger=CronTrigger(day_of_week='mon', hour=WEEKLY_REPORT_SEND_HOUR, minute=WEEKLY_REPORT_SEND_MINUTE),
+                trigger=CronTrigger(
+                    day_of_week='mon',
+                    hour=WEEKLY_REPORT_SEND_HOUR,
+                    minute=WEEKLY_REPORT_SEND_MINUTE,
+                    timezone=SCHEDULER_TIMEZONE,
+                ),
                 id='weekly_report_job',
                 name='Weekly Team Leaderboard Report',
                 replace_existing=True

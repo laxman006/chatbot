@@ -9,8 +9,9 @@ import os
 import json
 import logging
 import tempfile
-from datetime import datetime, time
+from datetime import datetime
 from typing import Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from app.weekly_reports import (
     get_weekly_date_range,
     generate_team_report_data,
@@ -22,6 +23,15 @@ from app.email_sender import send_weekly_report_emails
 logger = logging.getLogger(__name__)
 
 LAST_RUN_FILE = os.getenv("WEEKLY_REPORT_LAST_RUN_FILE", "./data/weekly_report_last_run.json")
+
+
+def _get_scheduler_timezone() -> ZoneInfo:
+    tz_name = os.getenv("SCHEDULER_TIMEZONE", "UTC")
+    try:
+        return ZoneInfo(tz_name)
+    except ZoneInfoNotFoundError:
+        logger.warning("[WEEKLY REPORT] Invalid timezone '%s', defaulting to UTC", tz_name)
+        return ZoneInfo("UTC")
 
 
 def _read_last_run_date() -> Optional[str]:
@@ -51,8 +61,8 @@ def _should_run_catchup(now: datetime, scheduled_hour: int, scheduled_minute: in
     """Run once on startup if today's scheduled time already passed."""
     if now.weekday() != 0:  # 0 = Monday
         return False
-    scheduled_time = time(hour=scheduled_hour, minute=scheduled_minute)
-    if now.time() < scheduled_time:
+    scheduled_dt = now.replace(hour=scheduled_hour, minute=scheduled_minute, second=0, microsecond=0)
+    if now < scheduled_dt:
         return False
     last_run_date = _read_last_run_date()
     return last_run_date != now.strftime("%Y-%m-%d")
@@ -60,7 +70,7 @@ def _should_run_catchup(now: datetime, scheduled_hour: int, scheduled_minute: in
 
 def run_weekly_report_if_missed(scheduled_hour: int, scheduled_minute: int) -> None:
     """Trigger report once on startup if it missed today's slot."""
-    now = datetime.now()
+    now = datetime.now(_get_scheduler_timezone())
     if _should_run_catchup(now, scheduled_hour, scheduled_minute):
         logger.info("[WEEKLY REPORT] ⏱️  Missed scheduled time; running catch-up now.")
         scheduled_weekly_reports_sync()
@@ -76,7 +86,7 @@ async def scheduled_weekly_reports():
     try:
         logger.info("="*70)
         logger.info("[WEEKLY REPORT] 🔄 Starting scheduled weekly report generation...")
-        logger.info(f"[WEEKLY REPORT] Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info(f"[WEEKLY REPORT] Time: {datetime.now(_get_scheduler_timezone()).strftime('%Y-%m-%d %H:%M:%S')}")
         logger.info("="*70)
         
         # Get date range for last week (Monday to Sunday)

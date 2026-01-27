@@ -30,10 +30,40 @@ class TraceFilteringStats:
         self.traces_out_of_date_range = 0
         self.traces_without_date = 0
         self.traces_without_email = 0
+        self.traces_with_email = 0
         self.traces_unassigned = 0
         self.unassigned_emails = set()
         self.invalid_emails = set()
         self.assigned_per_team: Dict[str, int] = {}
+        self.metadata_keys_with_email = Counter()
+        self.metadata_keys_missing_email = Counter()
+        self.trace_keys_with_email = Counter()
+        self.trace_keys_missing_email = Counter()
+        self.sample_with_email = []
+        self.sample_missing_email = []
+        self.sample_limit = 5
+
+    def record_trace_sample(self, trace: Dict[str, Any], metadata: Dict[str, Any], has_email: bool):
+        """Record a small sample for diagnostics."""
+        sample = {
+            "trace_id": trace.get("id"),
+            "user_id": trace.get("userId"),
+            "metadata_keys": sorted(list(metadata.keys()))[:10],
+            "metadata_user_name": metadata.get("user_name"),
+            "metadata_user_email": metadata.get("user_email"),
+            "input_type": type(trace.get("input", None)).__name__,
+        }
+        target_list = self.sample_with_email if has_email else self.sample_missing_email
+        if len(target_list) < self.sample_limit:
+            target_list.append(sample)
+
+    def common_metadata_keys(self) -> List[str]:
+        """Get metadata keys common to both traced and missing-email traces."""
+        return sorted(set(self.metadata_keys_with_email) & set(self.metadata_keys_missing_email))
+
+    def common_trace_keys(self) -> List[str]:
+        """Get top-level trace keys common to both trace groups."""
+        return sorted(set(self.trace_keys_with_email) & set(self.trace_keys_missing_email))
     
     def log_summary(self, page: int, batch_size: int):
         """Log page processing summary."""
@@ -143,8 +173,10 @@ def get_trace_email(trace: Dict[str, Any]) -> Optional[str]:
     """
     try:
         metadata = trace.get("metadata", {})
-        user_email = metadata.get("user_email")
+        user_email = metadata.get("user_email") or metadata.get("user_id")
         
+        if not user_email:
+            user_email = trace.get("userId") if isinstance(trace, dict) else None
         if not user_email:
             return None
         
@@ -168,11 +200,22 @@ def get_trace_email(trace: Dict[str, Any]) -> Optional[str]:
         return None
 
 
+def is_evaluation_trace(metadata: Dict[str, Any]) -> bool:
+    """Return True for evaluation/job traces that should be excluded."""
+    if not isinstance(metadata, dict):
+        return False
+    return any(
+        metadata.get(key)
+        for key in ("job_execution_id", "score_id", "target_trace_id", "previous_trace_id")
+    )
+
+
 def assign_trace_to_team(
     trace: Dict[str, Any],
     email_to_team_map: Dict[str, str],
     get_team_by_email_func,
-    stats: TraceFilteringStats
+    stats: TraceFilteringStats,
+    user_email_override: Optional[str] = None
 ) -> Tuple[Optional[str], Optional[str]]:
     """
     Assign a trace to a team using consistent logic.
@@ -186,7 +229,7 @@ def assign_trace_to_team(
     Returns:
         Tuple of (team_name, user_email) or (None, email) if unassigned
     """
-    user_email = get_trace_email(trace)
+    user_email = user_email_override or get_trace_email(trace)
     
     if not user_email:
         stats.traces_without_email += 1
@@ -220,7 +263,8 @@ def process_trace_batch(
     teams_data: Dict[str, Dict],
     start_time: Optional[datetime] = None,
     end_time: Optional[datetime] = None,
-    stats: Optional[TraceFilteringStats] = None
+    stats: Optional[TraceFilteringStats] = None,
+    trace_id_to_email: Optional[Dict[str, str]] = None
 ) -> int:
     """
     Process a batch of traces and assign to teams.
@@ -239,6 +283,8 @@ def process_trace_batch(
     """
     if stats is None:
         stats = TraceFilteringStats()
+    if trace_id_to_email is None:
+        trace_id_to_email = {}
     
     traces_added = 0
     sales_teams = {"Sales [SMB]", "Sales [ENT]", "Sales [AM]"}  # For diagnostics
@@ -247,8 +293,30 @@ def process_trace_batch(
         stats.total_fetched += 1
         
         try:
-            # Get email early for logging
+            trace_id = trace.get("id") if isinstance(trace, dict) else None
+            metadata = trace.get("metadata", {})
+            if not isinstance(metadata, dict):
+                metadata = {}
+            trace_keys = trace.keys() if isinstance(trace, dict) else []
+            if is_evaluation_trace(metadata):
+                continue
+
+            # Get email early for logging (user traces only)
             user_email = get_trace_email(trace)
+
+            # Cache known email for trace id
+            if user_email and trace_id:
+                trace_id_to_email[trace_id] = user_email
+
+            if user_email:
+                stats.traces_with_email += 1
+                stats.metadata_keys_with_email.update(metadata.keys())
+                stats.trace_keys_with_email.update(trace_keys)
+                stats.record_trace_sample(trace, metadata, has_email=True)
+            else:
+                stats.metadata_keys_missing_email.update(metadata.keys())
+                stats.trace_keys_missing_email.update(trace_keys)
+                stats.record_trace_sample(trace, metadata, has_email=False)
             is_sales_user = False
             
             # Validate trace date
@@ -292,7 +360,11 @@ def process_trace_batch(
             
             # Assign trace to team
             team_name, extracted_email = assign_trace_to_team(
-                trace, email_to_team_map, get_team_by_email_func, stats
+                trace,
+                email_to_team_map,
+                get_team_by_email_func,
+                stats,
+                user_email_override=user_email,
             )
             
             if not team_name:

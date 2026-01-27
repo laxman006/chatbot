@@ -6460,6 +6460,7 @@ async def clear_corrected_responses(current_user: dict = Depends(require_admin))
 @router.get("/analytics/langfuse/teams/summary")
 async def get_teams_analytics_summary(
     time_filter: str = Query("today", description="today|yesterday|this_week|last_week|last_7_days|all"),
+    debug: bool = Query(False, description="Include trace diagnostics"),
     current_user: dict = Depends(require_restricted_admin)
 ):
     """
@@ -6483,6 +6484,7 @@ async def get_teams_analytics_summary(
         from app.trace_utils import (
             TraceFilteringStats,
             calculate_question_metrics,
+            get_trace_email,
             process_trace_batch,
         )
         import asyncio
@@ -6564,6 +6566,7 @@ async def get_teams_analytics_summary(
         
         email_to_team_map = get_all_email_to_team_mapping()
         trace_stats = TraceFilteringStats()
+        trace_id_to_email = {}
         
         async with httpx.AsyncClient() as client:
             total_traces_fetched = 0
@@ -6611,6 +6614,48 @@ async def get_teams_analytics_summary(
                     if not traces:
                         logger.info(f"[LANGFUSE ANALYTICS] No more traces at page {page}, stopping pagination")
                         break
+
+                    # Optional backfill (debug only) to inspect target-trace links
+                    if debug:
+                        missing_target_ids = []
+                        for trace in traces:
+                            metadata = trace.get("metadata", {}) if isinstance(trace, dict) else {}
+                            if not isinstance(metadata, dict):
+                                metadata = {}
+                            if metadata.get("user_email"):
+                                continue
+                            target_trace_id = metadata.get("target_trace_id") or metadata.get("previous_trace_id")
+                            if isinstance(target_trace_id, list):
+                                target_trace_id = target_trace_id[0] if target_trace_id else None
+                            if target_trace_id and target_trace_id not in trace_id_to_email:
+                                missing_target_ids.append(target_trace_id)
+
+                        if missing_target_ids:
+                            unique_target_ids = list(dict.fromkeys(missing_target_ids))[:10]
+                            logger.info(
+                                "[LANGFUSE ANALYTICS] Backfill lookup (debug): %s target traces",
+                                len(unique_target_ids),
+                            )
+                            for target_id in unique_target_ids:
+                                try:
+                                    target_response = await client.get(
+                                        f"{LANGFUSE_HOST}/api/public/traces/{target_id}",
+                                        auth=(LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY),
+                                        timeout=30.0,
+                                    )
+                                    if target_response.status_code != 200:
+                                        continue
+                                    target_trace = target_response.json()
+                                    target_email = get_trace_email(target_trace)
+                                    if target_email:
+                                        trace_id_to_email[target_id] = target_email
+                                    await asyncio.sleep(0.1)
+                                except Exception as fetch_error:
+                                    logger.debug(
+                                        "[LANGFUSE ANALYTICS] Backfill lookup failed for %s: %s",
+                                        target_id,
+                                        fetch_error,
+                                    )
                     
                     traces_added = process_trace_batch(
                         traces,
@@ -6620,6 +6665,7 @@ async def get_teams_analytics_summary(
                         start_time=start_time,
                         end_time=end_time,
                         stats=trace_stats,
+                        trace_id_to_email=trace_id_to_email,
                     )
                     logger.debug(
                         "[LANGFUSE ANALYTICS] Page %s: Processed %s traces into teams",
@@ -6640,12 +6686,12 @@ async def get_teams_analytics_summary(
                     logger.error(f"[LANGFUSE ANALYTICS] Traceback: {traceback.format_exc()}")
                     break
             
-            logger.info(
-                "[LANGFUSE ANALYTICS] Traces processed: %s filtered, %s missing email, %s out of range",
-                trace_stats.traces_filtered,
-                trace_stats.traces_without_email,
-                trace_stats.traces_out_of_date_range,
-            )
+        logger.info(
+            "[LANGFUSE ANALYTICS] Traces processed: %s filtered, %s missing email, %s out of range",
+            trace_stats.traces_filtered,
+            trace_stats.traces_without_email,
+            trace_stats.traces_out_of_date_range,
+        )
         
         # Calculate unique questions and top questions per team
         team_stats = []
@@ -6678,7 +6724,7 @@ async def get_teams_analytics_summary(
         logger.info(f"[LANGFUSE ANALYTICS] Total traces across all teams: {total_questions}")
         logger.info(f"[LANGFUSE ANALYTICS] ===== Teams Summary Request Completed =====")
         
-        return {
+        response = {
             "status": "success",
             "time_filter": time_filter,
             "teams": team_stats,
@@ -6686,6 +6732,25 @@ async def get_teams_analytics_summary(
             "total_questions": total_questions,
             "total_active_teams": total_active_teams
         }
+        if debug:
+            response["trace_diagnostics"] = {
+                "with_email": {
+                    "count": trace_stats.traces_with_email,
+                    "top_metadata_keys": trace_stats.metadata_keys_with_email.most_common(10),
+                    "top_trace_keys": trace_stats.trace_keys_with_email.most_common(10),
+                    "samples": trace_stats.sample_with_email,
+                },
+                "missing_email": {
+                    "count": trace_stats.traces_without_email,
+                    "top_metadata_keys": trace_stats.metadata_keys_missing_email.most_common(10),
+                    "top_trace_keys": trace_stats.trace_keys_missing_email.most_common(10),
+                    "samples": trace_stats.sample_missing_email,
+                },
+                "common_metadata_keys": trace_stats.common_metadata_keys(),
+                "common_trace_keys": trace_stats.common_trace_keys(),
+                "unassigned_count": trace_stats.traces_unassigned,
+            }
+        return response
         
     except Exception as e:
         logger.error(f"[LANGFUSE ANALYTICS] Teams analytics fetch failed: {e}")

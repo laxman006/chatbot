@@ -10,6 +10,7 @@ import logging
 import tempfile
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple, Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter, A4
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak, Image
@@ -29,6 +30,15 @@ logger = logging.getLogger(__name__)
 COLORS = ['#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#6366f1', '#ef4444', '#14b8a6', '#f97316', '#06b6d4']
 
 
+def _get_report_timezone() -> ZoneInfo:
+    tz_name = os.getenv("SCHEDULER_TIMEZONE", "UTC")
+    try:
+        return ZoneInfo(tz_name)
+    except ZoneInfoNotFoundError:
+        logger.warning("[WEEKLY REPORT] Invalid timezone '%s', defaulting to UTC", tz_name)
+        return ZoneInfo("UTC")
+
+
 def get_weekly_date_range() -> Tuple[datetime, datetime, str]:
     """
     Calculate the date range for the last complete week (Monday to Sunday).
@@ -39,7 +49,7 @@ def get_weekly_date_range() -> Tuple[datetime, datetime, str]:
         end_date: Last Sunday at 23:59:59
         date_range_string: Formatted string like "Jan 17, 2026 - Jan 23, 2026"
     """
-    today = datetime.now()
+    today = datetime.now(_get_report_timezone())
     
     # Find last Monday (go back to find the most recent Monday)
     days_since_monday = (today.weekday()) % 7
