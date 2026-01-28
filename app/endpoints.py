@@ -3483,6 +3483,13 @@ Answer clearly and correctly based on the provided context and knowledge base.""
             doc_results = []
             retrieval_time_ms = 0  # Initialize to avoid UnboundLocalError if exception occurs
             
+            # Initialize retrieval parameters early to avoid UnboundLocalError
+            # These will be overwritten after retrieval, but need to exist for metadata logging
+            from config import DENSE_RETRIEVAL_K as DEFAULT_DENSE_K, BM25_RETRIEVAL_K as DEFAULT_BM25_K, FINAL_RETRIEVAL_K as DEFAULT_FINAL_K
+            DENSE_RETRIEVAL_K = DEFAULT_DENSE_K
+            BM25_RETRIEVAL_K = DEFAULT_BM25_K
+            FINAL_RETRIEVAL_K = DEFAULT_FINAL_K
+            
             try:
                 # Send status: Query expansion
                 if ENABLE_QUERY_EXPANSION:
@@ -3509,6 +3516,11 @@ Answer clearly and correctly based on the provided context and knowledge base.""
                     final_docs = [doc for doc, score in doc_results]
                     print(f"[RAG] Retrieved {len(final_docs)} docs using Intelligent Routing")
                     
+                    # Set retrieval parameters for metadata logging (intelligent routing path)
+                    DENSE_RETRIEVAL_K = 0  # Not used in intelligent routing
+                    BM25_RETRIEVAL_K = 0  # Not used in intelligent routing
+                    FINAL_RETRIEVAL_K = ROUTING_FINAL_K
+                    
                 else:
                     print("[RAG] Using Perplexity-Style (Option E) strategy")
                     
@@ -3526,6 +3538,11 @@ Answer clearly and correctly based on the provided context and knowledge base.""
 
                     final_docs = [doc for doc, score in doc_results]
                     print(f"[RAG] Retrieved {len(final_docs)} docs using Option E pipeline")
+                    
+                    # Set retrieval parameters for metadata logging (perplexity-style path)
+                    DENSE_RETRIEVAL_K = 60
+                    BM25_RETRIEVAL_K = 60
+                    FINAL_RETRIEVAL_K = 8
                 
                 # Send status: Documents found and reranking
                 yield f"data: {json.dumps({'type': 'status', 'status': 'reranking_docs', 'message': f'Found {len(doc_results)} documents, reranking for relevance'})}\n\n"

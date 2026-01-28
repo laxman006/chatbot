@@ -46,6 +46,7 @@ def format_docs(docs):
             jira_header = f"{tag_info}\n"
             jira_header += f"JIRA TICKET: {ticket_key}\n"
             if ticket_url:
+                # Make URL prominent - LLM should extract and use this exact URL for links
                 jira_header += f"Ticket URL: {ticket_url}\n"
             if status:
                 jira_header += f"Status: {status}\n"
