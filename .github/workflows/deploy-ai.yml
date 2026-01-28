@@ -44,44 +44,44 @@ jobs:
                 COMPOSE_CMD='docker-compose'
             fi
             
-            # Cleanup disk space before building
+            # Smart disk space management
             echo "========================================="
-            echo "Cleaning up disk space..."
+            echo "Checking disk space..."
             echo "========================================="
             
-            # Check disk usage
-            echo "Current disk usage:"
+            # Check disk usage percentage
+            DISK_USAGE=$(df / | tail -1 | awk '{print $5}' | sed 's/%//')
+            echo "Current disk usage: ${DISK_USAGE}%"
             df -h / || true
             
-            # Remove old backup directories (keep only last 2)
-            echo "Cleaning old backup directories..."
-            ls -dt data_backup_* 2>/dev/null | tail -n +3 | xargs rm -rf 2>/dev/null || true
-            
-            # Clean Docker resources (but keep running containers)
-            echo "Cleaning Docker resources..."
-            docker system prune -af --volumes || true
-            
-            # Remove dangling images and build cache
-            docker builder prune -af || true
-            
-            # Check disk usage after cleanup
-            echo "Disk usage after cleanup:"
-            df -h / || true
+            # Only clean up if disk usage > 80%
+            if [ "$DISK_USAGE" -gt 80 ]; then
+                echo "Disk usage high (${DISK_USAGE}%), cleaning up..."
+                
+                # Remove old backup directories (keep only last 2)
+                echo "Cleaning old backup directories..."
+                ls -dt data_backup_* 2>/dev/null | tail -n +3 | xargs rm -rf 2>/dev/null || true
+                
+                # Remove only dangling/unused images (keep build cache!)
+                echo "Removing dangling images..."
+                docker image prune -af || true
+                
+                # Only prune build cache if still > 85%
+                if [ "$DISK_USAGE" -gt 85 ]; then
+                    echo "Disk usage very high, pruning build cache..."
+                    docker builder prune -af || true
+                fi
+            else
+                echo "Disk usage OK (${DISK_USAGE}%), skipping cleanup to preserve build cache"
+            fi
             
             # Stop services
             echo "Stopping services..."
             $COMPOSE_CMD -f docker-compose.ai.yml down
             
-            # Rebuild images
-            echo "Building backend..."
-            $COMPOSE_CMD -f docker-compose.ai.yml build backend
-            
-            echo "Building frontend..."
-            $COMPOSE_CMD -f docker-compose.ai.yml build frontend
-            
-            # Start services
-            echo "Starting services..."
-            $COMPOSE_CMD -f docker-compose.ai.yml --env-file .env.ai up -d
+            # Use --build flag which only rebuilds changed layers (Docker layer caching!)
+            echo "Building and starting services (with smart rebuild)..."
+            $COMPOSE_CMD -f docker-compose.ai.yml --env-file .env.ai up -d --build
             
             # Wait for services to start
             echo "Waiting for services to start..."
