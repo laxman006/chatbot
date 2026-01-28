@@ -44,6 +44,30 @@ jobs:
                 COMPOSE_CMD='docker-compose'
             fi
             
+            # Cleanup disk space before building
+            echo "========================================="
+            echo "Cleaning up disk space..."
+            echo "========================================="
+            
+            # Check disk usage
+            echo "Current disk usage:"
+            df -h / || true
+            
+            # Remove old backup directories (keep only last 2)
+            echo "Cleaning old backup directories..."
+            ls -dt data_backup_* 2>/dev/null | tail -n +3 | xargs rm -rf 2>/dev/null || true
+            
+            # Clean Docker resources (but keep running containers)
+            echo "Cleaning Docker resources..."
+            docker system prune -af --volumes || true
+            
+            # Remove dangling images and build cache
+            docker builder prune -af || true
+            
+            # Check disk usage after cleanup
+            echo "Disk usage after cleanup:"
+            df -h / || true
+            
             # Stop services
             echo "Stopping services..."
             $COMPOSE_CMD -f docker-compose.ai.yml down
