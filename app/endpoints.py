@@ -434,6 +434,12 @@ def expand_query_with_intent(query: str, intent: str) -> str:
     Expand query with intent-specific keywords for better retrieval.
     Uses query expansion terms defined in intent branches.
     """
+    # Skip expansion for "who is" questions to avoid over-expansion and irrelevant results
+    query_lower = query.lower().strip()
+    if re.match(r'^who[\'s]?\s+is\s+\w+', query_lower):
+        print(f"[QUERY EXPANSION] Skipping expansion for 'who is' question: '{query}'")
+        return query
+    
     branch_config = INTENT_BRANCHES.get(intent, {})
     expansion_terms = branch_config.get("query_expansion", [])
     
