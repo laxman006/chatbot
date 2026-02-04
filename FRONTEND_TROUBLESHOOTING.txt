@@ -1,0 +1,83 @@
+=============================================================================
+FRONTEND TROUBLESHOOTING GUIDE - API Research Toggle
+=============================================================================
+
+✅ FRONTEND CODE ANALYSIS: NO ISSUES FOUND!
+
+All frontend code is correctly implemented:
+- Toggle button properly placed in sidebar
+- State management using React hooks
+- API calls using apiFetch utility
+- Proxy configuration forwards all requests
+- Conditional rendering based on access control
+- Visual feedback (colors, icons, loading states)
+
+=============================================================================
+QUICK BROWSER CHECKS
+=============================================================================
+
+1. OPEN BROWSER CONSOLE (F12)
+   - No errors should appear
+   - Toggle button should be visible in sidebar
+   - Button should change color when clicked
+
+2. CHECK NETWORK TAB
+   On page load:
+   ✓ GET /api/proxy/api/user/api-research/access → 200 OK
+   
+   When clicking toggle:
+   ✓ POST /api/proxy/api/user/api-research/toggle → 200 OK
+
+3. TEST IN CONSOLE
+   Run this in browser console:
+   
+   fetch('/api/proxy/api/user/api-research/access', {
+     credentials: 'include'
+   }).then(r => r.json()).then(console.log)
+   
+   Expected output:
+   {
+     "status": "success",
+     "can_access": true,
+     "enabled": false
+   }
+
+=============================================================================
+EXPECTED BEHAVIOR
+=============================================================================
+
+WHEN TOGGLE IS OFF (Default):
+- Button shows: 🔒 API Research: OFF (gray color)
+- Queries use normal RAG pipeline
+- Backend logs: "User has access but toggle is OFF"
+
+WHEN TOGGLE IS ON:
+- Button shows: 🔬 API Research: ON ✓ (green color with checkmark)
+- Queries like "Research APIs for Slack" trigger API research
+- Backend logs: "✅ API research ENABLED for laxman.kadari@cloudfuze.com"
+- Response includes official documentation, endpoints, SDKs
+
+=============================================================================
+MOST COMMON ISSUE: BACKEND NOT LOADING NEW CODE
+=============================================================================
+
+If toggle works but research doesn't trigger:
+
+1. Clear Python cache:
+   Get-ChildItem -Recurse -Filter "__pycache__" | Remove-Item -Recurse -Force
+
+2. Restart backend server:
+   - Press Ctrl+C in server terminal
+   - Run: python server.py
+
+3. Check logs for these NEW messages:
+   [CLOUD RESEARCH CHECK] Checking for query: 'Research APIs for Slack'
+   [CLOUD RESEARCH CHECK] Global flag: True
+   [CLOUD RESEARCH CHECK] User laxman.kadari@cloudfuze.com has access: True
+   [CLOUD RESEARCH CHECK] User laxman.kadari@cloudfuze.com has toggle enabled: True
+   [CLOUD RESEARCH CHECK] Matches research pattern: True
+   [CLOUD RESEARCH] ✅ API research ENABLED for laxman.kadari@cloudfuze.com
+
+If you DON'T see these logs → Backend code not loaded!
+
+=============================================================================

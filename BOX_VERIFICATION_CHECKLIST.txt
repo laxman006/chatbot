@@ -1,0 +1,198 @@
+====================================================================================================
+ BOX JAVASCRIPT RENDERING - VERIFICATION CHECKLIST
+====================================================================================================
+
+BEFORE DECLARING "DONE", VERIFY ALL 6 ITEMS
+
+====================================================================================================
+ 1. JS SCRAPER LOGS (MANDATORY)
+====================================================================================================
+
+MUST SEE:
+  [JS SCRAPER] Rendering https://developer.box.com/reference/resources/users/
+  [JS SCRAPER] Rendering https://developer.box.com/reference/resources/groups/
+  [JS SCRAPER] Extracted X endpoints from rendered page
+
+IF MISSING:
+  - Extraction still incomplete
+  - JavaScript rendering didn't activate
+  - Check: Did keyword detection logic trigger?
+
+====================================================================================================
+ 2. BOX-SPECIFIC ENDPOINT PATTERNS (MANDATORY)
+====================================================================================================
+
+MUST EXTRACT THESE BOX APIs:
+
+User Management:
+  GET    /2.0/users
+  POST   /2.0/users
+  PUT    /2.0/users/{user_id}
+  DELETE /2.0/users/{user_id}
+
+Group Management:
+  GET    /2.0/groups
+  POST   /2.0/groups
+  GET    /2.0/groups/{group_id}/memberships
+  POST   /2.0/group_memberships
+  DELETE /2.0/group_memberships/{membership_id}
+
+IF MISSING:
+  - Mapping will still fail
+  - 0% coverage will persist
+  - Check: Did browser render correctly?
+
+====================================================================================================
+ 3. SEMANTIC NORMALIZATION (MANDATORY)
+====================================================================================================
+
+MUST SEE LOGS LIKE:
+  [NORMALIZE] Mapping "group_memberships" -> addUserToGroup
+  [NORMALIZE] Mapping "status=inactive" -> suspendUser
+
+IF MISSING:
+  - Will under-report coverage
+  - Won't map Box's naming to CloudFuze operations
+  - Check: Is api_normalizer.py working?
+
+====================================================================================================
+ 4. COVERAGE JUMP (MANDATORY)
+====================================================================================================
+
+EXPECTED FOR BOX:
+  Core Coverage: >= 75% (6-8 operations mapped)
+  Confidence Score: >= 0.70
+  "Unknown" operations: <= 2-3
+
+IF COVERAGE STAYS 0-20%:
+  - Something is still wrong
+  - Either extraction failed OR normalization failed
+  - Check both stages
+
+====================================================================================================
+ 5. CONFIDENCE LOGIC (MANDATORY)
+====================================================================================================
+
+RULE 1: JS rendering succeeds + expected cloud type = full
+  -> Confidence MUST increase (0.7-0.9)
+
+RULE 2: JS rendering fails
+  -> Confidence MUST decrease, not stay neutral
+
+This prevents silent failures!
+
+====================================================================================================
+ 6. NO HALLUCINATED ENDPOINTS (CRITICAL)
+====================================================================================================
+
+BOX APIs MUST START WITH /2.0/
+
+REJECT IF YOU SEE:
+  X /users/create          (wrong format)
+  X /groups/list           (wrong format)
+  X /api/v1/*              (wrong version)
+  X /scim/v2/*             (only if explicitly documented)
+
+BOX'S REAL API FORMAT:
+  - /2.0/users
+  - /2.0/groups
+  - /2.0/group_memberships
+
+====================================================================================================
+ SUCCESS CRITERIA SUMMARY
+====================================================================================================
+
+Item                | Metric   | Pass Threshold
+--------------------|----------|----------------------------------
+JS Logs             | Present  | Must see rendering logs
+Box Endpoints       | Count    | 6-10 user/group endpoints
+Normalization       | Logs     | Must see mapping logs
+Coverage            | %        | >= 75%
+Confidence          | Score    | >= 0.70
+Hallucinations      | Count    | 0 (zero tolerance)
+
+====================================================================================================
+ WHAT TO WATCH IN LOGS
+====================================================================================================
+
+Phase 1: Keyword Detection (NEW)
+  [EXTRACTION] Extracted 11 endpoints but NONE are user/group management related
+  [EXTRACTION] Endpoints found: ['/files/content', '/folders', '/events']
+
+Phase 2: JS Rendering Activation (NEW)
+  [EXTRACTION] Step 3: Attempting JavaScript rendering for Box
+
+Phase 3: Browser Rendering (NEW)
+  [JS SCRAPER] Rendering https://developer.box.com/reference/resources/group/
+  [JS SCRAPER] Extracted 15 endpoints from rendered page
+
+Phase 4: Normalization
+  [NORMALIZE] Mapped 7 core operations
+
+Phase 5: Final Result
+  Core Coverage: 87.5%
+  Confidence: 0.85
+
+====================================================================================================
+ RED FLAGS
+====================================================================================================
+
+RED FLAG 1: Server Running OLD Code
+  [EXTRACTION] Successfully extracted 11 total endpoints
+  [PHASE 3] Normalization - Mapping operations  <- Skipped JS rendering!
+  [NORMALIZE] Mapped 0 core operations
+
+This means:
+  - Server running OLD code
+  - Keyword detection didn't trigger
+  - Need to restart server
+
+RED FLAG 2: Playwright Failed
+  [JS SCRAPER] Extracted 0 endpoints from rendered page
+
+This means:
+  - Playwright failed to render
+  - Box changed their docs structure
+  - Need to debug js_scraper.py
+
+====================================================================================================
+ STRATEGIC WIN
+====================================================================================================
+
+With this fix, we unlock:
+
+Cloud       | Coverage Before | Coverage After | Status
+------------|-----------------|----------------|--------
+Box         | 0%              | 75-100%        | Fixed
+Dropbox     | 0%              | 75-100%        | Should work
+Notion      | 0%              | 20-40%         | Partial
+Figma       | 0%              | 30-50%         | Partial
+Intercom    | 0%              | 60-80%         | Should work
+HubSpot     | 0%              | 80-100%        | Should work
+
+One fix -> many clouds!
+
+====================================================================================================
+ NEXT STEPS AFTER BOX SUCCESS
+====================================================================================================
+
+1. Test Dropbox (Content Management like Box)
+2. Test Notion (Business App - harder)
+3. Test Canny (Should show 0% honestly)
+
+If all 3 pass -> JavaScript fallback is production-ready!
+
+====================================================================================================
+ DON'T DECLARE SUCCESS UNTIL
+====================================================================================================
+
+[ ] All 6 checklist items verified
+[ ] Logs show JavaScript rendering activated
+[ ] Coverage >= 75%
+[ ] No hallucinated endpoints
+[ ] Confidence >= 0.70
+[ ] Results match Box's actual API documentation
+
+TRUST BUT VERIFY!
+
+====================================================================================================

@@ -1485,6 +1485,67 @@ async def update_user_profile(
         user_id, team_name, manager_email, manager_name, role
     )
 
+
+async def update_api_research_preference(user_email: str, enabled: bool) -> bool:
+    """
+    Update user's Cloud API Research preference.
+    
+    Args:
+        user_email: User's email
+        enabled: True to enable, False to disable
+        
+    Returns:
+        True if successful
+    """
+    try:
+        await mongodb_memory.connect()
+        collection = mongodb_memory.database["user_profiles"]
+        
+        result = await collection.update_one(
+            {"email": user_email},
+            {
+                "$set": {
+                    "api_research_enabled": enabled,
+                    "api_research_updated_at": datetime.now(timezone.utc).isoformat()
+                }
+            },
+            upsert=True
+        )
+        
+        logger.info(f"[API RESEARCH] Updated preference for {user_email}: {enabled}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"[ERROR] Failed to update API research preference: {e}")
+        return False
+
+
+async def get_api_research_preference(user_email: str) -> bool:
+    """
+    Get user's Cloud API Research preference.
+    
+    Args:
+        user_email: User's email
+        
+    Returns:
+        True if enabled, False otherwise (default: False)
+    """
+    try:
+        await mongodb_memory.connect()
+        collection = mongodb_memory.database["user_profiles"]
+        
+        profile = await collection.find_one({"email": user_email})
+        
+        if profile:
+            return profile.get("api_research_enabled", False)
+        
+        # Default: disabled
+        return False
+        
+    except Exception as e:
+        logger.error(f"[ERROR] Failed to get API research preference: {e}")
+        return False
+
 async def get_user_profile(user_id: str) -> Optional[Dict]:
     """Get user profile including team, manager, and role."""
     return await mongodb_memory.get_user_profile(user_id)

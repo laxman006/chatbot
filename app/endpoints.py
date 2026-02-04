@@ -40,7 +40,7 @@ from app.mongodb_memory import (
 )
 from app.helpers import strip_markdown, preserve_markdown
 from app.langfuse_integration import langfuse_tracker
-from app.auth import verify_user_access, require_admin, require_restricted_admin
+from app.auth import verify_user_access, require_admin, require_restricted_admin, get_current_user
 from app.user_data import get_user_job_title
 from app.models.teams import TEAMS_STRUCTURE, get_team_by_name
 from config import (
@@ -997,6 +997,108 @@ def is_memory_only_question(question: str) -> bool:
         "what did you say",
     ]
     return any(t in q for t in triggers)
+
+
+def is_cloud_api_research_query(question: str) -> bool:
+    """
+    Determine if a query is asking for cloud API research.
+    CLOUD-AGNOSTIC: Works for ANY cloud name, not just predefined ones.
+    
+    Args:
+        question: User's question or just cloud name
+        
+    Returns:
+        True if this is a cloud API research query
+    """
+    question_lower = question.lower().strip()
+    
+    # STRATEGY 1: Single word or short phrase (likely a cloud name)
+    # Accept 1-3 words, each 2+ characters
+    words = question_lower.split()
+    if 1 <= len(words) <= 3 and all(len(w) >= 2 for w in words):
+        # Exclude common question words to avoid false positives
+        exclude_words = {'what', 'how', 'why', 'when', 'where', 'who', 'which', 'help', 'please', 'can', 'could', 'would', 'should'}
+        if not any(w in exclude_words for w in words):
+            return True
+    
+    # STRATEGY 2: Check explicit research patterns
+    research_patterns = [
+        r'research\s+(?:the\s+)?apis?\s+(?:for|of)',
+        r'research\s+\w+\s+apis?',
+        r'what\s+apis?\s+(?:does|do)\s+\w+\s+(?:have|provide|offer|support)',
+        r'discover\s+\w+\s+(?:apis?|team|user|group)\s+management',
+        r'api\s+documentation\s+(?:for|of)',
+        r'(?:find|show|get)\s+(?:me\s+)?(?:the\s+)?apis?\s+(?:for|of)',
+        r'\w+\s+api\s+(?:reference|documentation|docs)',
+        r'how\s+(?:to|do\s+i)\s+(?:manage|use)\s+\w+\s+api',
+        r'what\s+(?:user|group|team)\s+management\s+apis?',
+    ]
+    
+    return any(re.search(pattern, question_lower) for pattern in research_patterns)
+
+
+def extract_cloud_name_from_query(question: str) -> Optional[str]:
+    """
+    Extract cloud name from a research query.
+    CLOUD-AGNOSTIC: Works for ANY cloud name, not just predefined ones.
+    
+    Args:
+        question: User's question or just cloud name
+        
+    Returns:
+        Cloud name or None if not found
+    """
+    question_trimmed = question.strip()
+    question_lower = question_trimmed.lower()
+    
+    # Known cloud names for better capitalization (optional, not required)
+    known_clouds_capitalization = {
+        "slack": "Slack", "okta": "Okta", "box": "Box", "github": "GitHub", 
+        "gitlab": "GitLab", "dropbox": "Dropbox", "azure ad": "Azure AD",
+        "aws": "AWS", "google workspace": "Google Workspace", "canny": "Canny",
+        "notion": "Notion", "trello": "Trello", "jira": "Jira", "asana": "Asana",
+        "monday": "Monday", "salesforce": "Salesforce", "hubspot": "HubSpot",
+        "zendesk": "Zendesk", "zoom": "Zoom", "microsoft 365": "Microsoft 365",
+        "onedrive": "OneDrive", "sharepoint": "SharePoint", "atlassian": "Atlassian"
+    }
+    
+    # STRATEGY 1: Single word or short phrase (1-3 words, 3+ chars)
+    # This catches: "Box", "Slack", "My Custom Cloud", "GitLab"
+    words = question_trimmed.split()
+    if 1 <= len(words) <= 3 and all(len(w) >= 2 for w in words):
+        # Check if it's in known list for proper capitalization
+        if question_lower in known_clouds_capitalization:
+            return known_clouds_capitalization[question_lower]
+        # Otherwise, title-case it
+        return question_trimmed.title()
+    
+    # STRATEGY 2: Extract from "Research APIs for [CLOUD]" pattern
+    match = re.search(r'(?:for|of)\s+([A-Za-z][A-Za-z0-9\s\-\.]{1,30}?)(?:\s+api|\s*$)', question_lower)
+    if match:
+        cloud_name = match.group(1).strip()
+        # Check known list for capitalization
+        if cloud_name.lower() in known_clouds_capitalization:
+            return known_clouds_capitalization[cloud_name.lower()]
+        return cloud_name.title()
+    
+    # STRATEGY 3: Extract from "What APIs does [CLOUD] have" pattern
+    match = re.search(r'(?:does|do)\s+([A-Za-z][A-Za-z0-9\s\-\.]{1,30}?)\s+(?:have|provide|offer|support)', question_lower)
+    if match:
+        cloud_name = match.group(1).strip()
+        if cloud_name.lower() in known_clouds_capitalization:
+            return known_clouds_capitalization[cloud_name.lower()]
+        return cloud_name.title()
+    
+    # STRATEGY 4: Extract from "[CLOUD] API" pattern
+    match = re.search(r'^([A-Za-z][A-Za-z0-9\s\-\.]{1,30}?)\s+api', question_lower)
+    if match:
+        cloud_name = match.group(1).strip()
+        if cloud_name.lower() in known_clouds_capitalization:
+            return known_clouds_capitalization[cloud_name.lower()]
+        return cloud_name.title()
+    
+    return None
+
 
 async def rewrite_query_with_context(question: str, conversation_history: list, llm) -> str:
     """
@@ -2784,9 +2886,66 @@ Answer clearly and correctly based on the provided context and knowledge base.""
     # FIRST: Check if we have a corrected response for this question
     corrected_answer = find_similar_corrected_response(question)
     
+    # Check if user has API research enabled FIRST, then check if query is about APIs
+    should_do_api_research = False
+    from app.auth import can_access_api_research
+    from app.mongodb_memory import get_api_research_preference
+    from config import ENABLE_CLOUD_API_RESEARCH
+    
+    logger.info(f"[CLOUD RESEARCH CHECK] Checking for query: '{question}'")
+    logger.info(f"[CLOUD RESEARCH CHECK] Global flag: {ENABLE_CLOUD_API_RESEARCH}")
+    
+    # Check if user has feature enabled
+    if ENABLE_CLOUD_API_RESEARCH:
+        has_access = can_access_api_research(user_email)
+        logger.info(f"[CLOUD RESEARCH CHECK] User {user_email} has access: {has_access}")
+        
+        if has_access:
+            is_enabled = await get_api_research_preference(user_email)
+            logger.info(f"[CLOUD RESEARCH CHECK] User {user_email} has toggle enabled: {is_enabled}")
+            
+            if is_enabled:
+                # User has it enabled - ALWAYS do API research (no pattern check needed)
+                should_do_api_research = True
+                logger.info(f"[CLOUD RESEARCH] ✅ API research ENABLED for {user_email} (toggle is ON)")
+            else:
+                logger.info(f"[CLOUD RESEARCH] User has access but toggle is OFF")
+        else:
+            logger.info(f"[CLOUD RESEARCH] User doesn't have access")
+    else:
+        logger.info(f"[CLOUD RESEARCH] Feature disabled globally")
+    
     if corrected_answer:
         # Use the corrected response
         answer = corrected_answer
+    # Perform cloud API research if all conditions met
+    elif should_do_api_research:
+        from app.cloud_api_researcher import research_cloud_api
+        
+        cloud_name = extract_cloud_name_from_query(question)
+        
+        if cloud_name:
+            logger.info(f"[CLOUD RESEARCH] User {user_email} researching: {cloud_name}")
+            
+            try:
+                # Perform research
+                llm = get_llm()
+                results = research_cloud_api(
+                    cloud_name=cloud_name,
+                    user_email=user_email,
+                    force_refresh=False,
+                    llm=llm
+                )
+                
+                # Format results as markdown
+                from app.response_formatter import format_cloud_research_markdown
+                answer = format_cloud_research_markdown(results, cloud_name)
+                
+            except Exception as e:
+                logger.error(f"[ERROR] Cloud research failed: {e}")
+                answer = f"I encountered an error while researching {cloud_name}'s APIs. Please try again or contact support.\n\nError: {str(e)}"
+        else:
+            answer = "I couldn't identify which cloud you want to research. Please specify the cloud name clearly (e.g., 'Research APIs for Slack' or 'What APIs does Okta have?')."
     # Check if this is a conversational query
     elif is_conversational_query(question):
         # Handle conversational queries directly without document retrieval
@@ -3151,6 +3310,34 @@ Answer clearly and correctly based on the provided context and knowledge base.""
             # FIRST: Check if we have a corrected response for this question
             corrected_answer = find_similar_corrected_response(question)
             
+            # Check if user has API research enabled FIRST
+            should_do_api_research = False
+            from app.auth import can_access_api_research
+            from app.mongodb_memory import get_api_research_preference
+            from config import ENABLE_CLOUD_API_RESEARCH
+            
+            logger.info(f"[CLOUD RESEARCH CHECK] Checking for query: '{question}'")
+            logger.info(f"[CLOUD RESEARCH CHECK] Global flag: {ENABLE_CLOUD_API_RESEARCH}")
+            
+            if ENABLE_CLOUD_API_RESEARCH:
+                has_access = can_access_api_research(user_email)
+                logger.info(f"[CLOUD RESEARCH CHECK] User {user_email} has access: {has_access}")
+                
+                if has_access:
+                    is_enabled = await get_api_research_preference(user_email)
+                    logger.info(f"[CLOUD RESEARCH CHECK] User {user_email} has toggle enabled: {is_enabled}")
+                    
+                    if is_enabled:
+                        # User has it enabled - ALWAYS do API research (no pattern check needed)
+                        should_do_api_research = True
+                        logger.info(f"[CLOUD RESEARCH] ✅ API research ENABLED for {user_email} (toggle is ON)")
+                    else:
+                        logger.info(f"[CLOUD RESEARCH] User has access but toggle is OFF")
+                else:
+                    logger.info(f"[CLOUD RESEARCH] User doesn't have access")
+            else:
+                logger.info(f"[CLOUD RESEARCH] Feature disabled globally")
+            
             if corrected_answer:
                 # Use the corrected response
                 yield f"data: {json.dumps({'type': 'thinking_complete'})}\n\n"
@@ -3223,8 +3410,68 @@ Answer clearly and correctly based on the provided context and knowledge base.""
                 yield f"data: {json.dumps({'type': 'done', 'full_response': full_response, 'trace_id': trace_id, 'recommended_questions': recommended_questions})}\n\n"
                 return
             
+            # Cloud API Research if enabled
+            elif should_do_api_research:
+                from app.cloud_api_researcher import research_cloud_api
+                
+                cloud_name = extract_cloud_name_from_query(question)
+                
+                if cloud_name:
+                    logger.info(f"[CLOUD RESEARCH] User {user_email} researching: {cloud_name}")
+                    
+                    yield f"data: {json.dumps({'type': 'thinking', 'message': f'Hold on tight — researching {cloud_name} APIs can take a moment...'})}\n\n"
+                    
+                    try:
+                        # Perform research
+                        llm = get_llm()
+                        results = research_cloud_api(
+                            cloud_name=cloud_name,
+                            user_email=user_email,
+                            force_refresh=False,
+                            llm=llm
+                        )
+                        
+                        # Format results as markdown
+                        from app.response_formatter import format_cloud_research_markdown
+                        full_response = format_cloud_research_markdown(results, cloud_name)
+                        
+                        yield f"data: {json.dumps({'type': 'thinking_complete'})}\n\n"
+                        
+                        # Stream the response
+                        for i, char in enumerate(full_response):
+                            yield f"data: {json.dumps({'token': char, 'type': 'token'})}\n\n"
+                            if i % 10 == 0:
+                                await asyncio.sleep(0.01)
+                        
+                        # Save messages
+                        try:
+                            await save_message(session_id, "user", question)
+                            await save_message(session_id, "assistant", full_response)
+                        except Exception as e:
+                            logger.warning(f"Failed to save messages: {e}")
+                        
+                        yield f"data: {json.dumps({'type': 'done', 'full_response': full_response})}\n\n"
+                        return
+                        
+                    except Exception as e:
+                        error_msg = f"I encountered an error while researching {cloud_name}'s APIs: {str(e)}"
+                        logger.error(f"[ERROR] Cloud research failed: {e}")
+                        yield f"data: {json.dumps({'type': 'thinking_complete'})}\n\n"
+                        for char in error_msg:
+                            yield f"data: {json.dumps({'token': char, 'type': 'token'})}\n\n"
+                        yield f"data: {json.dumps({'type': 'done', 'full_response': error_msg})}\n\n"
+                        return
+                else:
+                    error_msg = "I couldn't identify which cloud you want to research. Please specify the cloud name clearly."
+                    logger.info(f"[CLOUD RESEARCH] Could not extract cloud name from: {question}")
+                    yield f"data: {json.dumps({'type': 'thinking_complete'})}\n\n"
+                    for char in error_msg:
+                        yield f"data: {json.dumps({'token': char, 'type': 'token'})}\n\n"
+                    yield f"data: {json.dumps({'type': 'done', 'full_response': error_msg})}\n\n"
+                    return
+            
             # ✅ MEMORY-ONLY QUESTION → do NOT run retrieval
-            if conversation_history and is_memory_only_question(question):
+            elif conversation_history and is_memory_only_question(question):
                 logger.info(f"[MEMORY-ONLY] Skipping RAG for: '{question}'")
                 
                 yield f"data: {json.dumps({'type': 'thinking_complete'})}\n\n"
@@ -8847,5 +9094,341 @@ async def microsoft_oauth_callback(
 #         if not langfuse_client:
 #             return {"error": "Langfuse client not initialized", "status": "error"}
 #         ... (entire duplicate function body removed - using endpoint at line 3482 instead)
+
+
+# ============================================================================
+# CLOUD API RESEARCH ENDPOINTS
+# ============================================================================
+
+class CloudResearchRequest(BaseModel):
+    """Request model for cloud API research"""
+    cloud_name: str
+    force_refresh: bool = False
+
+
+@router.post("/api/cloud-research/query")
+async def research_cloud_api_endpoint(
+    request: CloudResearchRequest,
+    user_info: dict = Depends(verify_user_access)
+):
+    """
+    Research cloud API and return comprehensive documentation.
+    
+    Args:
+        request: Cloud research request with cloud name
+        user_info: Authenticated user information
+        
+    Returns:
+        Complete API research results
+    """
+    try:
+        from config import ENABLE_CLOUD_API_RESEARCH
+        
+        if not ENABLE_CLOUD_API_RESEARCH:
+            raise HTTPException(
+                status_code=503,
+                detail="Cloud API research feature is currently disabled"
+            )
+        
+        cloud_name = request.cloud_name.strip()
+        user_email = user_info.get("email", "unknown")
+        
+        logger.info(f"[CLOUD RESEARCH] User {user_email} requesting research for {cloud_name}")
+        
+        # Import here to avoid circular dependencies
+        from app.cloud_api_researcher import research_cloud_api
+        from app.llm_factory import get_llm
+        
+        # Get LLM for intelligent normalization
+        llm = get_llm()
+        
+        # Perform research
+        results = research_cloud_api(
+            cloud_name=cloud_name,
+            user_email=user_email,
+            force_refresh=request.force_refresh,
+            llm=llm
+        )
+        
+        return {
+            "status": "success",
+            "data": results
+        }
+        
+    except Exception as e:
+        logger.error(f"[ERROR] Cloud research failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/cloud-research/{cloud_name}")
+async def get_cached_research(
+    cloud_name: str,
+    user_info: dict = Depends(verify_user_access)
+):
+    """
+    Get cached cloud API research results.
+    
+    Args:
+        cloud_name: Name of the cloud
+        user_info: Authenticated user information
+        
+    Returns:
+        Cached research results or 404 if not found
+    """
+    try:
+        from app.models.cloud_research import get_cloud_research
+        
+        results = get_cloud_research(cloud_name)
+        
+        if not results:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No research found for {cloud_name}"
+            )
+        
+        return {
+            "status": "success",
+            "data": results
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[ERROR] Failed to get cached research: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/cloud-research/list")
+async def list_researched_clouds_endpoint(
+    limit: int = Query(100, ge=1, le=500),
+    user_info: dict = Depends(verify_user_access)
+):
+    """
+    List all researched clouds.
+    
+    Args:
+        limit: Maximum number of results
+        user_info: Authenticated user information
+        
+    Returns:
+        List of researched clouds with basic info
+    """
+    try:
+        from app.models.cloud_research import list_researched_clouds
+        
+        clouds = list_researched_clouds(limit)
+        
+        return {
+            "status": "success",
+            "count": len(clouds),
+            "data": clouds
+        }
+        
+    except Exception as e:
+        logger.error(f"[ERROR] Failed to list clouds: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/cloud-research/refresh/{cloud_name}")
+async def refresh_cloud_research(
+    cloud_name: str,
+    user_info: dict = Depends(verify_user_access)
+):
+    """
+    Force refresh cloud API research (ignores cache).
+    
+    Args:
+        cloud_name: Name of the cloud
+        user_info: Authenticated user information
+        
+    Returns:
+        Fresh research results
+    """
+    try:
+        from app.cloud_api_researcher import research_cloud_api
+        from app.llm_factory import get_llm
+        
+        user_email = user_info.get("email", "unknown")
+        logger.info(f"[REFRESH] User {user_email} forcing refresh for {cloud_name}")
+        
+        llm = get_llm()
+        
+        results = research_cloud_api(
+            cloud_name=cloud_name,
+            user_email=user_email,
+            force_refresh=True,  # Always force refresh
+            llm=llm
+        )
+        
+        return {
+            "status": "success",
+            "data": results
+        }
+        
+    except Exception as e:
+        logger.error(f"[ERROR] Refresh failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/cloud-research/{cloud_name}/download")
+async def download_cloud_blueprint(
+    cloud_name: str,
+    user_info: dict = Depends(verify_user_access)
+):
+    """
+    Download JSON blueprint for a cloud.
+    
+    Args:
+        cloud_name: Name of the cloud
+        user_info: Authenticated user information
+        
+    Returns:
+        JSON file download
+    """
+    try:
+        from app.models.cloud_research import get_cloud_research
+        from fastapi.responses import Response
+        import json
+        
+        results = get_cloud_research(cloud_name)
+        
+        if not results:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No research found for {cloud_name}"
+            )
+        
+        # Generate JSON
+        json_data = json.dumps(results, indent=2, ensure_ascii=False)
+        
+        # Return as downloadable file
+        filename = f"{cloud_name.lower().replace(' ', '_')}_api_blueprint.json"
+        
+        return Response(
+            content=json_data,
+            media_type="application/json",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"'
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[ERROR] Download failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/cloud-research/statistics")
+async def get_research_statistics_endpoint(
+    user_info: dict = Depends(verify_user_access)
+):
+    """
+    Get overall cloud research statistics.
+    
+    Args:
+        user_info: Authenticated user information
+        
+    Returns:
+        Statistics about researched clouds
+    """
+    try:
+        from app.models.cloud_research import get_research_statistics
+        
+        stats = get_research_statistics()
+        
+        return {
+            "status": "success",
+            "data": stats
+        }
+        
+    except Exception as e:
+        logger.error(f"[ERROR] Failed to get statistics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/user/api-research/access")
+async def check_api_research_access(
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Check if user can access Cloud API Research feature.
+    
+    Returns:
+        can_access: bool - Whether user has permission
+        enabled: bool - Whether user has it enabled
+    """
+    try:
+        from app.auth import can_access_api_research
+        from app.mongodb_memory import get_api_research_preference
+        
+        user_email = current_user.get("email")
+        
+        # Check if user has access
+        can_access = can_access_api_research(user_email)
+        
+        # Check if user has it enabled
+        enabled = False
+        if can_access:
+            enabled = await get_api_research_preference(user_email)
+        
+        return {
+            "status": "success",
+            "can_access": can_access,
+            "enabled": enabled
+        }
+        
+    except Exception as e:
+        logger.error(f"[ERROR] Failed to check API research access: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/user/api-research/toggle")
+async def toggle_api_research(
+    request: Request,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Toggle Cloud API Research feature for current user.
+    
+    Body:
+        enabled: bool
+    """
+    try:
+        from app.auth import can_access_api_research
+        from app.mongodb_memory import update_api_research_preference
+        
+        user_email = current_user.get("email")
+        
+        # Check if user has access to this feature
+        if not can_access_api_research(user_email):
+            raise HTTPException(
+                status_code=403,
+                detail="You don't have access to Cloud API Research feature"
+            )
+        
+        data = await request.json()
+        enabled = data.get("enabled", False)
+        
+        # Update preference
+        success = await update_api_research_preference(user_email, enabled)
+        
+        if not success:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to update preference"
+            )
+        
+        return {
+            "status": "success",
+            "enabled": enabled,
+            "message": f"Cloud API Research {'enabled' if enabled else 'disabled'}"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[ERROR] Failed to toggle API research: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 

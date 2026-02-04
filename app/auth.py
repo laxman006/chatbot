@@ -326,3 +326,61 @@ async def get_current_user_optional(
         # If authentication fails, return None instead of raising exception
         return None
 
+
+def is_admin_email(email: str) -> bool:
+    """
+    Check if email is in the admin allowlist.
+    
+    Args:
+        email: User's email address
+        
+    Returns:
+        True if user is an admin
+    """
+    normalized = _normalize_email(email)
+    return normalized in ADMIN_EMAILS
+
+
+def is_cloudfuze_manage_team(user_email: str) -> bool:
+    """
+    Check if user is in CloudFuze Manage team.
+    
+    Args:
+        user_email: User's email address
+        
+    Returns:
+        True if user is in CloudFuze Manage team
+    """
+    from app.models.teams import get_team_by_member_email
+    
+    team = get_team_by_member_email(user_email)
+    return team == "CloudFuze Manage"
+
+
+def can_access_api_research(user_email: str) -> bool:
+    """
+    Check if user can access Cloud API Research feature.
+    
+    Access is granted to:
+    - CloudFuze Manage team members
+    - Admin users (from ADMIN_EMAILS allowlist)
+    
+    Args:
+        user_email: User's email address
+        
+    Returns:
+        True if user has access to API research feature
+    """
+    # Check if admin
+    if is_admin_email(user_email):
+        logger.debug(f"[API RESEARCH ACCESS] Admin access granted: {user_email}")
+        return True
+    
+    # Check if CloudFuze Manage team member
+    if is_cloudfuze_manage_team(user_email):
+        logger.debug(f"[API RESEARCH ACCESS] Manage team access granted: {user_email}")
+        return True
+    
+    logger.debug(f"[API RESEARCH ACCESS] Access denied: {user_email}")
+    return False
+

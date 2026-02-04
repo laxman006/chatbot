@@ -630,3 +630,33 @@ USE_CONTEXT_SYNTHESIS = os.getenv("USE_CONTEXT_SYNTHESIS", "false").lower() == "
 SYNTHESIS_MAX_CONTEXT_LENGTH = int(os.getenv("SYNTHESIS_MAX_CONTEXT_LENGTH", "50000"))  # Max chars for synthesis input
 SYNTHESIS_TEMPERATURE = float(os.getenv("SYNTHESIS_TEMPERATURE", "0.3"))  # Lower temp for more factual synthesis
 SYNTHESIS_MAX_OUTPUT_LENGTH = int(os.getenv("SYNTHESIS_MAX_OUTPUT_LENGTH", "10000"))  # Max chars for synthesized output
+
+# ============================================================================
+# CLOUD API RESEARCH CONFIGURATION
+# ============================================================================
+
+# Enable/Disable Cloud API Research Feature
+ENABLE_CLOUD_API_RESEARCH = os.getenv("ENABLE_CLOUD_API_RESEARCH", "true").lower() == "true"
+
+# Web Search Configuration
+CLOUD_RESEARCH_WEB_SEARCH_API = os.getenv("CLOUD_RESEARCH_WEB_SEARCH_API", "serper")  # "serper", "serpapi", "google", "bing", "duckduckgo"
+CLOUD_RESEARCH_SEARCH_API_KEY = os.getenv("CLOUD_RESEARCH_SEARCH_API_KEY", "")  # Serper API key (falls back to DuckDuckGo if not set or fails)
+
+# Scraping Configuration
+CLOUD_RESEARCH_MAX_URLS_PER_CLOUD = int(os.getenv("CLOUD_RESEARCH_MAX_URLS_PER_CLOUD", "5"))  # Max URLs to scrape per cloud (reduced for speed)
+CLOUD_RESEARCH_SCRAPING_DELAY = int(os.getenv("CLOUD_RESEARCH_SCRAPING_DELAY", "2"))  # Delay between requests (seconds)
+
+# Caching Configuration
+CLOUD_RESEARCH_CACHE_DAYS = int(os.getenv("CLOUD_RESEARCH_CACHE_DAYS", "30"))  # Days before cache expires
+CLOUD_RESEARCH_FORCE_REFRESH = os.getenv("CLOUD_RESEARCH_FORCE_REFRESH", "false").lower() == "true"  # Force fresh research
+
+# Verification Configuration
+CLOUD_RESEARCH_VERIFY_URLS = os.getenv("CLOUD_RESEARCH_VERIFY_URLS", "true").lower() == "true"  # Verify URLs are accessible
+
+# SCIM Configuration (HARD BLOCK - NON-NEGOTIABLE)
+ALLOW_SCIM = False  # SCIM is COMPLETELY DISABLED - do not extract, parse, map, validate, score, or mention SCIM
+CLOUD_RESEARCH_MIN_CONFIDENCE = float(os.getenv("CLOUD_RESEARCH_MIN_CONFIDENCE", "0.7"))  # Minimum confidence score
+
+# LLM Configuration for Research
+CLOUD_RESEARCH_LLM_TEMPERATURE = float(os.getenv("CLOUD_RESEARCH_LLM_TEMPERATURE", "0.3"))  # Lower temp for factual research
+CLOUD_RESEARCH_MAX_RETRIES = int(os.getenv("CLOUD_RESEARCH_MAX_RETRIES", "3"))  # Max retries for failed operations

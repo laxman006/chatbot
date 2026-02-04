@@ -1,0 +1,240 @@
+====================================================================================================
+ ENHANCED API ENDPOINT EXTRACTION - COMPREHENSIVE IMPROVEMENTS
+====================================================================================================
+
+ISSUE IDENTIFIED:
+- System was finding correct documentation URLs (e.g., https://developers.canny.io/api-reference)
+- BUT extracting 0 endpoints from those pages
+- Problem: HTML parsing didn't match modern documentation formats
+
+====================================================================================================
+ SOLUTION IMPLEMENTED
+====================================================================================================
+
+## 3 NEW EXTRACTION STRATEGIES ADDED:
+
+### 1. HEADING-BASED EXTRACTION (For Single-Page Docs)
+**Purpose:** Extract endpoints from documentation organized by headings (h1-h6)
+
+**How it works:**
+- Scans all heading elements (h1, h2, h3, h4, h5, h6)
+- Reads content between headings
+- Looks for HTTP methods (GET, POST, DELETE, etc.)
+- Extracts endpoint URLs from the section
+- Associates endpoint with heading text as description
+
+**Example (Canny-style docs):**
+```html
+<h2>List users</h2>
+<p>Returns a list of users.</p>
+<code>GET</code>
+<code>https://canny.io/api/v2/users/list</code>
+```
+**Extracted:** `GET /api/v2/users/list` - "List users"
+
+### 2. DEFINITION LIST EXTRACTION
+**Purpose:** Extract endpoints from `<dl>`, `<dt>`, `<dd>` tags
+
+**How it works:**
+- Finds all definition lists in HTML
+- Pairs terms (dt) with definitions (dd)
+- Extracts method and path from term
+- Uses definition as description
+
+**Example:**
+```html
+<dl>
+  <dt>GET /api/v1/users/retrieve</dt>
+  <dd>Retrieves the details of an existing user</dd>
+</dl>
+```
+**Extracted:** `GET /api/v1/users/retrieve` - "Retrieves the details of an existing user"
+
+### 3. HTTP BLOCK EXTRACTION
+**Purpose:** Extract endpoints from elements with "endpoint" class/id
+
+**How it works:**
+- Finds elements with "endpoint", "url", or "method" in class or id
+- Looks for patterns like "Endpoint: https://..." or "Method: POST"
+- Extracts path from full URLs
+- Finds method in same element or nearby
+
+**Example:**
+```html
+<div class="endpoint">
+  <p>Endpoint: https://canny.io/api/v1/users/list</p>
+  <p>Method: POST</p>
+</div>
+```
+**Extracted:** `POST /api/v1/users/list`
+
+====================================================================================================
+ ENHANCED OPERATION DETECTION
+====================================================================================================
+
+## CLOUDFUZE MANAGE OPERATIONS (8 Essential)
+
+The `_guess_operation_name()` function is now optimized to recognize the 8 essential operations:
+
+### USER OPERATIONS:
+1. **getUsers** (List users)
+   - Patterns: GET /users, /users/list, "list users", "get users"
+   - Matches: `GET /api/v2/users/list`, `GET /v1/users`
+
+2. **getAdmins** (List admins)
+   - Patterns: GET /admins, "list admins", "administrator"
+   - Matches: `GET /api/admins`, `GET /users?role=admin`
+
+3. **createUser** (Create user)
+   - Patterns: POST /users, "create user", "add user", "invite user"
+   - Matches: `POST /api/v1/users`, `POST /users/create`
+
+4. **deleteUser** (Delete user)
+   - Patterns: DELETE /users/{id}, "delete user", "remove user"
+   - Matches: `DELETE /api/v1/users/{id}`, `POST /users/delete`
+
+### GROUP OPERATIONS:
+5. **getGroups** (List groups)
+   - Patterns: GET /groups, /groups/list, "list groups"
+   - Matches: `GET /api/v1/groups`, `GET /v2/groups/list`
+
+6. **getGroupMembers** (List group members)
+   - Patterns: GET /groups/{id}/members, /groups/{id}/users
+   - Matches: `GET /api/v1/groups/{id}/users`
+
+7. **addUserToGroup** (Add user to group)
+   - Patterns: POST /groups/{id}/members, PUT /groups/{id}/users/{uid}
+   - Matches: `POST /groups/{gid}/users/{uid}`, `PUT /api/groups/add`
+
+8. **removeUserFromGroup** (Remove user from group)
+   - Patterns: DELETE /groups/{id}/members/{uid}, POST /groups/remove
+   - Matches: `DELETE /groups/{gid}/members/{uid}`
+
+====================================================================================================
+ EXTRACTION PIPELINE (7 STRATEGIES)
+====================================================================================================
+
+The extraction now runs through 7 strategies in order:
+
+1. **HTML Tables** (existing) - Extracts from `<table>` elements
+2. **Structured HTML** (existing) - Extracts from divs/sections with API-related classes
+3. **Code Blocks** (existing) - Extracts from `<code>` and `<pre>` tags
+4. **Heading Sections** (NEW) - Extracts from heading-based documentation
+5. **Definition Lists** (NEW) - Extracts from `<dl>` elements
+6. **HTTP Blocks** (NEW) - Extracts from elements with "endpoint" class/id
+7. **Regex Fallback** (existing) - Pattern matching on full text
+
+Each strategy is independent and additive. If one strategy finds endpoints, others still run.
+
+====================================================================================================
+ IMPROVED LOGGING
+====================================================================================================
+
+Added detailed debug logging:
+```
+[HEADING] Found: POST /api/v1/users/create from heading 'Create user'
+[DL] Found: GET /api/v1/groups
+[HTTP_BLOCK] Found: DELETE /api/v1/users/{id}
+[EXTRACT] Total unique endpoints after deduplication: 23
+```
+
+This helps debug what's being found and from where.
+
+====================================================================================================
+ EXPECTED RESULTS FOR CANNY
+====================================================================================================
+
+With these improvements, for Canny (https://developers.canny.io/api-reference):
+
+**BEFORE:**
+- Found 0 endpoints
+
+**AFTER (Expected):**
+- ✓ GET /api/v2/users/list (getUsers)
+- ✓ POST /api/v1/users/find_or_create (createUser)
+- ✓ DELETE /api/v1/users/delete (deleteUser)
+- ✓ GET /api/v1/groups/list (getGroups)
+- ✓ GET /api/v1/groups/retrieve (getGroupMembers)
+- ✓ POST /api/v1/posts/create
+- ✓ DELETE /api/v1/comments/delete
+- And many more...
+
+**Minimum Expected:** 15-30+ endpoints extracted (out of the ~50 documented)
+
+====================================================================================================
+ WHY THIS WORKS FOR MODERN DOCS
+====================================================================================================
+
+Modern API documentation sites (Readme.io, GitBook, Docusaurus, custom) commonly use:
+
+1. **Single-page design** with anchor links (#list_users)
+2. **Heading-based navigation** (h1-h6 tags)
+3. **Code blocks** for HTTP methods and URLs
+4. **Structured HTML** with semantic classes
+
+The new extraction strategies specifically target these patterns.
+
+====================================================================================================
+ LIMITATIONS & FUTURE ENHANCEMENTS
+====================================================================================================
+
+## CURRENT LIMITATIONS:
+1. **JavaScript-rendered content** - BeautifulSoup can't render JavaScript
+   - If docs load via JS frameworks (React, Vue), content might still be invisible
+   - Solution: Add Selenium/Playwright for JS rendering (future enhancement)
+
+2. **Interactive API explorers** - Some sites use widgets/iframes
+   - Solution: Try to find hidden JSON data or API specs
+
+3. **Custom formats** - Some sites have unique structures
+   - Solution: Continually add new extraction patterns
+
+## NEXT STEPS (if needed):
+1. Add Selenium/Playwright for JavaScript rendering
+2. Look for hidden OpenAPI/Swagger JSON in page source
+3. Add site-specific extractors for popular doc frameworks
+4. Use LLM for intelligent extraction as ultimate fallback
+
+====================================================================================================
+ HOW TO TEST
+====================================================================================================
+
+1. Restart the server:
+   ```
+   Ctrl+C
+   python server.py
+   ```
+
+2. Test with Canny:
+   ```
+   Research APIs for Canny
+   ```
+
+3. Check logs for:
+   ```
+   [EXTRACT] Total unique endpoints after deduplication: X
+   ```
+   Where X should be > 0 (hopefully 15-30+)
+
+4. If still 0, check logs for extraction attempts:
+   ```
+   [HEADING] Found: ...
+   [DL] Found: ...
+   [HTTP_BLOCK] Found: ...
+   ```
+
+5. If no extraction logs, the issue is likely JavaScript rendering
+
+====================================================================================================
+ SUMMARY
+====================================================================================================
+
+✓ Added 3 new extraction strategies
+✓ Enhanced operation name detection (8 CloudFuze Manage operations)
+✓ Improved logging for debugging
+✓ Focused on modern single-page documentation formats
+✓ Should now extract 15-30+ endpoints from Canny (was 0)
+
+The system is now much better at handling modern API documentation sites!
+
+====================================================================================================
