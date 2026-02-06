@@ -387,7 +387,8 @@ VENDOR_TERMINOLOGY_MAPPINGS = {
     "get users": "getUsers",
     "fetch users": "getUsers",
     "retrieve users": "getUsers",
-    "invite user": "createUser",
+    # Invite-only flows are NOT equivalent to native user creation.
+    # Keep invite terms unmapped to prevent false CRUD support claims.
     "add user": "createUser",
     "provision user": "createUser",
     "modify user": "updateUser",

@@ -66,16 +66,9 @@ class APIOperationNormalizer:
             cloudfuze_op = pattern_op
             confidence = pattern_confidence
         
-        # Step 3: Try LLM-powered normalization if available and confidence is low
-        if self.llm and confidence < 0.7:
-            llm_op, llm_confidence = self._try_llm_normalization(
-                vendor_operation, endpoint, method, description
-            )
-            
-            if llm_op and llm_confidence > confidence:
-                cloudfuze_op = llm_op
-                confidence = llm_confidence
-        
+        # Step 3: LLM-powered normalization DISABLED.
+        # Cloud API Research output must be evidence-based (docs/OpenAPI only).
+        # LLM-derived operation mappings are not permitted as capability evidence.
         return cloudfuze_op, confidence
     
     def _try_terminology_mapping(
@@ -87,7 +80,7 @@ class APIOperationNormalizer:
         
         # Try direct lookup
         cloudfuze_op = normalize_vendor_term(vendor_op_lower)
-        if cloudfuze_op:
+        if cloudfuze_op and get_operation_details(cloudfuze_op):
             logger.debug(f"[NORMALIZE] Direct mapping: {vendor_operation} → {cloudfuze_op}")
             return cloudfuze_op, 0.95
         
@@ -95,7 +88,7 @@ class APIOperationNormalizer:
         key_terms = self._extract_key_terms(vendor_operation)
         for term in key_terms:
             cloudfuze_op = normalize_vendor_term(term)
-            if cloudfuze_op:
+            if cloudfuze_op and get_operation_details(cloudfuze_op):
                 logger.debug(f"[NORMALIZE] Term mapping: {term} → {cloudfuze_op}")
                 return cloudfuze_op, 0.85
         
@@ -104,16 +97,34 @@ class APIOperationNormalizer:
             desc_lower = description.lower()
             for vendor_term, cf_op in self.terminology_map.items():
                 if vendor_term in desc_lower:
+                    if not get_operation_details(cf_op):
+                        # Ignore non-operation terminology mappings (e.g., entity nouns)
+                        continue
                     logger.debug(f"[NORMALIZE] Description mapping: {vendor_term} → {cf_op}")
                     return cf_op, 0.75
         
         return None, 0.0
     
+    def _canonicalize_path_for_rest_matching(self, path: str) -> str:
+        """
+        Strip version/API prefix for canonical REST pattern matching (vendor-agnostic).
+        E.g. /2.0/users -> /users, /api/1/users -> /users, /v1/users -> /users.
+        """
+        if not path:
+            return ""
+        p = path.strip().lower()
+        # Remove leading /api, /api/1, /v1, /v2, /2.0, /1, etc.
+        p = re.sub(r"^/(?:api(?:/\d+)?|v?\d+(?:\.\d+)?)/", "/", p)
+        return p or "/"
+
     def _try_pattern_matching(self, endpoint: str, method: str) -> Tuple[Optional[str], float]:
-        """Match operation based on endpoint pattern and HTTP method"""
+        """Match operation based on endpoint pattern and HTTP method (canonical REST lifecycle mapping)."""
         endpoint_lower = endpoint.lower()
         method_upper = method.upper()
-        
+        canonical_path = self._canonicalize_path_for_rest_matching(endpoint)
+        # Try matching against canonical path first (version-agnostic)
+        path_to_match = canonical_path if canonical_path != endpoint_lower else endpoint_lower
+
         # INTENT-AWARE BLOCKING: These are NOT admin CRUD operations
         non_crud_patterns = [
             r'/search', r'/query', r'/picker', r'/lookup',  # Search/query endpoints
@@ -123,15 +134,17 @@ class APIOperationNormalizer:
         ]
         
         for blocked_pattern in non_crud_patterns:
-            if re.search(blocked_pattern, endpoint_lower):
+            if re.search(blocked_pattern, path_to_match):
                 logger.debug(f"[NORMALIZE] BLOCKED: {endpoint} matches non-CRUD pattern {blocked_pattern}")
                 return None, 0.0
-        
-        # Define pattern rules
+
+        # Canonical REST lifecycle mapping (vendor-agnostic): method + path pattern -> capability.
+        # Applied to canonical path so /2.0/users, /api/1/users, /v1/users all match /users patterns.
         patterns = {
             # Users - Standard REST patterns
             (r'/users?$', 'GET'): ('getUsers', 0.9),
             (r'/users?/\{?[\w-]+\}?$', 'GET'): ('getUser', 0.9),
+            (r'/user/\{?[\w-]+\}?$', 'GET'): ('getUser', 0.85),
             (r'/users?$', 'POST'): ('createUser', 0.9),
             (r'/users?/\{?[\w-]+\}?$', 'PUT|PATCH'): ('updateUser', 0.85),
             (r'/users?/\{?[\w-]+\}?$', 'DELETE'): ('deleteUser', 0.85),
@@ -153,18 +166,27 @@ class APIOperationNormalizer:
             # Groups - Standard REST patterns
             (r'/groups?$', 'GET'): ('getGroups', 0.9),
             (r'/teams?$', 'GET'): ('getGroups', 0.9),
+            (r'/team$', 'GET'): ('getGroups', 0.85),
             (r'/usergroups?$', 'GET'): ('getGroups', 0.9),
             (r'/groups?/\{?[\w-]+\}?$', 'GET'): ('getGroup', 0.9),
             (r'/teams?/\{?[\w-]+\}?$', 'GET'): ('getGroup', 0.9),
+            (r'/team/\{?[\w-]+\}?$', 'GET'): ('getGroup', 0.85),
             (r'/groups?$', 'POST'): ('createGroup', 0.9),
             (r'/teams?$', 'POST'): ('createGroup', 0.9),
+            (r'/team$', 'POST'): ('createGroup', 0.85),
             (r'/groups?/\{?[\w-]+\}?$', 'PUT|PATCH'): ('updateGroup', 0.85),
             (r'/groups?/\{?[\w-]+\}?$', 'DELETE'): ('deleteGroup', 0.85),
             (r'/groups?/\{?[\w-]+\}?/members', 'GET'): ('getGroupMembers', 0.9),
             (r'/groups?/\{?[\w-]+\}?/users', 'GET'): ('getGroupMembers', 0.9),
             (r'/teams?/\{?[\w-]+\}?/members', 'GET'): ('getGroupMembers', 0.9),
+            (r'/team/\{?[\w-]+\}?/users', 'GET'): ('getGroupMembers', 0.85),
+            (r'/team/\{?[\w-]+\}?/members', 'GET'): ('getGroupMembers', 0.85),
+            (r'/team/members', 'GET'): ('getGroupMembers', 0.85),
+            (r'/team/users', 'GET'): ('getGroupMembers', 0.85),
             (r'/groups?/\{?[\w-]+\}?/members/\{?[\w-]+\}?', 'PUT|POST'): ('addUserToGroup', 0.85),
             (r'/groups?/\{?[\w-]+\}?/members/\{?[\w-]+\}?', 'DELETE'): ('removeUserFromGroup', 0.85),
+            (r'/team/\{?[\w-]+\}?/user/\{?[\w-]+\}?', 'PUT|POST'): ('addUserToGroup', 0.85),
+            (r'/team/\{?[\w-]+\}?/user/\{?[\w-]+\}?', 'DELETE'): ('removeUserFromGroup', 0.85),
             
             # Groups - Slack method-based patterns
             (r'/usergroups\.list', 'GET|POST'): ('getGroups', 0.9),
@@ -182,14 +204,20 @@ class APIOperationNormalizer:
             (r'/token', 'POST'): ('getAccessToken', 0.8),
             (r'/auth/token', 'POST'): ('getAccessToken', 0.85),
             (r'/oauth\.v2\.access', 'POST'): ('getAccessToken', 0.9),
+
+            # Audit / logs (extended governance evidence)
+            (r'/audit', 'GET'): ('getAuditLogs', 0.8),
+            (r'/audit-logs', 'GET'): ('getAuditLogs', 0.85),
+            (r'/logs', 'GET'): ('getAuditLogs', 0.75),
+            (r'/security/events', 'GET'): ('getSecurityEvents', 0.8),
         }
         
-        # Try to match patterns
+        # Try to match patterns against canonical path (version-agnostic)
         for (pattern, methods), (operation, confidence) in patterns.items():
-            if re.search(pattern, endpoint_lower) and re.search(methods, method_upper):
-                logger.debug(f"[NORMALIZE] Pattern match: {method} {endpoint} → {operation}")
+            if re.search(pattern, path_to_match) and re.search(methods, method_upper):
+                logger.debug(f"[NORMALIZE] Pattern match: {method} {endpoint} → {operation} (canonical: {path_to_match})")
                 return operation, confidence
-        
+
         return None, 0.0
     
     def _extract_key_terms(self, vendor_operation: str) -> List[str]:

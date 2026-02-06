@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 def format_cloud_research_markdown(research_data: Dict, cloud_name: str) -> str:
     """
-    Format cloud research data into comprehensive markdown response.
+    Format cloud research data into the REQUIRED Cloud API Research contract.
     
     Args:
         research_data: Complete research results
@@ -22,319 +22,494 @@ def format_cloud_research_markdown(research_data: Dict, cloud_name: str) -> str:
     Returns:
         Formatted markdown string
     """
-    sections = []
-    
-    # Header
-    sections.append(f"# Cloud API Integration Guide: {cloud_name}")
-    sections.append("")
-    
-    if research_data.get("from_cache"):
-        sections.append("*(Retrieved from cache)*")
-        sections.append("")
-    
-    sections.append("")
-    sections.append("---")
-    sections.append("")
-    
-    # SECTION 1: Integration Quickstart (NEW - Most Important)
-    sections.extend(_format_integration_quickstart(research_data, cloud_name))
-    
-    # SECTION 2: Authentication Setup (Enhanced)
-    sections.extend(_format_authentication_setup(research_data, cloud_name))
-    
-    # Cloud Classification (context)
-    classification = research_data.get("cloud_classification", {})
-    if classification:
-        category = classification.get("category", "Unknown")
-        support = classification.get("manage_team_support", "unknown")
-        expected = classification.get("expected_coverage", "Unknown")
-        
-        sections.append("## Cloud Classification")
-        sections.append("")
-        sections.append(f"**{category}**")
-        sections.append("")
-        sections.append(f"- **Manage Team Support:** {support.title()}")
-        sections.append(f"- **Expected Coverage:** {expected}")
-        sections.append("")
-        sections.append("---")
-        sections.append("")
-    
-    # Official Documentation Links
-    doc_links = research_data.get("documentation", {})
-    if doc_links:
-        sections.append("## Official Documentation")
-        sections.append("")
-        
-        if doc_links.get("docs_home"):
-            sections.append(f"- **Developer Portal:** [{cloud_name} Developers]({doc_links['docs_home']})")
-        if doc_links.get("api_reference"):
-            sections.append(f"- **API Reference:** [API Reference]({doc_links['api_reference']})")
-        if doc_links.get("getting_started"):
-            sections.append(f"- **Getting Started:** [Quick Start]({doc_links['getting_started']})")
-        if doc_links.get("authentication_guide"):
-            sections.append(f"- **Authentication Guide:** [Auth Guide]({doc_links['authentication_guide']})")
-        if doc_links.get("rate_limits"):
-            sections.append(f"- **Rate Limits:** [Rate Limiting]({doc_links['rate_limits']})")
-        
-        sections.append("")
-        sections.append("---")
-        sections.append("")
-    
-    # Core Operations (Enhanced with full integration details)
-    core_ops = research_data.get("core_operations", {})
-    base_url = research_data.get("base_url", "")
-    
-    if core_ops:
-        sections.append("## Available API Endpoints")
-        sections.append("")
-        sections.append("*Ready-to-use endpoints with complete integration examples*")
-        sections.append("")
-        
-        # Users
-        user_ops = ["getUsers", "getUser", "createUser", "updateUser", "deleteUser", "suspendUser", "restoreUser"]
-        user_ops_found = [op for op in user_ops if op in core_ops]
-        
-        if user_ops_found:
-            sections.append("### User Management APIs")
-            sections.append("")
-            
-            for op in user_ops_found:
-                op_data = core_ops[op][0] if isinstance(core_ops[op], list) and core_ops[op] else core_ops[op]
-                sections.extend(_format_operation(op, op_data, base_url))
-        
-        # Groups
-        group_ops = ["getGroups", "getGroup", "createGroup", "updateGroup", "deleteGroup", 
-                     "getGroupMembers", "addUserToGroup", "removeUserFromGroup"]
-        group_ops_found = [op for op in group_ops if op in core_ops]
-        
-        if group_ops_found:
-            sections.append("### Group/Team Management APIs")
-            sections.append("")
-            
-            for op in group_ops_found:
-                op_data = core_ops[op][0] if isinstance(core_ops[op], list) and core_ops[op] else core_ops[op]
-                sections.extend(_format_operation(op, op_data, base_url))
-    
-    # Extended Operations Summary
-    extended_ops = research_data.get("extended_operations", {})
-    if extended_ops:
-        sections.append("## Extended Operations")
-        sections.append("")
-        sections.append(f"Found {len(extended_ops)} additional operations beyond core user/group management:")
-        sections.append("")
-        
-        for op_name in list(extended_ops.keys())[:10]:  # Show first 10
-            sections.append(f"- `{op_name}`")
-        
-        if len(extended_ops) > 10:
-            sections.append(f"- ... and {len(extended_ops) - 10} more")
-        
-        sections.append("")
-        sections.append("---")
-        sections.append("")
-    
-    # Authentication (OAuth 2.0 - PRIMARY FOCUS)
-    auth_info = research_data.get("authentication", {})
-    if auth_info:
-        sections.append("## Authentication")
-        sections.append("")
-        
-        auth_type = auth_info.get("type", "Unknown")
-        
-        if "oauth" in auth_type.lower():
-            sections.append(f"✅ **{cloud_name} supports OAuth 2.0**")
-            sections.append("")
-            
-            grant_type = auth_info.get("grant_type", "")
-            if grant_type:
-                sections.append(f"- **Grant Type:** `{grant_type}`")
-            
-            token_endpoint = auth_info.get("token_endpoint", "")
-            if token_endpoint:
-                sections.append(f"- **Token Endpoint:** `{token_endpoint}`")
-            
-            auth_endpoint = auth_info.get("authorization_endpoint", "")
-            if auth_endpoint:
-                sections.append(f"- **Authorization Endpoint:** `{auth_endpoint}`")
-            
-            scopes = auth_info.get("scopes", [])
-            if scopes:
-                sections.append(f"- **Required Scopes:** {', '.join(scopes)}")
-            
-            admin_required = auth_info.get("admin_consent_required", False)
-            sections.append(f"- **Admin Consent Required:** {'Yes' if admin_required else 'No'}")
-            
-            if auth_info.get("documentation_url"):
-                sections.append(f"- **Auth Guide:** [OAuth Documentation]({auth_info['documentation_url']})")
-        elif auth_type != "Unknown":
-            sections.append(f"**Authentication Type:** {auth_type}")
-            sections.append("")
-            sections.append(f"*(Note: {cloud_name} uses {auth_type} instead of OAuth 2.0)*")
-        else:
-            sections.append("⚠️ **Authentication method not automatically determined**")
-            sections.append("")
-            sections.append(f"Please check the [official documentation]({doc_links.get('authentication_guide', doc_links.get('docs_home', ''))}) for authentication details.")
-        
-        sections.append("")
-        sections.append("---")
-        sections.append("")
-    
-    # SCIM is HARD BLOCKED - do not show SCIM support section
-        sections.append("---")
-        sections.append("")
-    
-    # SDKs & Tools
-    sdks = doc_links.get("sdks", {})
-    tools = doc_links.get("tools", {})
-    
-    if sdks or tools:
-        sections.append("## Developer Resources")
-        sections.append("")
-        
-        if sdks:
-            sections.append("### Official SDKs")
-            sections.append("")
-            for lang, sdk_info in sdks.items():
-                sections.append(f"- **{lang.title()}:** [{sdk_info['name']}]({sdk_info['url']})")
-                sections.append(f"  - Install: `{sdk_info['install']}`")
-            sections.append("")
-        
-        if tools:
-            sections.append("### Tools")
-            sections.append("")
-            for tool_name, tool_url in tools.items():
-                sections.append(f"- **{tool_name.replace('_', ' ').title()}:** [Link]({tool_url})")
-            sections.append("")
-        
-        sections.append("---")
-        sections.append("")
-    
-    # Coverage Summary
-    coverage = research_data.get("coverage_metrics", {})
-    if coverage:
-        sections.append("## API Coverage Summary")
-        sections.append("")
+    confidence = float(research_data.get("confidence_score") or 0.0)
+    integration_mode = research_data.get("integration_mode") or "NOT_SUPPORTED"
 
-        # Determine if discovered endpoints look like Manage Team APIs
-        all_endpoints = research_data.get("all_endpoints", [])
-        manage_keywords = [
-            "user", "users", "group", "groups", "member", "members", "admin", "admins",
-            "team", "teams", "auth", "oauth", "token", "scim", "directory"
+    core_ops = research_data.get("core_operations") or {}
+    extended_ops = research_data.get("extended_operations") or {}
+    auth_info = research_data.get("authentication") or {}
+    doc_links = research_data.get("documentation") or {}
+
+    # Confidence gates (suppress content, not structure)
+    suppress_examples_and_checklists = confidence < 0.7
+    suppress_endpoint_tables = confidence < 0.6
+    minimal_sections_only = confidence < 0.55
+
+    # Contract: capability-first, no "Unknown"
+    capabilities = _compute_supported_capabilities(core_ops, extended_ops, integration_mode)
+    out_of_scope = _compute_out_of_scope(core_ops, extended_ops, integration_mode, confidence)
+
+    # INVARIANT: NOT_SUPPORTED → no endpoints rendered, no capability may be "Supported"
+    if integration_mode == "NOT_SUPPORTED":
+        capabilities = _capabilities_for_not_supported()
+
+    sections: List[str] = []
+    sections.append(f"# Cloud API Integration Assessment: {cloud_name}")
+    sections.append("")
+
+    # 1. Overview
+    sections.append("## Overview")
+    sections.append("")
+    sections.extend(_render_overview(cloud_name, integration_mode, capabilities, confidence))
+    sections.append("")
+
+    # 2. Problems Solved
+    sections.append("## Problems Solved")
+    sections.append("")
+    if minimal_sections_only:
+        sections.append("Out of scope.")
+    else:
+        sections.extend(_render_problems_solved(capabilities))
+    sections.append("")
+
+    # 3. Supported Capabilities
+    sections.append("## Supported Capabilities")
+    sections.append("")
+    sections.extend(_render_capabilities(capabilities))
+    sections.append("")
+
+    # 4. Out of Scope
+    sections.append("## Out of Scope")
+    sections.append("")
+    sections.extend(_render_out_of_scope(out_of_scope))
+    sections.append("")
+
+    # 5. Authentication
+    sections.append("## Authentication")
+    sections.append("")
+    if minimal_sections_only:
+        sections.append("Out of scope.")
+    else:
+        sections.extend(_render_authentication(auth_info, doc_links, cloud_name))
+    sections.append("")
+
+    # 6. Explicit Endpoints (evidence only)
+    sections.append("## Explicit Endpoints")
+    sections.append("")
+    # INVARIANT: NOT_SUPPORTED → no explicit endpoints may be rendered
+    if integration_mode == "NOT_SUPPORTED":
+        sections.append("Not supported.")
+    elif minimal_sections_only or suppress_endpoint_tables:
+        sections.append("Out of scope.")
+    else:
+        sections.extend(_render_explicit_endpoints(core_ops, extended_ops))
+    sections.append("")
+
+    # 7. Governance Workflows
+    sections.append("## Governance Workflows")
+    sections.append("")
+    if minimal_sections_only or suppress_examples_and_checklists:
+        sections.append("Out of scope.")
+    else:
+        sections.extend(_render_governance_workflows(capabilities, integration_mode))
+    sections.append("")
+
+    # 8. Recommendation
+    sections.append("## Recommendation")
+    sections.append("")
+    if minimal_sections_only:
+        sections.append(_render_recommendation_summary(integration_mode))
+    else:
+        sections.extend(_render_recommendation(integration_mode, capabilities))
+    sections.append("")
+
+    # 9. Authoritative Documentation (Informational)
+    sections.append("## Authoritative Documentation (Informational)")
+    sections.append("")
+    authoritative_docs = research_data.get("authoritative_docs") or []
+    sections.extend(_render_authoritative_documentation(authoritative_docs, cloud_name))
+    sections.append("")
+
+    markdown = "\n".join(sections).strip() + "\n"
+    _contract_safety_assertions(markdown, core_ops, extended_ops, integration_mode, capabilities)
+    return markdown
+
+
+def _capabilities_for_not_supported() -> Dict[str, str]:
+    """Invariant: NOT_SUPPORTED → no capability may be marked Supported."""
+    return {
+        "Integration Mode": "NOT_SUPPORTED",
+        "User lifecycle (create/update/delete/suspend/restore)": "Not supported.",
+        "User visibility (list/get)": "Not supported.",
+        "Team/Group lifecycle (create/update/delete)": "Not supported.",
+        "Team/Group visibility (list/get)": "Not supported.",
+        "Membership management (add/remove members)": "Not supported.",
+        "Membership visibility (list members)": "Not supported.",
+        "Audit / activity logs": "Not supported.",
+    }
+
+
+def _contract_safety_assertions(
+    markdown: str,
+    core_ops: Dict,
+    extended_ops: Dict,
+    integration_mode: str = "",
+    capabilities: Optional[Dict[str, str]] = None,
+) -> None:
+    """
+    Final safety assertions (contract-enforced):
+    - No rendered output may contain the string "Unknown"
+    - No endpoint evidence with LLM provenance may be rendered
+    - NOT_SUPPORTED → no endpoints rendered, no capability Supported
+    - Any rendered endpoint must have vendor_docs_url provenance
+    """
+    if "Unknown" in markdown:
+        raise AssertionError('Contract violation: rendered output contains "Unknown"')
+
+    # NOT_SUPPORTED → no endpoint table may be present
+    if integration_mode == "NOT_SUPPORTED" and "| Capability | Method | Endpoint | Docs |" in markdown:
+        raise AssertionError("Contract violation: NOT_SUPPORTED must not render explicit endpoints table")
+
+    # If any capability is Supported, integration_mode must NOT be NOT_SUPPORTED
+    if capabilities:
+        for key, val in capabilities.items():
+            if key != "Integration Mode" and val == "Supported":
+                if integration_mode == "NOT_SUPPORTED":
+                    raise AssertionError(
+                        "Contract violation: capability marked Supported but integration_mode is NOT_SUPPORTED"
+                    )
+                break
+
+    # If endpoint table is present, no LLM provenance (iter_evidence already filters these and vendor_docs_url)
+    if "| Capability | Method | Endpoint | Docs |" in markdown:
+        evidence = _iter_evidence_operations(core_ops, extended_ops)
+        for rec in evidence:
+            validation_status = (rec.get("validation_status") or "").lower()
+            evidence_source = (rec.get("evidence_source") or "").lower()
+            page_source = (rec.get("page_source") or "").lower()
+            if "llm" in validation_status or "llm" in evidence_source or "llm" in page_source:
+                raise AssertionError("Contract violation: endpoint evidence with LLM provenance is renderable")
+            if not (rec.get("vendor_docs_url") or rec.get("source_url")):
+                raise AssertionError("Contract violation: rendered endpoint must have vendor_docs_url provenance")
+
+
+def _compute_supported_capabilities(core_ops: Dict, extended_ops: Dict, integration_mode: str) -> Dict[str, str]:
+    """
+    Compute capability statuses (Supported / Limited / Not supported) without inference.
+    Endpoints are evidence only; if operation not present, it is Not supported.
+    """
+    def _has(op: str) -> bool:
+        return op in (core_ops or {}) and bool(core_ops[op])
+
+    def _has_ext(op: str) -> bool:
+        return op in (extended_ops or {}) and bool(extended_ops[op])
+
+    # Identity lifecycle
+    user_read = _has("getUsers") or _has("getUser")
+    user_lifecycle = any(_has(op) for op in ["createUser", "updateUser", "deleteUser", "suspendUser", "restoreUser"])
+
+    # Teams/groups + memberships
+    group_read = _has("getGroups") or _has("getGroup")
+    group_lifecycle = any(_has(op) for op in ["createGroup", "updateGroup", "deleteGroup"])
+    membership_read = _has("getGroupMembers")
+    membership_write = any(_has(op) for op in ["addUserToGroup", "removeUserFromGroup"])
+
+    # Governance/audit (extended)
+    audit = _has_ext("getAuditLogs") or _has_ext("getSecurityEvents")
+
+    # Status values per docs/capability-contract.md
+    def _status_supported() -> str:
+        return "Supported"
+
+    def _status_limited() -> str:
+        return "Limited"
+
+    def _status_not_supported() -> str:
+        return "Not supported"
+
+    caps: Dict[str, str] = {}
+
+    # Integration mode as top-level capability signal
+    caps["Integration Mode"] = integration_mode
+
+    # User lifecycle
+    if user_lifecycle:
+        caps["User lifecycle (create/update/delete/suspend/restore)"] = _status_supported()
+    elif user_read:
+        caps["User lifecycle (create/update/delete/suspend/restore)"] = _status_not_supported()
+        caps["User visibility (list/get)"] = _status_supported()
+    else:
+        caps["User lifecycle (create/update/delete/suspend/restore)"] = _status_not_supported()
+        caps["User visibility (list/get)"] = _status_not_supported()
+
+    # Teams / groups
+    if group_lifecycle:
+        caps["Team/Group lifecycle (create/update/delete)"] = _status_supported()
+    elif group_read:
+        caps["Team/Group lifecycle (create/update/delete)"] = _status_not_supported()
+        caps["Team/Group visibility (list/get)"] = _status_supported()
+    else:
+        caps["Team/Group lifecycle (create/update/delete)"] = _status_not_supported()
+        caps["Team/Group visibility (list/get)"] = _status_not_supported()
+
+    # Memberships
+    if membership_write:
+        caps["Membership management (add/remove members)"] = _status_supported()
+    elif membership_read:
+        caps["Membership management (add/remove members)"] = _status_not_supported()
+        caps["Membership visibility (list members)"] = _status_supported()
+    else:
+        caps["Membership management (add/remove members)"] = _status_not_supported()
+        caps["Membership visibility (list members)"] = _status_not_supported()
+
+    # Audit
+    caps["Audit / activity logs"] = _status_supported() if audit else _status_not_supported()
+
+    # Guardrail: if no identity or team-management APIs explicitly documented, mode must be NOT_SUPPORTED or VISIBILITY_ONLY
+    has_identity_or_team = user_read or user_lifecycle or group_read or group_lifecycle or membership_read or membership_write
+    if not has_identity_or_team and integration_mode not in ("NOT_SUPPORTED", "VISIBILITY_ONLY"):
+        caps["Integration Mode"] = "NOT_SUPPORTED"
+
+    return caps
+
+
+def _compute_out_of_scope(core_ops: Dict, extended_ops: Dict, integration_mode: str, confidence: float) -> List[str]:
+    """
+    Out-of-scope items are explicit. No 'Unknown' allowed.
+    """
+    items: List[str] = []
+
+    # If NOT_SUPPORTED or VISIBILITY_ONLY, user lifecycle is out of scope by definition
+    if integration_mode in ("NOT_SUPPORTED", "VISIBILITY_ONLY"):
+        items.append("User lifecycle automation (create/update/delete/suspend/restore): Not supported.")
+        items.append("Team/Group lifecycle automation (create/update/delete): Not supported.")
+        items.append("Membership automation (add/remove members): Not supported.")
+
+    # Confidence-based suppression (content only; structure remains)
+    if confidence < 0.7:
+        items.append("Integration examples and checklists: Out of scope (confidence < 0.7).")
+    if confidence < 0.6:
+        items.append("Endpoint tables: Out of scope (confidence < 0.6).")
+
+    # Always state evidence policy
+    items.append("LLM-generated endpoints: Not supported (forbidden).")
+
+    # If nothing else, keep at least one line
+    if not items:
+        items.append("No additional out-of-scope items identified.")
+
+    return items
+
+
+def _render_overview(cloud_name: str, integration_mode: str, capabilities: Dict[str, str], confidence: float) -> List[str]:
+    lines: List[str] = []
+    # Short, capability-first overview aligned to example intent.
+    # Do not claim support beyond the computed capability statuses.
+    supports_team = any(
+        capabilities.get(k) == "Supported"
+        for k in [
+            "Team/Group visibility (list/get)",
+            "Team/Group lifecycle (create/update/delete)",
+            "Membership visibility (list members)",
+            "Membership management (add/remove members)",
         ]
-        def _is_manage_candidate(endpoint: Dict) -> bool:
-            path = (endpoint.get("path") or "").lower()
-            desc = (endpoint.get("description") or "").lower()
-            combined = f"{path} {desc}"
-            return any(k in combined for k in manage_keywords)
+    )
+    supports_user_lifecycle = capabilities.get("User lifecycle (create/update/delete/suspend/restore)") == "Supported"
+    supports_audit = capabilities.get("Audit / activity logs") == "Supported"
 
-        has_manage_candidates = any(_is_manage_candidate(ep) for ep in all_endpoints)
+    if integration_mode == "NOT_SUPPORTED":
+        lines.append("Not supported.")
+        return lines
 
-        # Get cloud classification for context-aware status
-        classification = research_data.get("cloud_classification", {})
-        support_level = classification.get("manage_team_support", "unknown")
+    if supports_team and supports_audit and not supports_user_lifecycle:
+        lines.append("Supports team governance and audit.")
+        lines.append("Does not support user lifecycle.")
+        return lines
 
-        # If we have endpoints but none look like Manage Team APIs, avoid showing all "Unknown"
-        if not core_ops and all_endpoints and not has_manage_candidates:
-            sections.append("No Manage Team endpoints detected in the discovered API surface.")
-            sections.append("These endpoints appear unrelated to user/group/admin/auth management, so coverage is not applicable.")
-            sections.append("")
-            sections.append(f"**Core Coverage:** 0.0% (no Manage Team endpoints detected)")
-            sections.append(f"**Confidence Score:** {research_data.get('confidence_score', 0):.2f}/1.0")
-            sections.append("")
+    # Generic overview without new assumptions
+    if supports_user_lifecycle:
+        lines.append("Supports identity governance.")
+    elif supports_team:
+        lines.append("Supports team governance.")
+    else:
+        lines.append("Not supported.")
+
+    if supports_audit:
+        lines.append("Supports audit visibility.")
+
+    return lines
+
+
+def _render_problems_solved(capabilities: Dict[str, str]) -> List[str]:
+    lines: List[str] = []
+    # Keep minimal and non-assumptive
+    if capabilities.get("Team/Group visibility (list/get)") == "Supported":
+        lines.append("- Inventory teams/groups.")
+    if capabilities.get("Membership visibility (list members)") == "Supported":
+        lines.append("- Review group membership for governance.")
+    if capabilities.get("Audit / activity logs") == "Supported":
+        lines.append("- Support audit visibility for compliance.")
+    if not lines:
+        lines.append("Not supported.")
+    return lines
+
+
+def _render_capabilities(capabilities: Dict[str, str]) -> List[str]:
+    lines: List[str] = []
+    for name, status in capabilities.items():
+        if name == "Integration Mode":
+            lines.append(f"- **Integration Mode**: `{status}`")
         else:
-            sections.append("| CloudFuze Operation | Status |")
-            sections.append("|---------------------|--------|")
+            lines.append(f"- **{name}**: {status}")
+    return lines
 
-            all_core_ops = ["getUsers", "createUser", "updateUser", "deleteUser", "suspendUser", "restoreUser",
-                            "getGroups", "createGroup", "getGroupMembers", "addUserToGroup", "removeUserFromGroup"]
 
-            for op in all_core_ops:
-                if op in core_ops:
-                    # Get the actual endpoint details to qualify the status
-                    op_data = core_ops[op]
-                    if isinstance(op_data, list) and len(op_data) > 0:
-                        endpoint = op_data[0]
-                        path = endpoint.get("path", "").lower()
-                        method = endpoint.get("method", "")
+def _render_out_of_scope(items: List[str]) -> List[str]:
+    return [f"- {item}" for item in items] if items else ["- Out of scope."]
 
-                        # QUALIFIED STATUS based on intent
-                        if "/search" in path or "/query" in path or "/picker" in path:
-                            status = "✅ Search-based"
-                        elif "/invite" in path or "/send" in path:
-                            status = "✅ Invite-only"
-                        elif "/me" in path or "/profile" in path or "/self" in path:
-                            status = "✅ Self-service"
-                        elif method == "GET" and op in ["getUsers", "getGroups", "getGroupMembers"]:
-                            status = "✅ Read-only"
-                        else:
-                            status = "✅ Native API"
+
+def _render_authentication(auth_info: Dict, doc_links: Dict, cloud_name: str) -> List[str]:
+    lines: List[str] = []
+    auth_type = (auth_info.get("type") or "").strip()
+    if auth_type.lower() == "unknown":
+        auth_type = ""
+
+    if auth_type:
+        lines.append(f"- **Type**: {auth_type}")
+    else:
+        lines.append("- **Type**: Not supported (not explicitly documented).")
+
+    doc_url = auth_info.get("documentation_url") or doc_links.get("authentication_guide") or doc_links.get("docs_home")
+    if doc_url:
+        lines.append(f"- **Docs**: [{cloud_name} authentication]({doc_url})")
+
+    return lines
+
+
+def _iter_evidence_operations(core_ops: Dict, extended_ops: Dict) -> List[Dict]:
+    """
+    Flatten operation evidence records and filter out anything that indicates LLM-derived evidence.
+    """
+    records: List[Dict] = []
+    for op_name, op_list in (core_ops or {}).items():
+        if isinstance(op_list, list):
+            for rec in op_list:
+                rec2 = dict(rec or {})
+                rec2["_cloudfuze_operation"] = op_name
+                records.append(rec2)
+        elif isinstance(op_list, dict):
+            rec2 = dict(op_list)
+            rec2["_cloudfuze_operation"] = op_name
+            records.append(rec2)
+
+    for op_name, op_list in (extended_ops or {}).items():
+        if isinstance(op_list, list):
+            for rec in op_list:
+                rec2 = dict(rec or {})
+                rec2["_cloudfuze_operation"] = op_name
+                records.append(rec2)
+        elif isinstance(op_list, dict):
+            rec2 = dict(op_list)
+            rec2["_cloudfuze_operation"] = op_name
+            records.append(rec2)
+
+    filtered: List[Dict] = []
+    for rec in records:
+        validation_status = (rec.get("validation_status") or "").lower()
+        evidence_source = (rec.get("evidence_source") or "").lower()
+        page_source = (rec.get("page_source") or "").lower()
+
+        # Hard filter: never render LLM-derived evidence
+        if "llm" in validation_status or "llm" in evidence_source or "llm" in page_source:
+            continue
+        # Hard filter: only render endpoints with vendor_docs_url (or source_url) provenance
+        if not (rec.get("vendor_docs_url") or rec.get("source_url")):
+            continue
+
+        filtered.append(rec)
+
+    return filtered
+
+
+def _render_explicit_endpoints(core_ops: Dict, extended_ops: Dict) -> List[str]:
+    evidence = _iter_evidence_operations(core_ops, extended_ops)
+    if not evidence:
+        return ["Not supported."]
+
+    lines: List[str] = []
+    lines.append("| Capability | Method | Endpoint | Docs |")
+    lines.append("|-----------|--------|----------|------|")
+    for rec in evidence:
+        cap = rec.get("_cloudfuze_operation", "")
+        method = rec.get("method", "") or ""
+        endpoint = rec.get("endpoint", "") or ""
+        docs = rec.get("vendor_docs_url") or rec.get("source_url") or ""
+        docs_cell = f"[link]({docs})" if docs else "Not supported."
+        lines.append(f"| `{cap}` | `{method}` | `{endpoint}` | {docs_cell} |")
+
+    return lines
+
+
+def _render_governance_workflows(capabilities: Dict[str, str], integration_mode: str) -> List[str]:
+    # No checklists; only brief statements about what is supported.
+    if integration_mode in ("NOT_SUPPORTED",):
+        return ["Not supported."]
+    if integration_mode in ("VISIBILITY_ONLY",):
+        return ["Read-only visibility workflows only."]
+    if integration_mode in ("PARTIAL_GOVERNANCE",):
+        return ["Team governance workflows are partially supported (no full user lifecycle)."]
+    if integration_mode in ("FULL_IDENTITY_GOVERNANCE",):
+        return ["Identity governance workflows are supported."]
+    return ["Not supported."]
+
+
+def _render_recommendation_summary(integration_mode: str) -> str:
+    if integration_mode == "NOT_SUPPORTED":
+        return "Not supported."
+    if integration_mode == "VISIBILITY_ONLY":
+        return "Visibility-only integration recommended."
+    if integration_mode == "PARTIAL_GOVERNANCE":
+        return "Partial governance integration recommended."
+    if integration_mode == "FULL_IDENTITY_GOVERNANCE":
+        return "Full identity governance integration recommended."
+    return "Not supported."
+
+
+def _render_recommendation(integration_mode: str, capabilities: Dict[str, str]) -> List[str]:
+    return [_render_recommendation_summary(integration_mode)]
+
+
+def _render_authoritative_documentation(authoritative_docs: List[str], cloud_name: str) -> List[str]:
+    """
+    Render authoritative documentation links (informational only).
+    These links are provided for reference and do NOT imply verified API support.
+    Works uniformly for ALL clouds, including NOT_SUPPORTED cases.
+    """
+    lines: List[str] = []
+    
+    # Disclaimer (mandatory)
+    lines.append("The following links point to official vendor documentation.")
+    lines.append("They are provided for reference only and do not imply verified")
+    lines.append("API support under this assessment.")
+    lines.append("")
+    
+    if not authoritative_docs:
+        lines.append("No official documentation URLs were discovered for this cloud.")
+        return lines
+    
+    lines.append("**Official Documentation Links:**")
+    lines.append("")
+    for url in authoritative_docs:
+        if url and url.strip():
+            # Extract a readable title from URL if possible
+            title = url
+            try:
+                from urllib.parse import urlparse
+                parsed = urlparse(url)
+                if parsed.path:
+                    # Use path segment as title hint
+                    path_parts = [p for p in parsed.path.split("/") if p]
+                    if path_parts:
+                        title = path_parts[-1].replace("-", " ").replace("_", " ").title()
                     else:
-                        status = "✅ Supported"
+                        title = f"{cloud_name} API Documentation"
                 else:
-                    # Context-aware status based on cloud type
-                    if support_level == "none":
-                        # Business App with no expected support
-                        status = "❌ Not Supported"
-                    elif support_level == "full":
-                        # IAM/Directory - should have it, extraction likely failed
-                        status = "⚠️ Unknown (check docs manually)"
-                    elif support_level in ["partial", "limited"]:
-                        # Collaboration/Business - may or may not have it
-                        status = "⚠️ Unknown"
-                    else:
-                        # Default: unknown
-                        status = "⚠️ Unknown"
-                sections.append(f"| {op} | {status} |")
-
-            sections.append("")
-            sections.append(f"**Core Coverage:** {coverage.get('core_coverage_percentage', 0):.1f}%")
-            sections.append(f"**Confidence Score:** {research_data.get('confidence_score', 0):.2f}/1.0")
-            sections.append("")
-
-        # Add classification-based recommendation
-        if classification:
-            coverage_pct = coverage.get('core_coverage_percentage', 0)
-
-            if support_level == "none":
-                sections.append("")
-                sections.append("### Recommendation")
-                sections.append(f"❌ **{cloud_name} is not eligible for Manage Team automation**")
-                sections.append(f"- This cloud does not provide organization-wide user/group lifecycle APIs")
-                sections.append(f"- APIs are limited to application-specific data (posts, boards, tasks, etc.)")
-            elif support_level == "full" and coverage_pct < 50:
-                sections.append("")
-                sections.append("### Recommendation")
-                sections.append(f"⚠️ **Manual verification required**")
-                sections.append(f"- {category} clouds typically have comprehensive Manage Team APIs")
-                sections.append(f"- Low coverage ({coverage_pct:.0f}%) suggests extraction incomplete")
-                sections.append(f"- Please check official documentation manually")
-            elif support_level in ["partial", "limited"]:
-                sections.append("")
-                sections.append("### Recommendation")
-                sections.append(f"⚠️ **Partial support - verify before implementation**")
-                sections.append(f"- {category} clouds may have limited user/group management")
-                sections.append(f"- Review mapped operations to confirm they meet requirements")
-
-        sections.append("")
-        sections.append("---")
-        sections.append("")
+                    title = f"{cloud_name} API Documentation"
+            except Exception:
+                title = f"{cloud_name} API Documentation"
+            lines.append(f"- [{title}]({url})")
     
-    # All Discovered Endpoints (NEW - Complete list for reference)
-    all_endpoints = research_data.get("all_endpoints", [])
-    if all_endpoints:
-        sections.extend(_format_all_endpoints_table(all_endpoints, base_url))
-    
-    # Integration Checklist (NEW - Step-by-step guide)
-    sections.extend(_format_integration_checklist(research_data, cloud_name))
-    
-    # Footer
-    last_researched = research_data.get("last_researched", "Unknown")
-    created_by = research_data.get("created_by", "system")
-    sections.append(f"*Research completed on {last_researched}*")
-    sections.append(f"*Created by: {created_by}*")
-    sections.append(f"*Confidence Score: {research_data.get('confidence_score', 0):.2f}*")
-    
-    return "\n".join(sections)
+    return lines
 
 
 def _format_integration_quickstart(research_data: Dict, cloud_name: str) -> List[str]:

@@ -15,7 +15,13 @@ from typing import Dict, List, Optional, Tuple
 import logging
 from datetime import datetime, timezone
 
-from app.web_tools import search_cloud_documentation, scrape_documentation_pages
+from app.web_tools import (
+    search_cloud_documentation,
+    scrape_documentation_pages,
+    enterprise_surface_filter,
+    search_cloud_documentation_capability_first,
+    validate_admin_doc_candidates,
+)
 from app.api_normalizer import APIOperationNormalizer
 from app.doc_link_extractor import extract_documentation_links
 from app.openapi_parser import extract_endpoints_from_openapi
@@ -112,6 +118,24 @@ class CloudAPIResearcher:
             {"url": "https://developer.atlassian.com/cloud/confluence/rest/v2/intro/", "title": "Confluence REST API"},
             {"url": "https://developer.atlassian.com/cloud/confluence/rest/v2/api-group-user/", "title": "User API"},
             {"url": "https://developer.atlassian.com/cloud/confluence/rest/v2/api-group-group/", "title": "Group API"},
+        ],
+        "vercel": [
+            {"url": "https://vercel.com/docs/rest-api", "title": "Vercel REST API"},
+            {"url": "https://vercel.com/docs/rest-api/reference/examples/team-management", "title": "Vercel Team Management (REST API)"},
+            {"url": "https://vercel.com/docs/rest-api/reference/examples/logs-monitoring", "title": "Vercel Logs & Monitoring (REST API)"},
+        ],
+        "rollbar": [
+            {"url": "https://docs.rollbar.com/reference/getting-started-1", "title": "Rollbar API Reference"},
+            {"url": "https://docs.rollbar.com/reference/list-all-users", "title": "Rollbar Users API (GET /api/1/users)"},
+            {"url": "https://docs.rollbar.com/reference/get-a-user", "title": "Rollbar Get User (GET /api/1/user/{id})"},
+            {"url": "https://docs.rollbar.com/reference/list-all-teams", "title": "Rollbar Teams API (GET /api/1/teams)"},
+            {"url": "https://docs.rollbar.com/reference/list-a-users-teams", "title": "Rollbar Teams (per user)"},
+            {"url": "https://docs.rollbar.com/reference/list-a-teams-users", "title": "Rollbar Team Members (GET /api/1/team/{id}/users)"},
+            {"url": "https://docs.rollbar.com/reference/assign-a-user-to-team", "title": "Rollbar Assign User to Team"},
+        ],
+        "mezmo": [
+            {"url": "https://docs.mezmo.com/log-analysis-api/ref", "title": "Mezmo Log Analysis API"},
+            {"url": "https://docs.mezmo.com/pipeline-api", "title": "Mezmo Pipeline API"},
         ],
     }
     
@@ -265,30 +289,67 @@ JSON (URLs only, no explanation):"""
         logger.info(f"[CLASSIFICATION] {cloud_name} → {classification['category']} (support: {classification['manage_team_support']})")
         
         # Phase 1: Discovery
-        logger.info(f"[PHASE 1] Discovery - Searching for {cloud_name} documentation")
-        search_results = self._discovery_phase(cloud_name)
-        
-        if not search_results:
-            logger.warning(f"[WARNING] Web search returned no results for {cloud_name}")
-            
-            # Try fallback 1: Known documentation URLs
+        cloud_key = cloud_name.lower().strip()
+        if cloud_key == "rollbar":
+            # Rollbar: bypass web search; use only authoritative KNOWN_DOCS.
+            logger.info("[PHASE 1] Discovery - Rollbar: using KNOWN_DOCS only (web search bypassed)")
             search_results = self._get_fallback_docs(cloud_name)
-            
             if not search_results:
-                logger.info(f"[FALLBACK] No known URLs, trying LLM generation for {cloud_name}")
-                # Try fallback 2: LLM-generated URLs
-                search_results = self._generate_docs_with_llm(cloud_name)
-            
-            if not search_results:
-                logger.error(f"[ERROR] No documentation found for {cloud_name} (all fallbacks failed)")
+                logger.error("[ERROR] No KNOWN_DOCS for Rollbar")
                 return {
-                    "error": "No official documentation found. Please verify the cloud name and try again.",
+                    "error": "No documentation found for Rollbar.",
                     "cloud_name": cloud_name,
                     "confidence_score": 0.0
                 }
-            
-            logger.info(f"[FALLBACK] Using {len(search_results)} fallback URLs for {cloud_name}")
-        
+            logger.info(f"[DISCOVERY] Rollbar: using {len(search_results)} KNOWN_DOCS URLs")
+        else:
+            logger.info(f"[PHASE 1] Discovery - Searching for {cloud_name} documentation")
+            search_results = self._discovery_phase(cloud_name)
+            if not search_results:
+                logger.warning(f"[WARNING] Web search returned no results for {cloud_name}")
+                search_results = self._get_fallback_docs(cloud_name)
+                if not search_results:
+                    logger.info(f"[FALLBACK] No known URLs, trying LLM generation for {cloud_name}")
+                    search_results = self._generate_docs_with_llm(cloud_name)
+                if not search_results:
+                    logger.error(f"[ERROR] No documentation found for {cloud_name} (all fallbacks failed)")
+                    return {
+                        "error": "No official documentation found. Please verify the cloud name and try again.",
+                        "cloud_name": cloud_name,
+                        "confidence_score": 0.0
+                    }
+                logger.info(f"[FALLBACK] Using {len(search_results)} fallback URLs for {cloud_name}")
+
+        # Always merge in KNOWN_DOCS (official seeds) when available.
+        # This does not add capabilities; it only ensures we actually scrape the
+        # canonical official references for consistent evidence gathering.
+        known = self.KNOWN_DOCS.get(cloud_key, [])
+        if known:
+            existing_urls = {r.get("url") for r in (search_results or []) if isinstance(r, dict)}
+            merged = list(search_results or [])
+            added = 0
+            for doc in known:
+                url = doc.get("url")
+                if url and url not in existing_urls:
+                    merged.append({"url": url, "title": doc.get("title", f"{cloud_name} API Documentation"), "snippet": ""})
+                    existing_urls.add(url)
+                    added += 1
+            if added:
+                logger.info(f"[DISCOVERY] Merged {added} KNOWN_DOCS URLs for {cloud_name}")
+            search_results = merged
+
+        # Enterprise Admin Doc Resolution (BEFORE scraping)
+        # Produce a small set of high-confidence ADMIN/ENTERPRISE API doc URLs only.
+        # Capability-first: find identity, team, membership, audit doc pages; filter by enterprise surface; validate before scrape.
+        # Only validated admin doc URLs are scraped; if none, NOT_SUPPORTED is the correct outcome.
+        admin_doc_results = self._enterprise_admin_doc_resolution_phase(cloud_name, search_results)
+        if admin_doc_results:
+            logger.info(f"[ENTERPRISE ADMIN DOC] Using {len(admin_doc_results)} validated admin doc URLs for scraping")
+            search_results = admin_doc_results
+        else:
+            logger.info("[ENTERPRISE ADMIN DOC] No validated admin doc URLs; scraping 0 pages (NOT_SUPPORTED if no evidence)")
+            search_results = []
+
         # Phase 2: Extraction
         logger.info(f"[PHASE 2] Extraction - Scraping {len(search_results)} pages")
         scraped_data = self._extraction_phase(search_results, cloud_name)
@@ -299,7 +360,18 @@ JSON (URLs only, no explanation):"""
         
         # Phase 4: Verification
         logger.info(f"[PHASE 4] Verification - Validating and organizing")
-        final_data = self._verification_phase(cloud_name, normalized_data, scraped_data, classification)
+        # Collect authoritative documentation URLs (informational only, does not affect integration_mode)
+        authoritative_docs = []
+        # Include validated admin doc URLs from Enterprise Admin Doc Resolution
+        if admin_doc_results:
+            authoritative_docs.extend([r.get("url") for r in admin_doc_results if isinstance(r, dict) and r.get("url")])
+        # Include KNOWN_DOCS URLs (official references)
+        known_docs = self.KNOWN_DOCS.get(cloud_key, [])
+        if known_docs:
+            authoritative_docs.extend([doc.get("url") for doc in known_docs if doc.get("url")])
+        # Deduplicate
+        authoritative_docs = list(dict.fromkeys(authoritative_docs))  # Preserves order, removes duplicates
+        final_data = self._verification_phase(cloud_name, normalized_data, scraped_data, classification, authoritative_docs)
         
         # Add metadata
         final_data.update({
@@ -438,7 +510,81 @@ JSON Array:"""
         except Exception as e:
             logger.error(f"[ERROR] Discovery phase failed: {e}")
             return []
-    
+
+    def _enterprise_admin_doc_resolution_phase(self, cloud_name: str, search_results: List[Dict]) -> List[Dict]:
+        """
+        Enterprise Admin Doc Resolution (BEFORE scraping).
+        Produce a small set of high-confidence ADMIN/ENTERPRISE API documentation URLs
+        for identity, team, membership, and audit. Capability-first discovery; strict
+        enterprise surface filtering; domain validation; validate doc pages before scraping.
+        """
+        from urllib.parse import urlparse
+        try:
+            cloud_key = cloud_name.lower().strip()
+            candidates = list(search_results or [])
+            if not isinstance(candidates, list):
+                candidates = []
+
+            try:
+                from app.domain_detector import UniversalDomainDetector
+                detector = UniversalDomainDetector()
+                official_domain = detector.detect_official_domain(cloud_name)
+            except Exception:
+                official_domain = None
+
+            # For non-Rollbar: add capability-first search results (find doc PAGES, not endpoints).
+            if cloud_key != "rollbar" and official_domain:
+                cap_results = search_cloud_documentation_capability_first(
+                    cloud_name,
+                    search_api=CLOUD_RESEARCH_WEB_SEARCH_API,
+                    api_key=CLOUD_RESEARCH_SEARCH_API_KEY,
+                    official_domain=official_domain,
+                )
+                seen = {r.get("url") for r in candidates if isinstance(r, dict) and r.get("url")}
+                for r in cap_results:
+                    if isinstance(r, dict) and r.get("url") and r["url"] not in seen:
+                        seen.add(r["url"])
+                        candidates.append(r)
+                if cap_results:
+                    logger.info(f"[ENTERPRISE ADMIN DOC] Capability-first search added {len(cap_results)} candidate URLs")
+
+            # Domain validation: keep only URLs from official domain (or subdomain). LLM-suggested URLs must pass this.
+            # Explicit normalization: www.dropbox.com and dropbox.com are the same (admin docs under www.dropbox.com/developers/ are valid).
+            if official_domain:
+                domain_normalized = official_domain.lower().replace("www.", "")
+                domain_valid = []
+                for r in candidates:
+                    url = (r.get("url") or "").strip()
+                    if not url:
+                        continue
+                    try:
+                        netloc_raw = urlparse(url).netloc.lower()
+                        netloc = netloc_raw.replace("www.", "")
+                        if netloc == domain_normalized or netloc.endswith("." + domain_normalized):
+                            domain_valid.append(r)
+                    except Exception:
+                        continue
+                if domain_valid != candidates:
+                    logger.info(f"[ENTERPRISE ADMIN DOC] Domain validation: {len(domain_valid)} URLs on {official_domain} (from {len(candidates)} candidates)")
+                candidates = domain_valid
+                if not candidates:
+                    return []
+
+            # Strict enterprise surface filter: keep only URLs containing admin/team/enterprise/reference/api/ etc.
+            filtered = enterprise_surface_filter(candidates)
+            logger.info(f"[ENTERPRISE ADMIN DOC] After enterprise surface filter: {len(filtered)} URLs (from {len(candidates)} candidates)")
+            if not filtered:
+                return []
+
+            # Validate doc pages BEFORE scraping: title + content checks; exclude marketing/blog/SDK/UI.
+            validated = validate_admin_doc_candidates(filtered, max_validate=15)
+            logger.info(f"[ENTERPRISE ADMIN DOC] After pre-scrape validation: {len(validated)} scrapable admin doc URLs")
+            return validated
+
+        except Exception as e:
+            logger.error(f"[ERROR] Enterprise Admin Doc Resolution failed: {e}")
+            return []
+
     def _extraction_phase(self, search_results: List[Dict], cloud_name: str = "") -> List[Dict]:
         """
         Phase 2: Extract API details from documentation pages.
@@ -458,34 +604,40 @@ JSON Array:"""
             urls = [result["url"] for result in search_results]
             
             # STRATEGY 1: OpenAPI spec parsing (PRIMARY METHOD)
-            # SKIPPED FOR SPEED: Most clouds don't have direct OpenAPI spec file URLs
-            # JS rendering will extract from embedded OpenAPI YAML blocks instead (faster and more accurate)
-            # logger.info(f"[EXTRACTION] Step 1: Attempting OpenAPI spec parsing for {cloud_name or 'unknown cloud'}")
-            # openapi_endpoints = extract_endpoints_from_openapi(urls, cloud_name)
-            openapi_endpoints = []  # Skip for speed - JS rendering handles embedded OpenAPI
-            
-            # Disabled for speed - uncomment if cloud has direct OpenAPI spec file
-            if False and openapi_endpoints and len(openapi_endpoints) > 10:
+            logger.info(f"[EXTRACTION] Step 1: Attempting OpenAPI/Swagger spec parsing for {cloud_name or 'unknown cloud'}")
+            openapi_endpoints: List[Dict] = []
+            openapi_base_url: Optional[str] = None
+            openapi_spec_url: Optional[str] = None
+            try:
+                from app.openapi_parser import OpenAPIParser
+                parser = OpenAPIParser()
+                spec_urls = parser.find_openapi_specs_in_docs(urls, cloud_name)
+                for spec_url in spec_urls:
+                    spec_data = parser.parse_spec(spec_url)
+                    if not spec_data:
+                        continue
+                    openapi_spec_url = spec_url
+                    openapi_base_url = openapi_base_url or spec_data.get("base_url")
+                    openapi_endpoints.extend(spec_data.get("endpoints", []) or [])
+            except Exception as e:
+                logger.warning(f"[EXTRACTION] OpenAPI parsing failed: {e}")
+
+            if openapi_endpoints:
                 logger.info(f"[EXTRACTION] ✅ OpenAPI extraction SUCCESSFUL: {len(openapi_endpoints)} endpoints")
-                logger.info(f"[EXTRACTION] Skipping HTML scraping (OpenAPI provides complete data)")
                 return [{
-                    "url": urls[0] if urls else "openapi_spec",
-                    "title": "OpenAPI Specification",
+                    "url": openapi_spec_url or (urls[0] if urls else "openapi_spec"),
+                    "title": "OpenAPI/Swagger Specification",
                     "api_endpoints": openapi_endpoints,
                     "content": f"Extracted {len(openapi_endpoints)} endpoints from OpenAPI/Swagger specification",
                     "source": "openapi",
+                    "base_url": openapi_base_url,
                     "code_examples": [],
                     "links": []
                 }]
-            # else:
-            #     logger.info(f"[EXTRACTION] OpenAPI found {len(openapi_endpoints)} endpoints - insufficient, trying HTML")
             
             # STRATEGY 2: HTML scraping (FALLBACK)
-            # SKIPPED FOR SPEED: HTML scraping finds 0 endpoints for JS-rendered docs like Box
-            # Uncomment if needed for static HTML docs
-            # logger.info(f"[EXTRACTION] Step 2: HTML scraping {min(len(urls), CLOUD_RESEARCH_MAX_URLS_PER_CLOUD)} pages")
-            # scraped_pages = scrape_documentation_pages(urls, max_pages=CLOUD_RESEARCH_MAX_URLS_PER_CLOUD)
-            scraped_pages = []  # Skip HTML scraping for speed - JS rendering will handle it
+            logger.info(f"[EXTRACTION] Step 2: HTML scraping {min(len(urls), CLOUD_RESEARCH_MAX_URLS_PER_CLOUD)} pages")
+            scraped_pages = scrape_documentation_pages(urls, max_pages=CLOUD_RESEARCH_MAX_URLS_PER_CLOUD)
             
             # Merge OpenAPI endpoints with HTML scraped data
             if openapi_endpoints and scraped_pages:
@@ -519,15 +671,21 @@ JSON Array:"""
                 logger.info(f"[EXTRACTION] HTML scraping skipped or 0 endpoints - using JavaScript rendering")
                 should_try_js = True
             else:
-                # Quick check: do we have any user/group related endpoints?
-                # Look for keywords in paths
-                user_group_keywords = ['user', 'group', 'team', 'member', 'admin', 'account', 'identity', 'people', 'organization']
+                # Quick check: do we have any identity/team-management endpoints?
+                # Do NOT treat query parameters like `teamId` as evidence of team-management APIs.
+                manage_path_indicators = [
+                    "/users", "/user", "/groups", "/group", "/teams", "/team",
+                    "/members", "/member",
+                    "/audit", "/logs", "/activity",
+                    "/oauth", "/token", "/auth",
+                ]
                 found_relevant = False
                 
                 for page in scraped_pages:
                     for endpoint in page.get('api_endpoints', []):
-                        path = endpoint.get('path', '').lower()
-                        if any(keyword in path for keyword in user_group_keywords):
+                        path = (endpoint.get('path', '') or '').lower()
+                        path = path.split('?', 1)[0].split('#', 1)[0]
+                        if any(indicator in path for indicator in manage_path_indicators):
                             found_relevant = True
                             break
                     if found_relevant:
@@ -603,28 +761,6 @@ JSON Array:"""
                     logger.error(f"[EXTRACTION] Traceback: {traceback.format_exc()}")
                     # Continue with original scraped_pages
             
-            # LLM LAST-RESORT: If we still have zero endpoints, generate fallback endpoints via LLM
-            total_endpoints = sum(len(page.get('api_endpoints', [])) for page in scraped_pages) if scraped_pages else 0
-            if total_endpoints == 0:
-                try:
-                    from app.llm_helpers import get_llm_helper
-                    llm_helper = get_llm_helper()
-                    if llm_helper:
-                        logger.warning(f"[EXTRACTION] No endpoints found for {cloud_name}. Using LLM fallback generation.")
-                        fallback_endpoints = llm_helper.generate_fallback_endpoints(cloud_name, urls)
-                        if fallback_endpoints:
-                            scraped_pages = [{
-                                "url": urls[0] if urls else "llm_fallback",
-                                "title": f"{cloud_name} API (LLM Fallback)",
-                                "api_endpoints": fallback_endpoints,
-                                "content": "Generated by LLM fallback (no endpoints extracted from docs).",
-                                "source": "llm_fallback_generated",
-                                "code_examples": [],
-                                "links": []
-                            }]
-                except Exception as e:
-                    logger.error(f"[EXTRACTION] LLM fallback generation failed: {e}")
-
             return scraped_pages
             
         except Exception as e:
@@ -664,6 +800,8 @@ JSON Array:"""
                         "operation_name": ep.get("operation_name", ep.get("vendor_operation", "")),
                         "description": ep.get("description", ""),
                         "source_url": page.get("url", ""),
+                        "page_source": page.get("source", ""),
+                        "evidence_source": ep.get("source", ""),
                         "category": ep.get("category", "other"),
                         # Legacy field names for backward compatibility
                         "vendor_operation": ep.get("operation_name", ep.get("vendor_operation", "")),
@@ -742,6 +880,8 @@ JSON Array:"""
                         "endpoint": endpoint_path,
                         "description": ep.get("description", ""),
                         "vendor_docs_url": ep.get("source_url", ""),
+                        "page_source": ep.get("page_source", ""),
+                        "evidence_source": ep.get("evidence_source", ""),
                         "normalization_confidence": adjusted_confidence,
                         "validation_status": "validated"
                     }
@@ -760,73 +900,6 @@ JSON Array:"""
             logger.info(f"[NORMALIZE] Mapped {len(core_operations)} core + {len(extended_operations)} extended operations")
             logger.info(f"[VALIDATION] Rejected {len(invalid_mappings)} semantically invalid mappings")
             logger.info(f"[VALIDATION] {len(rejected_endpoints)} endpoints failed validation")
-            
-            # LLM SEMANTIC MAPPING: Try to map unmapped endpoints using LLM intelligence
-            if unmapped_operations:
-                try:
-                    from app.llm_helpers import get_llm_helper
-                    llm_helper = get_llm_helper()
-                    
-                    logger.info(f"[LLM MAPPING] Attempting to map {len(unmapped_operations)} unmapped endpoints using LLM")
-                    llm_mappings = llm_helper.semantic_operation_mapping(
-                        cloud_name=cloud_name or "Unknown",
-                        endpoints=unmapped_operations
-                    )
-                    
-                    if llm_mappings:
-                        logger.info(f"[LLM MAPPING] LLM mapped {len(llm_mappings)} additional endpoints")
-                        
-                        # Process LLM mappings
-                        for ep in unmapped_operations:
-                            endpoint_path = ep.get("path", ep.get("endpoint", ""))
-                            method = ep.get("method", "")
-                            key = f"{method} {endpoint_path}"
-                            
-                            if key in llm_mappings:
-                                cloudfuze_op = llm_mappings[key]
-                                
-                                # Validate the LLM mapping
-                                is_valid_mapping, validation_reason, adjusted_confidence = validate_operation_mapping(
-                                    ep, cloudfuze_op, confidence=0.75  # LLM mappings get 0.75 confidence
-                                )
-                                
-                                if is_valid_mapping:
-                                    # Determine if core or extended
-                                    contract = get_all_operations()
-                                    is_core = False
-                                    
-                                    for category in contract["core_operations"].values():
-                                        if cloudfuze_op in category:
-                                            is_core = True
-                                            break
-                                    
-                                    operation_data = {
-                                        "cloudfuze_operation": cloudfuze_op,
-                                        "vendor_operation": endpoint_path,
-                                        "method": method,
-                                        "endpoint": endpoint_path,
-                                        "description": ep.get("description", ""),
-                                        "vendor_docs_url": ep.get("source_url", ""),
-                                        "normalization_confidence": adjusted_confidence,
-                                        "validation_status": "llm_mapped"
-                                    }
-                                    
-                                    if is_core:
-                                        if cloudfuze_op not in core_operations:
-                                            core_operations[cloudfuze_op] = []
-                                        core_operations[cloudfuze_op].append(operation_data)
-                                        logger.info(f"[LLM MAPPING] Mapped {key} → {cloudfuze_op}")
-                                    else:
-                                        if cloudfuze_op not in extended_operations:
-                                            extended_operations[cloudfuze_op] = []
-                                        extended_operations[cloudfuze_op].append(operation_data)
-                                else:
-                                    logger.debug(f"[LLM MAPPING] Rejected LLM mapping {key} → {cloudfuze_op}: {validation_reason}")
-                        
-                        logger.info(f"[LLM MAPPING] Final: {len(core_operations)} core + {len(extended_operations)} extended operations")
-                    
-                except Exception as e:
-                    logger.warning(f"[LLM MAPPING] LLM semantic mapping failed: {e}")
             
             return {
                 "core_operations": core_operations,
@@ -852,7 +925,7 @@ JSON Array:"""
                 "validated_endpoints": 0
             }
     
-    def _verification_phase(self, cloud_name: str, normalized_data: Dict, scraped_data: List[Dict], classification: Dict) -> Dict:
+    def _verification_phase(self, cloud_name: str, normalized_data: Dict, scraped_data: List[Dict], classification: Dict, authoritative_docs: List[str] = None) -> Dict:
         """
         Phase 4: Verify data, extract documentation links, detect SCIM.
         
@@ -889,10 +962,16 @@ JSON Array:"""
             base_url = self._extract_base_url_from_scraped(scraped_data, cloud_name)
             auth_details = self._extract_auth_details_from_scraped(scraped_data, cloud_name)
             all_endpoints = self._extract_all_endpoints_from_scraped(scraped_data, normalized_data)
+
+            integration_mode = self._compute_integration_mode(
+                core_operations=normalized_data.get("core_operations", {}),
+                extended_operations=normalized_data.get("extended_operations", {}),
+            )
             
             # Organize final data
             final_data = {
                 "cloud_classification": classification,  # NEW: Include classification
+                "integration_mode": integration_mode,
                 "base_url": base_url,  # NEW: Base URL for API integration
                 "authentication": auth_details,  # NEW: Full authentication details
                 "all_endpoints": all_endpoints,  # NEW: All discovered endpoints (not just mapped)
@@ -911,7 +990,15 @@ JSON Array:"""
                 "confidence_score": confidence,
                 "research_notes": self._generate_research_notes(normalized_data, scim_support, classification),
                 "source_urls": [page.get("url") for page in scraped_data],
+                "authoritative_docs": authoritative_docs or [],  # Informational only; does not affect integration_mode
             }
+            source_urls = final_data["source_urls"]
+            cloud_key = cloud_name.lower().strip()
+            if cloud_key in ("rollbar", "mezmo"):
+                logger.info(f"[EVIDENCE] {cloud_name}: integration_mode={integration_mode}, {len(all_endpoints)} endpoints from {len(source_urls)} source URLs")
+                logger.debug(f"[EVIDENCE] {cloud_name}: source_urls={source_urls}")
+                for ep in all_endpoints:
+                    logger.debug(f"[EVIDENCE] {cloud_name}: endpoint {ep.get('method', '')} {ep.get('path', '')} <- {ep.get('vendor_docs_url', '')}")
             
             logger.info(f"[VERIFICATION] Verification complete")
             return final_data
@@ -922,11 +1009,64 @@ JSON Array:"""
                 "error": "Verification failed",
                 "confidence_score": 0.0
             }
+
+    def _compute_integration_mode(self, core_operations: Dict, extended_operations: Dict) -> str:
+        """
+        Compute integration mode per docs/integration-modes.md.
+        Capability-first: derived only from explicitly evidenced operations.
+
+        GUARDRAILS (do not relax):
+        - Integration mode is strictly evidence-driven; no inference or heuristic upgrades.
+        - Admin API documentation is the only source of truth for capabilities.
+        - Do not add fallbacks, retries, or heuristics that change mode based on cloud name or assumptions.
+        """
+        user_ops = {"getUsers", "getUser", "createUser", "updateUser", "deleteUser", "suspendUser", "restoreUser"}
+        group_ops = {"getGroups", "getGroup", "createGroup", "updateGroup", "deleteGroup"}
+        membership_ops = {"getGroupMembers", "addUserToGroup", "removeUserFromGroup"}
+
+        has_any_user = any(op in core_operations for op in user_ops)
+        has_any_group = any(op in core_operations for op in group_ops)
+        has_any_membership = any(op in core_operations for op in membership_ops)
+
+        has_user_lifecycle = any(op in core_operations for op in {"createUser", "updateUser", "deleteUser", "suspendUser", "restoreUser"})
+        has_group_lifecycle = any(op in core_operations for op in {"createGroup", "updateGroup", "deleteGroup"})
+        has_membership_writes = any(op in core_operations for op in {"addUserToGroup", "removeUserFromGroup"})
+
+        has_audit = any(op in extended_operations for op in {"getAuditLogs", "getSecurityEvents"})
+
+        # Validate integration modes per required rules:
+        # - FULL_IDENTITY_GOVERNANCE only if explicit user + group lifecycle endpoints exist
+        # - PARTIAL_GOVERNANCE only if explicit team/membership OR audit endpoints exist
+        # - VISIBILITY_ONLY only if read-only discovery or audit endpoints exist
+        # - NOT_SUPPORTED otherwise
+
+        has_any_identity_or_team = has_any_user or has_any_group or has_any_membership
+        has_any_write = has_user_lifecycle or has_group_lifecycle or has_membership_writes
+        has_any_read = (
+            any(op in core_operations for op in {"getUsers", "getUser"}) or
+            any(op in core_operations for op in {"getGroups", "getGroup"}) or
+            ("getGroupMembers" in core_operations)
+        )
+
+        if has_user_lifecycle and has_group_lifecycle:
+            return "FULL_IDENTITY_GOVERNANCE"
+
+        has_team_or_membership = has_any_group or has_any_membership
+        if has_team_or_membership or has_audit:
+            # If this is only read-only discovery/audit, classify VISIBILITY_ONLY
+            if (has_any_read or has_audit) and not has_any_write:
+                return "VISIBILITY_ONLY"
+            return "PARTIAL_GOVERNANCE"
+
+        if (has_any_read or has_audit) and not has_any_write:
+            return "VISIBILITY_ONLY"
+
+        return "NOT_SUPPORTED"
     
     def _extract_base_url_from_scraped(self, scraped_data: List[Dict], cloud_name: str = "") -> Optional[str]:
         """
-        Extract base URL from scraped pages with LLM validation.
-        Returns the most common base URL found, validated to reject placeholders.
+        Extract base URL from scraped pages.
+        Returns the most common base URL found, rejecting placeholders.
         """
         base_urls = []
         for page in scraped_data:
@@ -945,37 +1085,10 @@ JSON Array:"""
         if not extracted_url:
             return None
         
-        # LLM VALIDATION: Reject placeholder URLs like example.com
-        # Quick check first for efficiency
+        # Reject placeholder URLs like example.com
         if any(placeholder in extracted_url.lower() for placeholder in ['example.com', 'yoursite.com', 'sample.com', 'placeholder', 'your-domain']):
-            logger.warning(f"[BASE URL] Detected placeholder URL: {extracted_url}, attempting LLM correction")
-            
-            # Use LLM to find the real URL from documentation
-            try:
-                from app.llm_helpers import get_llm_helper
-                llm_helper = get_llm_helper()
-                
-                # Get context from first few pages
-                context_text = ""
-                for page in scraped_data[:3]:
-                    context_text += page.get("content", "")[:1000] + "\n"
-                
-                validated_url = llm_helper.validate_base_url(
-                    cloud_name=cloud_name,
-                    extracted_url=extracted_url,
-                    context_text=context_text
-                )
-                
-                if validated_url and validated_url != "NOT_FOUND" and validated_url != extracted_url:
-                    logger.info(f"[BASE URL] LLM corrected: {extracted_url} → {validated_url}")
-                    return validated_url
-                else:
-                    logger.warning(f"[BASE URL] LLM could not correct placeholder URL")
-                    return None
-                    
-            except Exception as e:
-                logger.error(f"[BASE URL] LLM validation failed: {e}")
-                return None
+            logger.warning(f"[BASE URL] Detected placeholder URL: {extracted_url} (rejected)")
+            return None
         
         return extracted_url
     
@@ -1027,32 +1140,7 @@ JSON Array:"""
         # Deduplicate scopes
         auth_details["scopes"] = list(set(auth_details["scopes"]))
         
-        # FINAL LLM VALIDATION: Validate aggregated scopes to filter any garbage
-        if auth_details["scopes"]:
-            try:
-                from app.llm_helpers import get_llm_helper
-                llm_helper = get_llm_helper()
-                
-                # Get context from first page for validation
-                context_text = ""
-                for page in scraped_data[:2]:
-                    context_text += page.get("content", "")[:1000] + "\n"
-                
-                validated_scopes = llm_helper.validate_oauth_scopes(
-                    cloud_name=cloud_name or "Unknown",
-                    extracted_scopes=auth_details["scopes"],
-                    context_text=context_text
-                )
-                
-                # Always use validated result (even if empty)
-                auth_details["scopes"] = validated_scopes
-                if validated_scopes:
-                    logger.info(f"[AUTH AGGREGATION] LLM validated aggregated scopes: {len(validated_scopes)} valid")
-                else:
-                    logger.info(f"[AUTH AGGREGATION] LLM rejected all aggregated scopes as invalid")
-                    
-            except Exception as e:
-                logger.warning(f"[AUTH AGGREGATION] LLM scope validation failed: {e}")
+        # No LLM validation: scopes are evidence-only; if ambiguous, keep empty.
         
         # Infer grant types based on endpoints
         if auth_details["authorization_endpoint"]:

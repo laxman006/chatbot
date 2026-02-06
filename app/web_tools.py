@@ -1074,6 +1074,192 @@ class DocumentationScraper:
         return code_blocks[:10]  # Limit to 10 code examples
 
 
+# --- Enterprise Admin Doc Resolution (capability-first, no inference) ---
+
+# URL is VALID for admin/enterprise docs ONLY if path contains at least one of these.
+ENTERPRISE_SURFACE_PATH_PARTS = (
+    "/admin", "/team", "/teams", "/enterprise", "/organization", "/workspace",
+    "/directory", "/scim", "/reference", "/api/",
+)
+
+# Canonical capability doc queries: for FINDING DOC PAGES only (not endpoints).
+CAPABILITY_DOC_QUERIES = {
+    "users": ["user management api", "admin users api", "directory api"],
+    "groups": ["group management api", "team api", "organization groups"],
+    "membership": ["add member api", "remove member api"],
+    "audit": ["audit logs api", "events api", "activity api"],
+}
+
+# Action-style titles (weak signal): suggest API reference pages.
+ADMIN_DOC_TITLE_ACTIONS = ("get", "list", "create", "update", "delete", "assign", "remove")
+
+# Exclude pages whose title or prominent content suggests non-API content.
+ADMIN_DOC_EXCLUDE_KEYWORDS = ("blog", "tutorial", "quickstart", "getting started", "sdk ", "ui guide", "marketing")
+
+# Content signals (any-two-of for scrapable):
+# a) HTTP verbs
+ADMIN_DOC_HTTP_VERBS = ("GET ", "POST ", "PUT ", "PATCH ", "DELETE ")
+# b) Endpoint-like paths in content
+ADMIN_DOC_PATH_INDICATORS = ("/api/", "/team", "/teams", "/users", "/user/", "/groups", "/group/", "/members", "/admin")
+# c) Request/response indicators
+ADMIN_DOC_REQUEST_RESPONSE = ("curl", "application/json", "Content-Type", "```", "<code>", "JSON")
+
+
+def enterprise_surface_filter(results: List[Dict]) -> List[Dict]:
+    """
+    Keep only results whose URL path contains at least one enterprise surface segment.
+    Any URL that does not match is discarded immediately.
+    """
+    filtered = []
+    for r in results:
+        url = (r.get("url") or "").strip()
+        if not url:
+            continue
+        try:
+            parsed = urlparse(url)
+            path = (parsed.path or "").lower()
+        except Exception:
+            continue
+        if any(part in path for part in ENTERPRISE_SURFACE_PATH_PARTS):
+            filtered.append(r)
+    return filtered
+
+
+def search_cloud_documentation_capability_first(
+    cloud_name: str,
+    search_api: str = "duckduckgo",
+    api_key: str = "",
+    official_domain: Optional[str] = None,
+) -> List[Dict]:
+    """
+    Capability-first discovery: run canonical doc queries for users, groups, membership, audit.
+    Returns raw search results (to be enterprise-filtered and validated separately).
+    """
+    searcher = WebSearcher(search_api, api_key)
+    if not official_domain:
+        try:
+            from app.domain_detector import UniversalDomainDetector
+            detector = UniversalDomainDetector()
+            official_domain = detector.detect_official_domain(cloud_name)
+        except Exception:
+            official_domain = None
+
+    all_results = []
+    for _cap, queries in CAPABILITY_DOC_QUERIES.items():
+        for q in queries:
+            query = f"{cloud_name} {q}"
+            if official_domain:
+                query = f"{query} site:{official_domain}"
+            try:
+                results = searcher.search(query, max_results=5, cloud_name=cloud_name, official_domain=official_domain or "")
+                all_results.extend(results)
+                time.sleep(0.5)
+            except Exception:
+                pass
+
+    # Dedupe by URL
+    seen = set()
+    unique = []
+    for r in all_results:
+        u = r.get("url") or ""
+        if u and u not in seen:
+            seen.add(u)
+            unique.append(r)
+    return unique
+
+
+def fetch_page_metadata(url: str, timeout: int = 8) -> Optional[Dict]:
+    """
+    Lightweight fetch: title + first N chars of body text. No full scrape.
+    Returns {"url", "title", "snippet"} or None on failure.
+    """
+    try:
+        resp = requests.get(url, timeout=timeout, headers={"User-Agent": "CloudFuze API Research Bot/1.0"})
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+        title = ""
+        t = soup.find("title")
+        if t:
+            title = t.get_text(strip=True)
+        if not title and soup.find("h1"):
+            title = soup.find("h1").get_text(strip=True)
+        if not title:
+            title = "Untitled"
+        for tag in soup(["script", "style", "nav", "footer", "header"]):
+            tag.decompose()
+        text = soup.get_text(separator=" ", strip=True)
+        snippet = (text[:4000] if len(text) > 4000 else text)
+        return {"url": url, "title": title, "snippet": snippet}
+    except Exception:
+        return None
+
+
+def _url_matches_enterprise_surface(url: str) -> bool:
+    """True if URL path contains at least one enterprise surface segment."""
+    try:
+        path = (urlparse(url).path or "").lower()
+        return any(part in path for part in ENTERPRISE_SURFACE_PATH_PARTS)
+    except Exception:
+        return False
+
+
+def is_scrapable_admin_doc(url: str, title: str, content_snippet: str) -> bool:
+    """
+    Pre-scrape validation.
+    TRUST RULE: If URL path matches enterprise/admin API reference surfaces (same
+    enterprise surface filter), the page is scrapable — no content snippet checks.
+    Fallback: for URLs that do NOT match enterprise surface, require any two of
+    (content HTTP verbs, endpoint paths, request/response indicators, title action).
+    """
+    # TRUST RULE: official admin API reference URLs matching enterprise surface are scrapable
+    if _url_matches_enterprise_surface(url or ""):
+        return True
+
+    # Fallback: URLs not on enterprise surface must pass "any two of" content/title rules
+    title_lower = (title or "").lower()
+    snippet_lower = (content_snippet or "").lower()
+    snippet = content_snippet or ""
+
+    if any(ex in title_lower or ex in snippet_lower for ex in ADMIN_DOC_EXCLUDE_KEYWORDS):
+        return False
+
+    signal_a = any(v in snippet for v in ADMIN_DOC_HTTP_VERBS)
+    signal_b = any(p in snippet_lower for p in ADMIN_DOC_PATH_INDICATORS)
+    signal_c = any(r in snippet_lower for r in ADMIN_DOC_REQUEST_RESPONSE)
+    signal_e = any(
+        title_lower.strip().startswith(a) or (a + " ") in title_lower or (" " + a + " ") in title_lower
+        for a in ADMIN_DOC_TITLE_ACTIONS
+    )
+
+    signals_true = sum([signal_a, signal_b, signal_c, signal_e])
+    return signals_true >= 2
+
+
+def validate_admin_doc_candidates(
+    candidates: List[Dict],
+    max_validate: int = 15,
+) -> List[Dict]:
+    """
+    Validate doc pages BEFORE full scraping. Keep only those that pass
+    is_scrapable_admin_doc (title + content checks).
+    """
+    validated = []
+    for r in candidates[:max_validate]:
+        url = r.get("url")
+        if not url:
+            continue
+        meta = fetch_page_metadata(url)
+        if not meta:
+            continue
+        if is_scrapable_admin_doc(meta.get("url", url) or url, meta.get("title", ""), meta.get("snippet", "")):
+            validated.append({
+                "url": url,
+                "title": meta.get("title", r.get("title", "")),
+                "snippet": meta.get("snippet", r.get("snippet", "")),
+            })
+    return validated
+
+
 # Helper functions
 def search_cloud_documentation(cloud_name: str, search_api: str = "duckduckgo", api_key: str = "") -> List[Dict]:
     """

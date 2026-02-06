@@ -204,33 +204,9 @@ class JavaScriptScraper:
                     endpoints = network_endpoints
                     logger.info(f"[JS SCRAPER] Extracted {len(endpoints)} endpoints from network calls")
             
-            # LLM FALLBACK: If regex extraction failed (0 endpoints), try LLM-based extraction
-            if not endpoints and self.llm_helper:
-                logger.warning(f"[JS SCRAPER] Regex extraction found 0 endpoints, trying LLM fallback for {self.cloud_name}")
-                try:
-                    # Increase text limit to 15000 characters for better context
-                    text_to_send = text_content[:15000]
-                    logger.info(f"[JS SCRAPER] Sending {len(text_to_send)} characters to LLM for extraction")
-                    
-                    llm_endpoints = self.llm_helper.extract_endpoints_from_text(
-                        cloud_name=self.cloud_name,
-                        page_url=url,
-                        page_text=text_to_send,
-                        page_title=title
-                    )
-                    if llm_endpoints:
-                        endpoints = llm_endpoints
-                        logger.info(f"[JS SCRAPER] ✅ LLM fallback extracted {len(endpoints)} endpoints")
-                        # Log first few endpoints for debugging
-                        for ep in llm_endpoints[:5]:
-                            logger.info(f"[JS SCRAPER]   - {ep.get('method')} {ep.get('path')}: {ep.get('description', '')[:50]}")
-                    else:
-                        logger.warning(f"[JS SCRAPER] LLM fallback found no endpoints (page text length: {len(text_content)})")
-                except Exception as e:
-                    logger.error(f"[JS SCRAPER] LLM fallback failed: {e}")
-                    import traceback
-                    logger.error(f"[JS SCRAPER] Traceback: {traceback.format_exc()}")
-            
+            # LLM FALLBACK DISABLED:
+            # LLM-generated endpoints must NEVER be used or rendered as evidence.
+
             # Extract base URL from endpoints if available
             base_url = None
             if endpoints:
@@ -327,7 +303,19 @@ class JavaScriptScraper:
         if structured_endpoints:
             logger.info(f"[JS SCRAPER] Extracted {len(structured_endpoints)} endpoints from structured HTML")
             endpoints.extend(structured_endpoints)
-        
+
+        # STRATEGY 2b: Extract from HTML tables (Method | Path columns) - Dropbox and similar HTML reference pages
+        table_endpoints = self._extract_from_html_tables(soup)
+        if table_endpoints:
+            logger.info(f"[JS SCRAPER] Extracted {len(table_endpoints)} endpoints from HTML tables")
+            endpoints.extend(table_endpoints)
+
+        # STRATEGY 2c: Extract method + path from code blocks (request examples without full URL)
+        code_request_endpoints = self._extract_method_path_from_code_blocks(soup, text_content, code_blocks_text)
+        if code_request_endpoints:
+            logger.info(f"[JS SCRAPER] Extracted {len(code_request_endpoints)} endpoints from code/request examples")
+            endpoints.extend(code_request_endpoints)
+
         # STRATEGY 3: Extract base URL from documentation
         if not base_url:
             base_url = self._extract_base_url(soup, text_content)
@@ -399,17 +387,6 @@ class JavaScriptScraper:
         if unique_endpoints:
             endpoint_strs = [f"{ep['method']} {ep['path']}" for ep in unique_endpoints[:10]]
             logger.info(f"[JS SCRAPER] Endpoints: {endpoint_strs}")
-        
-        # LLM NORMALIZATION: Add correct API version prefixes if missing
-        if self.llm_helper and unique_endpoints and base_url:
-            normalized_endpoints = self.llm_helper.normalize_endpoint_paths(
-                cloud_name=self.cloud_name,
-                base_url=base_url,
-                endpoints=unique_endpoints
-            )
-            unique_endpoints = normalized_endpoints
-            if normalized_endpoints:
-                logger.info(f"[JS SCRAPER] LLM normalized {len(normalized_endpoints)} endpoints for {self.cloud_name}")
         
         return unique_endpoints
     
@@ -1031,6 +1008,73 @@ class JavaScriptScraper:
                         })
         
         return endpoints
+
+    def _extract_from_html_tables(self, soup) -> List[Dict]:
+        """Extract method + path from HTML tables (Method | Path columns). Vendor-agnostic."""
+        endpoints = []
+        for table in soup.find_all("table"):
+            rows = table.find_all("tr")
+            if len(rows) < 2:
+                continue
+            header = rows[0]
+            cells = header.find_all(["th", "td"])
+            header_texts = [c.get_text().strip().lower() for c in cells]
+            method_col = None
+            path_col = None
+            for i, h in enumerate(header_texts):
+                if h and ("method" in h or "http" in h or "verb" in h):
+                    method_col = i
+                if h and ("path" in h or "endpoint" in h or "url" in h or "uri" in h or "route" in h):
+                    path_col = i
+            if method_col is None or path_col is None:
+                continue
+            for tr in rows[1:]:
+                tds = tr.find_all(["td", "th"])
+                if max(method_col, path_col) >= len(tds):
+                    continue
+                method_raw = tds[method_col].get_text().strip().upper()
+                path_raw = tds[path_col].get_text().strip()
+                method_match = re.match(r"^(GET|POST|PUT|PATCH|DELETE)", method_raw)
+                if not method_match:
+                    continue
+                method = method_match.group(1)
+                path = path_raw.split("?")[0].split("#")[0].strip().rstrip('"').rstrip("'")
+                if not path.startswith("/"):
+                    path = "/" + path.lstrip()
+                if self._is_valid_api_endpoint(path):
+                    endpoints.append({
+                        "method": method,
+                        "path": path,
+                        "description": "",
+                        "operation_name": "",
+                        "source": "html_table"
+                    })
+        return endpoints
+
+    def _extract_method_path_from_code_blocks(self, soup, text_content: str, code_blocks_text: str = "") -> List[Dict]:
+        """Extract METHOD + path from code/text (e.g. GET /team/members). No full URL required."""
+        endpoints = []
+        combined = (text_content or "") + "\n" + (code_blocks_text or "")
+        pattern = r"\b(GET|POST|PUT|PATCH|DELETE)\s+['\"]?(/[\w\.\-/{}\d]+)"
+        seen = set()
+        for match in re.finditer(pattern, combined, re.IGNORECASE):
+            method = match.group(1).upper()
+            path = match.group(2).strip().split("?")[0].split("#")[0].rstrip('"').rstrip("'").rstrip(",")
+            path = re.sub(r"[^\w/\-{}:].*$", "", path)
+            if not path or not path.startswith("/") or not self._is_valid_api_endpoint(path):
+                continue
+            key = (method, path)
+            if key in seen:
+                continue
+            seen.add(key)
+            endpoints.append({
+                "method": method,
+                "path": path,
+                "description": "",
+                "operation_name": "",
+                "source": "code_request"
+            })
+        return endpoints
     
     def _extract_base_url(self, soup, text_content: str) -> Optional[str]:
         """
@@ -1407,8 +1451,8 @@ class JavaScriptScraper:
                     "source": "regex_box_path_params"
                 })
         
-        # Pattern 5: Common REST patterns (/users, /groups, etc.) - but more specific
-        rest_pattern = r'\b(GET|POST|PUT|PATCH|DELETE)\s+(/(?:users|groups|teams|members|admins|group_memberships)(?:/\{?[\w\-]+\}?)?(?:/[\w\-]+)*)'
+        # Pattern 5: Common REST patterns (/users, /groups, /team, /teams, etc.) - vendor-agnostic
+        rest_pattern = r'\b(GET|POST|PUT|PATCH|DELETE)\s+(/(?:users|groups|teams?|team|members|admins|group_memberships)(?:/\{?[\w\-]+\}?)?(?:/[\w\-]+)*)'
         matches = re.finditer(rest_pattern, text_content, re.IGNORECASE)
         
         for match in matches:
@@ -1458,6 +1502,12 @@ class JavaScriptScraper:
             # This looks like concatenated text (e.g., /usersTry)
             return False
         
+        # Reject documentation URL paths (doc page routes, not API request paths)
+        doc_markers = ['/reference/', '/documentation/', '/docs/', '/developers/', '/api-docs/']
+        path_lower_check = path.lower()
+        if any(marker in path_lower_check for marker in doc_markers):
+            return False
+
         # Filter out invalid patterns
         invalid_patterns = [
             r'^/$',  # Just root
@@ -1633,7 +1683,6 @@ class JavaScriptScraper:
             r'/metadata',
             r'/webhook',
             r'/task',
-            r'/event',
             r'/legal-hold',
             r'/retention',
             r'/classification',
@@ -1676,14 +1725,18 @@ class JavaScriptScraper:
             link_text = (link.get_text() or "").strip().lower()
             keyword_text = any(k in link_text for k in [
                 "user", "users", "group", "groups", "member", "members",
-                "admin", "authentication", "auth", "token", "oauth", "access"
+                "admin", "authentication", "auth", "token", "oauth", "access",
+                "audit", "log", "logs", "activity"
             ])
             
             if any(re.search(pattern, full_url, re.I) for pattern in endpoint_patterns) or (
                 keyword_text and re.search(r'(api|reference|docs)', full_url, re.I)
             ):
                 # Check if it's related to users/groups/admin (STRICT)
-                relevant_keywords = ['user', 'group', 'team', 'member', 'admin', 'account', 'membership']
+                relevant_keywords = [
+                    'user', 'group', 'team', 'member', 'admin', 'account', 'membership',
+                    'audit', 'log', 'logs', 'activity'
+                ]
                 if any(keyword in full_url.lower() for keyword in relevant_keywords):
                     endpoint_links.append(full_url)
                     logger.debug(f"[JS SCRAPER] Found endpoint reference link: {full_url}")
@@ -1794,6 +1847,25 @@ class JavaScriptScraper:
                                 seen_bases.add(base_link)
                         
                         if unique_base_links:
+                            # Prioritize identity/governance-related pages first to improve
+                            # extraction coverage (capability-first evidence gathering).
+                            priority_keywords = [
+                                "team", "teams",
+                                "member", "members", "membership",
+                                "audit", "log", "logs", "activity",
+                                "user", "users",
+                                "group", "groups",
+                                "organization", "org",
+                            ]
+
+                            def _priority_score(link: str) -> int:
+                                lower = (link or "").lower()
+                                for i, kw in enumerate(priority_keywords):
+                                    if kw in lower:
+                                        return i
+                                return 10_000
+
+                            unique_base_links.sort(key=lambda u: (_priority_score(u), u))
                             urls_to_scrape = unique_base_links + urls_to_scrape  # Add to front
                             logger.info(f"[JS SCRAPER] 🔼 Prioritized {len(unique_base_links)} unique endpoint pages (fragments stripped)")
                 
