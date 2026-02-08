@@ -183,7 +183,9 @@ class IngestReporter:
                 if "token_count" in chunk.metadata:
                     total_tokens += chunk.metadata["token_count"]
                     chunks_with_stats += 1
-                total_chars += len(chunk.page_content)
+                # Support both LangChain Document (page_content) and WeaviateChunk (content)
+                content = getattr(chunk, 'content', getattr(chunk, 'page_content', ''))
+                total_chars += len(content)
             
             if chunks_with_stats > 0:
                 avg_tokens = total_tokens / chunks_with_stats
@@ -216,8 +218,10 @@ class IngestReporter:
                 report_lines.append("")
                 
                 # Content preview
-                content_preview = chunk.page_content[:200]
-                if len(chunk.page_content) > 200:
+                # Support both LangChain Document (page_content) and WeaviateChunk (content)
+                content = getattr(chunk, 'content', getattr(chunk, 'page_content', ''))
+                content_preview = content[:200]
+                if len(content) > 200:
                     content_preview += "..."
                 
                 report_lines.append("Content Preview:")
@@ -255,10 +259,11 @@ class IngestReporter:
             stats_copy["end_time"] = stats_copy["end_time"].isoformat()
         
         # Add sample chunks as serializable data
+        # Support both LangChain Document (page_content) and WeaviateChunk (content)
         stats_copy["sample_chunks"] = [
             {
                 "metadata": chunk.metadata,
-                "content_preview": chunk.page_content[:200]
+                "content_preview": (getattr(chunk, 'content', getattr(chunk, 'page_content', '')))[:200]
             }
             for chunk in self.sample_chunks[:5]
         ]

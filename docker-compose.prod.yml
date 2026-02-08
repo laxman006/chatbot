@@ -83,7 +83,6 @@ services:
       VERIFIER_ENABLED: "${VERIFIER_ENABLED}"
       # File paths
       JSON_MEMORY_FILE: "/app/data/chat_history.json"
-      CHROMA_DB_PATH: "/app/data/chroma_db"
       # Production settings
       PYTHONUNBUFFERED: "1"
       ENVIRONMENT: "production"

@@ -92,27 +92,23 @@ class UnifiedMetadata:
         # Remove None values to keep metadata clean
         return {k: v for k, v in data.items() if v is not None}
     
-    def to_chroma_metadata(self) -> Dict[str, Any]:
+    def to_flat_metadata(self) -> Dict[str, Any]:
         """
-        Convert to ChromaDB-compatible metadata.
-        ChromaDB only accepts str, int, float, or bool values.
+        Convert to flat metadata (str, int, float, bool only).
+        Use for stores that do not accept nested or list values.
         """
         data = self.to_dict()
-        chroma_metadata = {}
-        
+        flat = {}
         for key, value in data.items():
             if value is None:
                 continue
             elif isinstance(value, (str, int, float, bool)):
-                chroma_metadata[key] = value
+                flat[key] = value
             elif isinstance(value, list):
-                # Convert lists to comma-separated strings
-                chroma_metadata[key] = ", ".join(str(v) for v in value)
+                flat[key] = ", ".join(str(v) for v in value)
             else:
-                # Convert other types to string
-                chroma_metadata[key] = str(value)
-        
-        return chroma_metadata
+                flat[key] = str(value)
+        return flat
     
     @classmethod
     def from_sharepoint_file(cls, file_data: Dict[str, Any], folder_path: str = "") -> "UnifiedMetadata":

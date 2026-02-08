@@ -44,19 +44,19 @@ const generatingStatus = new Map<string, boolean>();
 
 export function initializeChatApp(options: InitOptions = {}) {
   const { router, initialSessionId, preloadedSession } = options;
-  
+
   // Guard: If already initialized with the same session, skip
   if (isAppInitialized && currentInitializedSessionId === initialSessionId) {
     console.log('[CHAT] App already initialized for session:', initialSessionId);
     return;
   }
-  
+
   // Check if we're switching sessions (already initialized but different session)
   const isSwitchingSession = isAppInitialized && currentInitializedSessionId !== initialSessionId;
-  
+
   if (isSwitchingSession) {
     console.log('[CHAT] Switching session from', currentInitializedSessionId, 'to', initialSessionId);
-    
+
     // ✅ CRITICAL FIX: Clear messages IMMEDIATELY when switching to new chat
     const messagesDivTemp = document.getElementById("messages");
     if (messagesDivTemp && initialSessionId === null) {
@@ -70,7 +70,7 @@ export function initializeChatApp(options: InitOptions = {}) {
         messagesDivTemp.style.display = 'none';
         inputSectionTemp.classList.remove('show');
       }
-      
+
       // ✅ CRITICAL FIX: Clear sidebar active state immediately
       const sidebarHistory = document.getElementById('sidebar-history');
       const othersHistory = document.getElementById('others-history');
@@ -84,14 +84,14 @@ export function initializeChatApp(options: InitOptions = {}) {
         });
       }
     }
-    
+
     // ✅ PHASE 2.5: DO NOT abort previous session's request
     // Allow multiple chats to generate in parallel
     // The previous session continues generating in the background
     // UI state is scoped to active session only (see updateUIForActiveSession)
     console.log('[CHAT] Previous session continues generating in background');
   }
-  
+
 
   const messagesDiv = document.getElementById("messages");
   const input = document.getElementById("user-input") as HTMLTextAreaElement;
@@ -116,10 +116,10 @@ export function initializeChatApp(options: InitOptions = {}) {
   // This prevents blocking all chats when one is generating
   function updateUIForActiveSession() {
     const isActiveGenerating = activeSessionId ? isSessionGenerating(activeSessionId) : false;
-    
+
     const buttons = [sendBtn, sendBtnEmptyState];
     const inputs = [input, inputEmptyState];
-    
+
     buttons.forEach(btn => {
       if (btn) {
         btn.disabled = isActiveGenerating;
@@ -128,7 +128,7 @@ export function initializeChatApp(options: InitOptions = {}) {
         btn.title = isActiveGenerating ? 'Response is generating...' : 'Send message';
       }
     });
-    
+
     inputs.forEach(inp => {
       if (inp) {
         inp.disabled = isActiveGenerating;
@@ -143,11 +143,11 @@ export function initializeChatApp(options: InitOptions = {}) {
       const hasMessages = messagesDiv.children.length > 0;
       emptyState.style.display = hasMessages ? 'none' : 'flex';
       messagesDiv.style.display = hasMessages ? 'block' : 'none';
-      
+
       // Show/hide suggested questions based on message state
       const emptyStateQuestions = emptyState.querySelector('.suggested-questions-container') as HTMLElement;
       const inputSectionQuestions = inputSection.querySelector('.suggested-questions-container') as HTMLElement;
-      
+
       if (emptyStateQuestions) {
         emptyStateQuestions.style.display = hasMessages ? 'none' : 'grid';
       }
@@ -155,32 +155,32 @@ export function initializeChatApp(options: InitOptions = {}) {
       if (inputSectionQuestions) {
         inputSectionQuestions.style.display = 'none';
       }
-      
+
       // Show bottom input only when there are messages
       if (hasMessages) {
         inputSection.classList.add('show');
       } else {
         inputSection.classList.remove('show');
       }
-      
+
       // Update chat header visibility
       renderChatHeader(isReadOnlyMode);
     }
   }
-  
+
   // Get user-specific localStorage key
   function getUserStorageKey(key: string): string {
     const user = JSON.parse(localStorage.getItem('user') || 'null');
     const userId = user?.id || 'anonymous';
     return `${key}_${userId}`;
   }
-  
+
   // Session management
   // Only load from localStorage if we're on /chat/[sessionId] route (initialSessionId is explicitly undefined)
   let sessionId: string | null;
-  
+
   // Response version tracking: Map<parentTraceId, Array<{version, content, model, isCurrent}>>
-  const responseVersions = new Map<string, Array<{version: number, content: string, model: string, isCurrent: boolean, traceId?: string}>>();
+  const responseVersions = new Map<string, Array<{ version: number, content: string, model: string, isCurrent: boolean, traceId?: string }>>();
   if (initialSessionId === null) {
     // We're on /chat/new - don't load any existing session
     sessionId = null;
@@ -192,13 +192,13 @@ export function initializeChatApp(options: InitOptions = {}) {
     sessionId = localStorage.getItem(getUserStorageKey('chatbot_session_id'));
   }
   let currentSessionTitle = '';
-  
+
   interface ChatSession {
     id: string;
     title: string;
     timestamp: number;
     createdAt: number;
-    messages: Array<{role: string, content: string, traceId?: string, feedbackSubmitted?: boolean, feedbackRating?: 'thumbs_up' | 'thumbs_down', recommendedQuestions?: string[]}>;
+    messages: Array<{ role: string, content: string, traceId?: string, feedbackSubmitted?: boolean, feedbackRating?: 'thumbs_up' | 'thumbs_down', recommendedQuestions?: string[] }>;
     deletedAt?: number; // Timestamp when session was deleted (for soft delete)
   }
 
@@ -210,17 +210,17 @@ export function initializeChatApp(options: InitOptions = {}) {
     user_email?: string;
     created_at?: string;
   }
-  
+
   function createNewSession(): string {
     const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
     const randomId = Math.random().toString(36).substr(2, 9);
     return `cf.conversation.${date}.${randomId}`;
   }
-  
+
   // ✅ FIX: Declare isReadOnlyMode BEFORE it's used in updateEmptyState()
   // Track if we're in read-only mode (viewing others' chats)
   let isReadOnlyMode = false;
-  
+
   // Initialize or create session (only auto-create if not provided explicitly)
   // Don't navigate immediately - wait for first message
   if (!initialSessionId) {
@@ -228,7 +228,7 @@ export function initializeChatApp(options: InitOptions = {}) {
     sessionId = createNewSession();
     localStorage.setItem(getUserStorageKey('chatbot_session_id'), sessionId);
     console.log('[SESSION] Created new session (will navigate after first message):', sessionId);
-    
+
     // ✅ ALWAYS clear messages for new chat (defense in depth)
     if (messagesDiv) {
       messagesDiv.innerHTML = '';
@@ -241,15 +241,15 @@ export function initializeChatApp(options: InitOptions = {}) {
     console.log('[SESSION] Using session from URL:', sessionId);
     localStorage.setItem(getUserStorageKey('chatbot_session_id'), sessionId);
   }
-  
+
   // Track the currently active session (for UI highlighting)
   // ✅ CRITICAL FIX: Set activeSessionId to null when initialSessionId is null (new chat)
   // Even though we create a sessionId for future use, UI should show no active session
   let activeSessionId: string | null = (initialSessionId === null) ? null : (sessionId || null);
-  
+
   // Track if this is a brand new session that needs URL navigation after first message
   let isNewSessionPendingNavigation = !initialSessionId && sessionId;
-  
+
   // Load all sessions from localStorage (filter out empty sessions)
   function getAllSessions(): ChatSession[] {
     try {
@@ -263,17 +263,45 @@ export function initializeChatApp(options: InitOptions = {}) {
       return [];
     }
   }
-  
-  // Save all sessions to localStorage
+
+  // Trim sessions to fit localStorage quota (keep most recent, cap messages per session)
+  const MAX_SESSIONS_WHEN_QUOTA = 25;
+  const MAX_MESSAGES_PER_SESSION_WHEN_QUOTA = 40;
+  function trimSessionsToFit(sessions: ChatSession[]): ChatSession[] {
+    return sessions.slice(0, MAX_SESSIONS_WHEN_QUOTA).map((s) => {
+      let messages = s.messages || [];
+      if (messages.length > MAX_MESSAGES_PER_SESSION_WHEN_QUOTA) {
+        messages = messages.slice(-MAX_MESSAGES_PER_SESSION_WHEN_QUOTA);
+      }
+      return { ...s, messages };
+    });
+  }
+
+  // Save all sessions to localStorage; on QuotaExceededError trim and retry
   function saveAllSessions(sessions: ChatSession[]) {
+    const storageKey = getUserStorageKey('chat_sessions');
+    const trySave = (toSave: ChatSession[]) => {
+      localStorage.setItem(storageKey, JSON.stringify(toSave));
+    };
     try {
-      const storageKey = getUserStorageKey('chat_sessions');
-      localStorage.setItem(storageKey, JSON.stringify(sessions));
+      trySave(sessions);
     } catch (e) {
-      console.error('[SESSIONS] Failed to save sessions:', e);
+      const isQuota = e instanceof DOMException && (e.name === 'QuotaExceededError' || e.code === 22);
+      if (isQuota) {
+        console.warn('[SESSIONS] localStorage quota exceeded, trimming sessions and retrying');
+        const trimmed = trimSessionsToFit(sessions);
+        try {
+          trySave(trimmed);
+          console.warn('[SESSIONS] Saved after trimming to', trimmed.length, 'sessions');
+        } catch (e3) {
+          console.error('[SESSIONS] Failed to save even after trim:', e3);
+        }
+      } else {
+        console.error('[SESSIONS] Failed to save sessions:', e);
+      }
     }
   }
-  
+
   // Get all deleted sessions from localStorage
   function getDeletedSessions(): ChatSession[] {
     try {
@@ -285,7 +313,7 @@ export function initializeChatApp(options: InitOptions = {}) {
       return [];
     }
   }
-  
+
   // Save deleted sessions to localStorage
   function saveDeletedSessions(sessions: ChatSession[]) {
     try {
@@ -296,7 +324,7 @@ export function initializeChatApp(options: InitOptions = {}) {
       console.error('[DELETED_SESSIONS] Failed to save deleted sessions:', e);
     }
   }
-  
+
   // Remove test sessions from localStorage (cleanup for production)
   function removeTestSessions() {
     try {
@@ -307,11 +335,11 @@ export function initializeChatApp(options: InitOptions = {}) {
           return false; // Remove invalid sessions
         }
         return (
-          !session.id.startsWith('test-') && 
+          !session.id.startsWith('test-') &&
           !session.title.toLowerCase().includes('test chat')
         );
       });
-      
+
       if (sessions.length !== cleanedSessions.length) {
         console.log('[CLEANUP] Removed', sessions.length - cleanedSessions.length, 'test sessions');
         saveAllSessions(cleanedSessions);
@@ -332,13 +360,13 @@ export function initializeChatApp(options: InitOptions = {}) {
     if (mainContainer) mainContainer.innerHTML = '';
     loadSuggestedQuestions();
   }
-  
+
   // Add test data for all time periods (for UI testing)
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   function addTestSessions() {
     const now = Date.now();
     const oneDay = 24 * 60 * 60 * 1000;
-    
+
     const testSessions: ChatSession[] = [
       // Today
       {
@@ -424,21 +452,21 @@ export function initializeChatApp(options: InitOptions = {}) {
         ]
       }
     ];
-    
+
     const existingSessions = getAllSessions();
-    
+
     // Filter out test sessions that already exist
-    const newTestSessions = testSessions.filter(test => 
+    const newTestSessions = testSessions.filter(test =>
       !existingSessions.some(existing => existing.id === test.id)
     );
-    
+
     if (newTestSessions.length > 0) {
       const updatedSessions = [...existingSessions, ...newTestSessions];
       saveAllSessions(updatedSessions);
       console.log('[TEST DATA] Added', newTestSessions.length, 'test sessions');
     }
   }
-  
+
   // View deleted sessions (for debugging)
   function viewDeletedSessions() {
     const deleted = getDeletedSessions();
@@ -451,7 +479,7 @@ export function initializeChatApp(options: InitOptions = {}) {
     })));
     return deleted;
   }
-  
+
   // Clear all deleted sessions (permanent delete)
   function clearDeletedSessions() {
     if (!confirm('Permanently delete all sessions in trash? This cannot be undone.')) return;
@@ -459,7 +487,7 @@ export function initializeChatApp(options: InitOptions = {}) {
     localStorage.removeItem(storageKey);
     console.log('[DELETED_SESSIONS] Cleared all deleted sessions');
   }
-  
+
   // View current user's storage data (for debugging)
   function viewUserData() {
     const user = JSON.parse(localStorage.getItem('user') || 'null');
@@ -476,7 +504,7 @@ export function initializeChatApp(options: InitOptions = {}) {
     console.log('Active Chats:', sessions.length);
     console.log('Deleted Chats:', deleted.length);
     console.log('Current Session ID:', sessionId);
-    
+
     // Show all localStorage keys for this user
     console.log('\n=== All LocalStorage Keys ===');
     const userId = user?.id || 'anonymous';
@@ -486,13 +514,13 @@ export function initializeChatApp(options: InitOptions = {}) {
       }
     });
   }
-  
+
   // Expose to window for easy access in console
   (window as any).removeTestSessions = removeTestSessions;
   (window as any).viewDeletedSessions = viewDeletedSessions;
   (window as any).clearDeletedSessions = clearDeletedSessions;
   (window as any).viewUserData = viewUserData;
-  
+
   // Save current session
   function saveCurrentSession(title?: string) {
     // ✅ FIX 3: Guard against saving inactive sessions from DOM
@@ -501,27 +529,27 @@ export function initializeChatApp(options: InitOptions = {}) {
       console.log('[SESSION SAVE] ⏭️ Skipping save — no active session');
       return;
     }
-    
+
     // ✅ FIX: Prevent saving others' chats (read-only mode) to MY CHATS
     // Only save when user explicitly clicks "Continue in this thread"
     if (isReadOnlyMode) {
       console.log('[SESSION SAVE] ⏭️ Skipping save — read-only mode (others\' chat)');
       return;
     }
-    
+
     const sessions = getAllSessions();
-    
+
     // 🔒 CRITICAL FIX: Defensive check - ensure sessions is an array
     if (!Array.isArray(sessions)) {
       console.error('[SESSION SAVE] Sessions is not an array:', sessions);
       return; // Cannot save if sessions is not an array
     }
-    
+
     const messages = Array.from(messagesDiv!.children)
       .map((child, index) => {
-        const isUser = child.classList.contains('user-message-wrapper') || 
-                       child.querySelector('.message.user');
-        
+        const isUser = child.classList.contains('user-message-wrapper') ||
+          child.querySelector('.message.user');
+
         if (isUser) {
           const content = (child.querySelector('.message.user') as HTMLElement)?.textContent || '';
           return {
@@ -538,54 +566,54 @@ export function initializeChatApp(options: InitOptions = {}) {
             return null; // Skip this message
           }
           /* ================================ */
-          
+
           // Bot message - capture content and recommended questions
           const messageContentDiv = child.querySelector('.message-content') as HTMLElement;
-        const content = messageContentDiv?.innerHTML || '';
-        const traceId = (child as HTMLElement).dataset.traceId || undefined;
-        const feedbackSubmitted = (child as HTMLElement).dataset.feedbackSubmitted === 'true';
-        const feedbackRating = (child as HTMLElement).dataset.feedbackRating as ('thumbs_up' | 'thumbs_down' | undefined);
-        const recommendedQuestionsDiv = child.querySelector('.recommended-questions');
-        const recommendedQuestions: string[] = [];
-        
-        console.log(`[SESSION SAVE] Processing bot message ${index}, has .recommended-questions:`, !!recommendedQuestionsDiv);
-        
-        if (recommendedQuestionsDiv) {
-          const questionBtns = recommendedQuestionsDiv.querySelectorAll('.recommended-question-btn');
-          console.log(`[SESSION SAVE] Found ${questionBtns.length} question buttons`);
-          questionBtns.forEach(btn => {
-            const question = btn.getAttribute('data-question');
-            if (question) {
-              recommendedQuestions.push(question);
-              console.log(`[SESSION SAVE] Captured question: "${question}"`);
-            }
-          });
+          const content = messageContentDiv?.innerHTML || '';
+          const traceId = (child as HTMLElement).dataset.traceId || undefined;
+          const feedbackSubmitted = (child as HTMLElement).dataset.feedbackSubmitted === 'true';
+          const feedbackRating = (child as HTMLElement).dataset.feedbackRating as ('thumbs_up' | 'thumbs_down' | undefined);
+          const recommendedQuestionsDiv = child.querySelector('.recommended-questions');
+          const recommendedQuestions: string[] = [];
+
+          console.log(`[SESSION SAVE] Processing bot message ${index}, has .recommended-questions:`, !!recommendedQuestionsDiv);
+
+          if (recommendedQuestionsDiv) {
+            const questionBtns = recommendedQuestionsDiv.querySelectorAll('.recommended-question-btn');
+            console.log(`[SESSION SAVE] Found ${questionBtns.length} question buttons`);
+            questionBtns.forEach(btn => {
+              const question = btn.getAttribute('data-question');
+              if (question) {
+                recommendedQuestions.push(question);
+                console.log(`[SESSION SAVE] Captured question: "${question}"`);
+              }
+            });
+          }
+
+          const result = {
+            role: 'assistant',
+            content: content,
+            traceId,
+            feedbackSubmitted,
+            feedbackRating,
+            recommendedQuestions: recommendedQuestions.length > 0 ? recommendedQuestions : undefined
+          };
+
+          if (result.recommendedQuestions) {
+            console.log('[SESSION SAVE] Saving', result.recommendedQuestions.length, 'recommended questions with message');
+          }
+
+          return result;
         }
-        
-        const result = {
-          role: 'assistant',
-          content: content,
-          traceId,
-          feedbackSubmitted,
-          feedbackRating,
-          recommendedQuestions: recommendedQuestions.length > 0 ? recommendedQuestions : undefined
-        };
-        
-        if (result.recommendedQuestions) {
-          console.log('[SESSION SAVE] Saving', result.recommendedQuestions.length, 'recommended questions with message');
-        }
-        
-        return result;
-      }
-    })
-    .filter(msg => msg !== null); // 🔒 PHASE 2.5.3: Remove skipped generating messages
-    
+      })
+      .filter(msg => msg !== null); // 🔒 PHASE 2.5.3: Remove skipped generating messages
+
     if (messages.length === 0) return;
-    
+
     // Generate title from first user message if not provided
     const sessionTitle = title || currentSessionTitle || messages[0]?.content.substring(0, 50) || 'New Chat';
     currentSessionTitle = sessionTitle;
-    
+
     const existingIndex = sessions.findIndex(s => s.id === sessionId);
     const now = Date.now();
     const sessionData: ChatSession = {
@@ -595,54 +623,54 @@ export function initializeChatApp(options: InitOptions = {}) {
       createdAt: existingIndex >= 0 ? sessions[existingIndex].createdAt : now,
       messages: messages
     };
-    
+
     // Log what we're about to save
     const questionsCount = messages.filter(m => m.role === 'assistant' && 'recommendedQuestions' in m && m.recommendedQuestions).length;
     console.log(`[SESSION SAVE] Saving session with ${messages.length} messages, ${questionsCount} have recommended questions`);
-    
+
     // Sessions is already validated as array above, safe to use unshift
     if (existingIndex >= 0) {
       sessions[existingIndex] = sessionData;
     } else {
       sessions.unshift(sessionData);
     }
-    
+
     // Keep only last 50 sessions
     if (sessions.length > 50) {
       sessions.splice(50);
     }
-    
+
     saveAllSessions(sessions);
-    
+
     // Delay renderSessionHistory to allow immediate sidebar update to complete first
     // This ensures the sidebar shows the new chat immediately before the full re-render
     setTimeout(() => {
       renderSessionHistory().catch(err => console.error('[SESSION] Failed to render history:', err));
     }, 100);
-    
+
     // Sync session metadata to backend
     syncSessionToBackend(sessionData);
   }
-  
+
   // Save a session that completed generation in the background (not currently displayed)
   function saveCompletedBackgroundSession(completedSessionId: string, botDiv: HTMLElement) {
     console.log('[SESSION SYNC] Saving completed background session:', completedSessionId);
-    
+
     const sessions = getAllSessions();
     const sessionIndex = sessions.findIndex(s => s.id === completedSessionId);
-    
+
     if (sessionIndex === -1) {
       console.error('[SESSION SYNC] ❌ Session not found:', completedSessionId);
       return;
     }
-    
+
     // Extract completed message data from botDiv
     const contentDiv = botDiv.querySelector('.message-content') as HTMLElement;
     const content = contentDiv?.innerHTML || '';
     const traceId = botDiv.dataset.traceId;
     const recommendedQuestionsDiv = botDiv.querySelector('.recommended-questions');
     const recommendedQuestions: string[] = [];
-    
+
     // Extract recommended questions if present
     if (recommendedQuestionsDiv) {
       const questionBtns = recommendedQuestionsDiv.querySelectorAll('.recommended-question-btn');
@@ -651,7 +679,7 @@ export function initializeChatApp(options: InitOptions = {}) {
         if (question) recommendedQuestions.push(question);
       });
     }
-    
+
     // Add completed message to session
     sessions[sessionIndex].messages.push({
       role: 'assistant',
@@ -659,25 +687,25 @@ export function initializeChatApp(options: InitOptions = {}) {
       traceId: traceId,
       recommendedQuestions: recommendedQuestions.length > 0 ? recommendedQuestions : undefined
     });
-    
+
     // Update timestamp
     sessions[sessionIndex].timestamp = Date.now();
-    
+
     // Save to storage
     saveAllSessions(sessions);
-    
+
     console.log('[SESSION SYNC] ✅ Successfully synced background session, message count:', sessions[sessionIndex].messages.length);
-    
+
     // Sync to backend
     syncSessionToBackend(sessions[sessionIndex]);
   }
-  
+
   // ✅ NEW: Sync session metadata to backend (session-based auth)
   async function syncSessionToBackend(sessionData: ChatSession, retries = 2) {
     try {
       // ✅ Session-based auth - no token check needed, session_id cookie sent automatically
       console.log('[SESSION SYNC] Syncing to backend with', sessionData.messages.length, 'messages');
-      
+
       // ✅ Session-based auth - session_id cookie sent automatically via proxy
       const response = await apiFetch('/chat/sessions/save', {
         method: 'POST',
@@ -690,7 +718,7 @@ export function initializeChatApp(options: InitOptions = {}) {
           message_count: sessionData.messages.length
         })
       });
-      
+
       if (response.ok) {
         console.log('[SESSION SYNC] Successfully synced to backend');
       } else if (response.status === 502 && retries > 0) {
@@ -708,7 +736,7 @@ export function initializeChatApp(options: InitOptions = {}) {
           messageCount: sessionData.messages.length,
           retriesLeft: retries
         });
-        
+
         // ✅ Don't throw error - session sync failure shouldn't break the app
         // The session is still saved locally, so it's not critical
         if (response.status === 502) {
@@ -723,7 +751,7 @@ export function initializeChatApp(options: InitOptions = {}) {
         sessionId: sessionData.id,
         retriesLeft: retries
       });
-      
+
       // ✅ Retry on network errors if retries available
       if (retries > 0 && (error instanceof TypeError || error instanceof Error)) {
         const errorMessage = error instanceof Error ? error.message : String(error);
@@ -734,12 +762,12 @@ export function initializeChatApp(options: InitOptions = {}) {
           return syncSessionToBackend(sessionData, retries - 1);
         }
       }
-      
+
       // ✅ Don't throw - session is saved locally, sync can retry later
       console.warn('[SESSION SYNC] Session saved locally - will retry sync on next save');
     }
   }
-  
+
   // ✅ NEW: Fetch all users' chats (session-based auth)
   async function fetchAllUsersChats(): Promise<OtherUserChat[]> {
     try {
@@ -747,33 +775,33 @@ export function initializeChatApp(options: InitOptions = {}) {
       const response = await apiFetch('/chat/sessions/all?limit=15', {
         method: 'GET'
       });
-      
+
       if (response.ok) {
         const data = await response.json();
         // Already filtered on backend, return all sessions
         return data.sessions || [];
       }
-      
+
       return [];
     } catch (error) {
       console.error('[SESSION] Failed to fetch all users chats:', error);
       return [];
     }
   }
-  
+
   // ✅ NEW: Load another user's chat session (read-only, session-based auth)
   async function loadOthersSession(otherSessionId: string) {
     try {
       // Set read-only mode
       isReadOnlyMode = true;
-      
+
       console.log('[SESSION] Loading others session:', otherSessionId);
-      
+
       let response: Response;
-      
+
       // Check if this is a conversation_id format (MongoDB ObjectId - 24 hex characters)
       const isConversationId = /^[0-9a-fA-F]{24}$/.test(otherSessionId);
-      
+
       if (isConversationId) {
         // New format: conversation_id (MongoDB _id)
         console.log('[SESSION] Loading others session with conversation_id:', otherSessionId);
@@ -793,20 +821,20 @@ export function initializeChatApp(options: InitOptions = {}) {
         showToast('Invalid chat session format', 'error', 5000);
         return;
       }
-      
+
       if (response.status === 403) {
         console.error('[SESSION] Access denied (403) - You do not have permission to view this chat');
         console.error('[SESSION] This chat may be from another user that you no longer have access to');
         showToast('Access denied: You cannot view this chat', 'error', 5000);
         return;
       }
-      
+
       if (response.status === 404) {
         console.error('[SESSION] Chat not found (404) - This chat may have been deleted');
         showToast('Chat not found: This conversation may have been deleted', 'error', 5000);
         return;
       }
-      
+
       if (!response.ok) {
         console.error('[SESSION] Failed to fetch messages:', response.status);
         const errorText = await response.text();
@@ -814,15 +842,15 @@ export function initializeChatApp(options: InitOptions = {}) {
         showToast('Failed to load chat: ' + response.statusText, 'error', 5000);
         return;
       }
-      
+
       const data = await response.json();
-      
+
       if (data.error) {
         console.error('[SESSION] Backend error:', data.error);
         showToast('Error: ' + data.error, 'error', 5000);
         return;
       }
-      
+
       // Create a temporary session object that won't be saved
       const sessionData: ChatSession = {
         id: otherSessionId,
@@ -831,9 +859,9 @@ export function initializeChatApp(options: InitOptions = {}) {
         createdAt: Date.now(),
         messages: data.messages || []
       };
-      
+
       console.log('[SESSION] Successfully loaded others session with', data.messages?.length || 0, 'messages');
-      
+
       // Don't update sessionId to prevent this from being saved to user's history
       // Just display the messages
       loadSession(sessionData, true);
@@ -842,25 +870,25 @@ export function initializeChatApp(options: InitOptions = {}) {
       alert('Failed to load this chat session.');
     }
   }
-  
+
   // Continue in this thread - copy others' chat to user's own chats
   function continueInThisThread() {
     try {
       console.log('[CONTINUE] Starting continue in thread functionality');
-      
+
       // Get current messages from the DOM
-      const messages: Array<{role: string, content: string, traceId?: string, feedbackSubmitted?: boolean, feedbackRating?: 'thumbs_up' | 'thumbs_down', recommendedQuestions?: string[]}> = [];
+      const messages: Array<{ role: string, content: string, traceId?: string, feedbackSubmitted?: boolean, feedbackRating?: 'thumbs_up' | 'thumbs_down', recommendedQuestions?: string[] }> = [];
       const messageElements = messagesDiv!.children;
-      
+
       // Skip the read-only banner (first element)
       for (let i = 0; i < messageElements.length; i++) {
         const element = messageElements[i];
-        
+
         // Skip read-only banner
         if (element.classList.contains('read-only-banner')) {
           continue;
         }
-        
+
         // Check if it's a user message
         if (element.classList.contains('user-message-wrapper')) {
           const messageDiv = element.querySelector('.message.user') as HTMLElement;
@@ -870,7 +898,7 @@ export function initializeChatApp(options: InitOptions = {}) {
               content: messageDiv.textContent || messageDiv.innerText || ''
             });
           }
-        } 
+        }
         // Check if it's a bot message
         else if (element.classList.contains('message') && element.classList.contains('bot')) {
           const messageContentDiv = element.querySelector('.message-content') as HTMLElement;
@@ -878,11 +906,11 @@ export function initializeChatApp(options: InitOptions = {}) {
           const traceId = (element as HTMLElement).dataset.traceId || undefined;
           const feedbackSubmitted = (element as HTMLElement).dataset.feedbackSubmitted === 'true';
           const feedbackRating = (element as HTMLElement).dataset.feedbackRating as ('thumbs_up' | 'thumbs_down' | undefined);
-          
+
           // Extract recommended questions if present
           const recommendedQuestionsDiv = element.querySelector('.recommended-questions');
           const recommendedQuestions: string[] = [];
-          
+
           if (recommendedQuestionsDiv) {
             const questionBtns = recommendedQuestionsDiv.querySelectorAll('.recommended-question-btn');
             questionBtns.forEach(btn => {
@@ -892,7 +920,7 @@ export function initializeChatApp(options: InitOptions = {}) {
               }
             });
           }
-          
+
           messages.push({
             role: 'assistant',
             content: content,
@@ -903,23 +931,23 @@ export function initializeChatApp(options: InitOptions = {}) {
           });
         }
       }
-      
+
       if (messages.length === 0) {
         console.error('[CONTINUE] No messages found to copy');
         showToast('No messages to copy', 'error', 3000);
         return;
       }
-      
+
       // Create new session ID
       const newSessionId = createNewSession();
       console.log('[CONTINUE] Created new session ID:', newSessionId);
-      
+
       // Get the title from the current session (use first user message if no title)
       const firstUserMessage = messages.find(m => m.role === 'user');
-      const sessionTitle = firstUserMessage 
+      const sessionTitle = firstUserMessage
         ? firstUserMessage.content.substring(0, 50) + (firstUserMessage.content.length > 50 ? '...' : '')
         : 'Copied Chat';
-      
+
       // Create new session object
       const now = Date.now();
       const newSession: ChatSession = {
@@ -929,32 +957,32 @@ export function initializeChatApp(options: InitOptions = {}) {
         createdAt: now,
         messages: messages
       };
-      
+
       // Save to localStorage
       const sessions = getAllSessions();
-      
+
       // 🔒 CRITICAL FIX: Defensive check before unshift
       if (!Array.isArray(sessions)) {
         console.error('[SESSION] Sessions is not an array:', sessions);
         return;
       }
-      
+
       sessions.unshift(newSession);
-      
+
       // Keep only last 50 sessions
       if (sessions.length > 50) {
         sessions.splice(50);
       }
-      
+
       saveAllSessions(sessions);
       console.log('[CONTINUE] Saved new session to localStorage with', messages.length, 'messages');
-      
+
       // Sync session metadata to backend
       syncSessionToBackend(newSession);
-      
+
       // Reset read-only mode
       isReadOnlyMode = false;
-      
+
       // Navigate to the new session
       if (router) {
         router.push(`/chat/${newSessionId}`);
@@ -963,26 +991,26 @@ export function initializeChatApp(options: InitOptions = {}) {
         loadSession(newSession, false);
         showToast('Chat copied successfully! You can now continue the conversation.', 'success', 4000);
       }
-      
+
     } catch (error) {
       console.error('[CONTINUE] Failed to continue in thread:', error);
       showToast('Failed to copy chat. Please try again.', 'error', 4000);
     }
   }
-  
+
   // Expose continueInThisThread to window for onclick handler
   (window as any).continueInThisThread = continueInThisThread;
-  
+
   // Expose loadOthersSession globally for client-side navigation from sidebar
   (window as any).loadOthersSession = loadOthersSession;
-  
+
   // Share chat functionality
   async function shareChat() {
     // Get share button reference
     const shareButton = document.querySelector('.share-button') as HTMLButtonElement;
     const shareButtonSpan = shareButton?.querySelector('span');
     const originalButtonText = shareButtonSpan?.textContent || 'Share';
-    
+
     try {
       // Show loading state
       if (shareButton) {
@@ -999,13 +1027,13 @@ export function initializeChatApp(options: InitOptions = {}) {
           Sharing...
         `;
       }
-      
+
       if (!sessionId) {
         showToast('No active chat session to share', 'error', 3000);
         console.warn('[SHARE] No session ID available');
         return;
       }
-      
+
       // ✅ FIX 2: Session-based auth - check user exists (no token needed)
       const user = getCurrentUser();
       if (!user) {
@@ -1014,20 +1042,20 @@ export function initializeChatApp(options: InitOptions = {}) {
         window.location.href = '/login?error=session_expired';
         return;
       }
-      
+
       console.log('[SHARE] Attempting to share session:', sessionId);
-      
+
       // ✅ Session-based auth - session_id cookie sent automatically via proxy
       const response = await apiFetch(`/chat/share/${sessionId}`, {
         method: 'POST'
       });
-      
+
       console.log('[SHARE] Response status:', response.status);
-      
+
       if (!response.ok) {
         const errorText = await response.text();
         console.error('[SHARE] API Error Response:', response.status, errorText);
-        
+
         // Parse error message
         let errorMessage = `Failed to create share link (${response.status})`;
         try {
@@ -1038,24 +1066,24 @@ export function initializeChatApp(options: InitOptions = {}) {
         } catch {
           // Use default error message
         }
-        
+
         // Provide helpful guidance based on error
         if (response.status === 404) {
           errorMessage = "Chat not found. Make sure the chat is saved before sharing. Try refreshing the page.";
         } else if (response.status === 403) {
           errorMessage = "You don't have permission to share this chat.";
         }
-        
+
         throw new Error(errorMessage);
       }
-      
+
       const data = await response.json();
-      
+
       console.log('[SHARE] Response data:', data);
-      
+
       // Build full shareable URL
       const shareUrl = `${window.location.origin}${data.share_url}`;
-      
+
       // Copy to clipboard with fallback
       try {
         await navigator.clipboard.writeText(shareUrl);
@@ -1076,9 +1104,9 @@ export function initializeChatApp(options: InitOptions = {}) {
         }
         document.body.removeChild(textarea);
       }
-      
+
       console.log('[SHARE] Created share link:', shareUrl);
-      
+
     } catch (error) {
       console.error('[SHARE] Failed to share chat:', error);
       showToast('Failed to create share link. Please try again.', 'error', 4000);
@@ -1094,16 +1122,16 @@ export function initializeChatApp(options: InitOptions = {}) {
       }
     }
   }
-  
+
   // Expose shareChat to window for onclick handler
   (window as any).shareChat = shareChat;
-  
-  
+
+
   // Render chat header with conditional buttons
   function renderChatHeader(isReadOnly: boolean) {
     const headerContainer = document.getElementById('chat-header-container');
     if (!headerContainer) return;
-    
+
     // Only show header if there are messages
     const hasMessages = messagesDiv && messagesDiv.children.length > 0;
     if (!hasMessages && messagesDiv && messagesDiv.innerHTML.trim() === '') {
@@ -1111,9 +1139,9 @@ export function initializeChatApp(options: InitOptions = {}) {
       headerContainer.style.display = 'none';
       return;
     }
-    
+
     headerContainer.style.display = 'block';
-    
+
     // Build header HTML
     const readOnlyBadge = isReadOnly ? `
       <div class="read-only-badge">
@@ -1124,7 +1152,7 @@ export function initializeChatApp(options: InitOptions = {}) {
         <span>Read-Only</span>
       </div>
     ` : '';
-    
+
     const continueButton = isReadOnly ? `
       <button class="header-btn continue-button" data-action="continue-thread" title="Copy this chat to your own chats and continue">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1134,7 +1162,7 @@ export function initializeChatApp(options: InitOptions = {}) {
         <span>Continue in this thread</span>
       </button>
     ` : '';
-    
+
     // Share button is only for own chats (not read-only/others' chats)
     const shareButton = !isReadOnly ? `
       <button class="header-btn share-button" data-action="share-chat" title="Share this chat">
@@ -1148,7 +1176,7 @@ export function initializeChatApp(options: InitOptions = {}) {
         <span>Share</span>
       </button>
     ` : '';
-    
+
     headerContainer.innerHTML = `
       <div class="chat-header">
         <div class="chat-header-content">
@@ -1161,14 +1189,14 @@ export function initializeChatApp(options: InitOptions = {}) {
       </div>
     `;
   }
-  
+
   // Add UTM parameter to URLs for tracking
   function addUtmParameter(url: string): string {
     if (!url || typeof url !== 'string') return url;
-    
+
     // Skip if URL already has utm_source parameter
     if (url.includes('utm_source=')) return url;
-    
+
     try {
       const urlObj = new URL(url);
       urlObj.searchParams.set('utm_source', 'ai.cloudfuze.com');
@@ -1184,9 +1212,9 @@ export function initializeChatApp(options: InitOptions = {}) {
   function linkifyText(text: string): string {
     // Check if the text already contains HTML tags (from formatted responses)
     const hasHtmlTags = /<[^>]+>/.test(text);
-    
+
     let processed = text;
-    
+
     if (hasHtmlTags) {
       // Text has HTML formatting (from renderMarkdown)
       // First, add UTM to existing <a> tags
@@ -1201,7 +1229,7 @@ export function initializeChatApp(options: InitOptions = {}) {
         const quote = match.includes("'") ? "'" : '"';
         return `href=${quote}${utmUrl}${quote}`;
       });
-      
+
       // Also handle any remaining markdown links that weren't converted (fallback case)
       // Only convert markdown links that aren't already inside HTML tags
       processed = processed.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, linkText, url) => {
@@ -1220,7 +1248,7 @@ export function initializeChatApp(options: InitOptions = {}) {
         const utmUrl = addUtmParameter(url);
         return `<a href="${utmUrl}" target="_blank" rel="noopener noreferrer" style="color: #0033CC; text-decoration: underline;">${linkText}</a>`;
       });
-      
+
       // Then handle plain URLs (that aren't already in anchor tags)
       const urlPattern = /(\b(https?|ftp|file):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
       processed = processed.replace(urlPattern, (url) => {
@@ -1233,35 +1261,35 @@ export function initializeChatApp(options: InitOptions = {}) {
         return `<a href="${utmUrl}" target="_blank" rel="noopener noreferrer" style="color: #0033CC; text-decoration: underline;">${url}</a>`;
       });
     }
-    
+
     return processed;
   }
-  
+
   // Load a specific session
   function loadSession(sessionData: ChatSession, isReadOnly = false) {
     console.log('[SESSION] Loading session:', sessionData.id, 'with', sessionData.messages.length, 'messages', isReadOnly ? '(read-only)' : '');
-    
+
     // Update read-only mode state
     isReadOnlyMode = isReadOnly;
-    
+
     // Always update activeSessionId for UI highlighting
     activeSessionId = sessionData.id;
-    
+
     // Update sessionId for both own and others' chats (needed for sharing)
     // But only save to localStorage for own chats (to prevent others' chats from being saved)
     sessionId = sessionData.id;
     currentSessionTitle = sessionData.title;
-    
+
     if (!isReadOnly) {
       localStorage.setItem(getUserStorageKey('chatbot_session_id'), sessionId);
     }
-    
+
     // Clear current messages
     messagesDiv!.innerHTML = '';
-    
+
     // Render chat header
     renderChatHeader(isReadOnly);
-    
+
     // Load session messages
     sessionData.messages.forEach((msg, index) => {
       if (msg.role === 'user') {
@@ -1271,41 +1299,41 @@ export function initializeChatApp(options: InitOptions = {}) {
         const isLastMessage = index === sessionData.messages.length - 1;
         const hasRecommendations = msg.recommendedQuestions && msg.recommendedQuestions.length > 0;
         const showRecommendations = isLastMessage && hasRecommendations;
-        
+
         if (showRecommendations) {
           console.log('[SESSION] Restoring', msg.recommendedQuestions!.length, 'recommended questions for last message');
         }
-        
-        const recommendedQuestionsHTML = showRecommendations 
-          ? buildRecommendedQuestionsHTML(msg.recommendedQuestions!) 
+
+        const recommendedQuestionsHTML = showRecommendations
+          ? buildRecommendedQuestionsHTML(msg.recommendedQuestions!)
           : '';
-        
+
         const div = document.createElement("div");
         div.className = "message bot";
         if (msg.traceId) {
           div.dataset.traceId = msg.traceId;
           div.setAttribute('data-trace-id', msg.traceId);
         }
-        
+
         // Store parent_trace_id if available (for versioning)
         const parentTraceId = (msg as any).parentTraceId || msg.traceId;
         if (parentTraceId) {
           div.dataset.parentTraceId = parentTraceId;
         }
-        
+
         // Render markdown to HTML first, then make links clickable
         let formattedContent = msg.content;
-        
+
         // Check if content needs markdown rendering (doesn't already have HTML tags)
         const hasHtmlTags = /<[^>]+>/.test(msg.content);
         if (!hasHtmlTags) {
           // Content is markdown or plain text, render it
           formattedContent = renderMarkdown(msg.content);
         }
-        
+
         // Make sure links are clickable
         const contentWithLinks = linkifyText(formattedContent);
-        
+
         div.innerHTML = `
           <div class="message-content">${contentWithLinks}</div>
           <div class="feedback-buttons">
@@ -1345,7 +1373,7 @@ export function initializeChatApp(options: InitOptions = {}) {
           ${recommendedQuestionsHTML}
         `;
         messagesDiv!.appendChild(div);
-        
+
         // Check version metadata and load correct current version before displaying
         if (parentTraceId) {
           // Lightweight check: fetch version metadata first to determine current version
@@ -1354,22 +1382,22 @@ export function initializeChatApp(options: InitOptions = {}) {
               const response = await apiFetch(`/chat/response-versions?parent_trace_id=${encodeURIComponent(parentTraceId)}&metadata_only=true`, {
                 method: 'GET'
               });
-              
+
               if (response.ok) {
                 const data = await response.json();
                 const totalVersions = data.total_versions || 1;
-                
+
                 // If multiple versions exist, load all versions to get current content
                 if (totalVersions > 1) {
                   // Load full versions to get current version content
                   const fullResponse = await apiFetch(`/chat/response-versions?parent_trace_id=${encodeURIComponent(parentTraceId)}`, {
                     method: 'GET'
                   });
-                  
+
                   if (fullResponse.ok) {
                     const fullData = await fullResponse.json();
                     const allVersions = fullData.versions || [];
-                    
+
                     if (allVersions.length > 0) {
                       const versionData = allVersions.map((v: { response_version: number; content: string; model_used?: string; is_current: boolean }) => ({
                         version: v.response_version,
@@ -1379,7 +1407,7 @@ export function initializeChatApp(options: InitOptions = {}) {
                         traceId: msg.traceId
                       }));
                       responseVersions.set(parentTraceId, versionData);
-                      
+
                       // Display current version content (not always version 1)
                       const currentVersionData = versionData.find((v: { isCurrent: boolean }) => v.isCurrent) || versionData[versionData.length - 1];
                       if (currentVersionData) {
@@ -1389,7 +1417,7 @@ export function initializeChatApp(options: InitOptions = {}) {
                           const contentWithLinks = linkifyText(renderedMarkdown);
                           messageContent.innerHTML = contentWithLinks;
                         }
-                        
+
                         // Show navigation UI with correct current version
                         updateVersionNavigation(div, currentVersionData.version, allVersions.length);
                       }
@@ -1483,7 +1511,7 @@ export function initializeChatApp(options: InitOptions = {}) {
         }
       }
     });
-    
+
     // Disable input for read-only mode
     if (isReadOnly) {
       const inputEl = document.getElementById('user-input') as HTMLTextAreaElement;
@@ -1491,7 +1519,7 @@ export function initializeChatApp(options: InitOptions = {}) {
       if (inputEl) {
         inputEl.disabled = true;
         inputEl.placeholder = "Read-only mode - You cannot send messages";
-        
+
         // Add security listener to prevent input even if disabled is bypassed
         inputEl.addEventListener('input', (e) => {
           if (isReadOnlyMode) {
@@ -1499,7 +1527,7 @@ export function initializeChatApp(options: InitOptions = {}) {
             (e.target as HTMLTextAreaElement).value = '';
           }
         });
-        
+
         // Prevent pasting in read-only mode
         inputEl.addEventListener('paste', (e) => {
           if (isReadOnlyMode) {
@@ -1510,7 +1538,7 @@ export function initializeChatApp(options: InitOptions = {}) {
       }
       if (sendBtn) {
         sendBtn.disabled = true;
-        
+
         // Add security listener to prevent send even if disabled is bypassed
         sendBtn.addEventListener('click', (e) => {
           if (isReadOnlyMode) {
@@ -1530,21 +1558,21 @@ export function initializeChatApp(options: InitOptions = {}) {
       }
       if (sendBtn) sendBtn.disabled = false;
     }
-    
+
     updateEmptyState();
     scrollToBottom();
   }
-  
+
   // Update only the active state in sidebar (lightweight, no re-render)
   function updateSidebarActiveState(newActiveSessionId: string | null) {
     const sidebarHistory = document.getElementById('sidebar-history');
     const othersHistory = document.getElementById('others-history');
-    
+
     const allHistoryItems = [
       ...(sidebarHistory ? Array.from(sidebarHistory.querySelectorAll('.history-item')) : []),
       ...(othersHistory ? Array.from(othersHistory.querySelectorAll('.history-item')) : [])
     ];
-    
+
     allHistoryItems.forEach(item => {
       const sessionEl = item as HTMLElement;
       const sid = sessionEl.dataset.sessionId;
@@ -1554,24 +1582,24 @@ export function initializeChatApp(options: InitOptions = {}) {
         sessionEl.classList.remove('active');
       }
     });
-    
+
     // Update activeSessionId for future reference
     activeSessionId = newActiveSessionId;
   }
-  
+
   // Update sidebar immediately when a new message is sent (before response)
   function updateSidebarImmediately() {
     if (!sessionId) return;
-    
+
     // ✅ FIX: Don't update sidebar for others' chats (read-only mode)
     if (isReadOnlyMode) {
       console.log('[SIDEBAR] ⏭️ Skipping sidebar update — read-only mode (others\' chat)');
       return;
     }
-    
+
     const sidebarHistory = document.getElementById('sidebar-history');
     if (!sidebarHistory) return;
-    
+
     // Check if this session already exists in the sidebar
     const existingItem = sidebarHistory.querySelector(`[data-session-id="${sessionId}"]`);
     if (existingItem) {
@@ -1579,7 +1607,7 @@ export function initializeChatApp(options: InitOptions = {}) {
       updateSidebarActiveState(sessionId);
       return;
     }
-    
+
     // Get title from the first user message in DOM (most reliable source)
     let sessionTitle = 'New Chat';
     const firstUserMessage = messagesDiv!.querySelector('.message.user');
@@ -1587,29 +1615,29 @@ export function initializeChatApp(options: InitOptions = {}) {
       const messageText = firstUserMessage.textContent || '';
       sessionTitle = messageText.substring(0, 50) + (messageText.length > 50 ? '...' : '');
     }
-    
-      // Find or create "Today" section - optimize DOM queries
-      let todaySection = sidebarHistory.querySelector('.history-section-content[data-section-id="today"]') as HTMLElement;
-      
-      if (!todaySection) {
-        // Remove "no-history" message if exists
-        const noHistory = sidebarHistory.querySelector('.no-history');
-        if (noHistory) noHistory.remove();
-        
-        // Check if section title exists
-        const sectionTitleExists = sidebarHistory.querySelector('.history-section-title[data-section-id="today"]');
-        
-        // Create Today section content
-        todaySection = document.createElement('div');
-        todaySection.className = 'history-section-content';
-        todaySection.setAttribute('data-section-id', 'today');
-        
-        if (!sectionTitleExists) {
-          // Create section title
-          const sectionTitle = document.createElement('div');
-          sectionTitle.className = 'history-section-title';
-          sectionTitle.setAttribute('data-section-id', 'today');
-          sectionTitle.innerHTML = `
+
+    // Find or create "Today" section - optimize DOM queries
+    let todaySection = sidebarHistory.querySelector('.history-section-content[data-section-id="today"]') as HTMLElement;
+
+    if (!todaySection) {
+      // Remove "no-history" message if exists
+      const noHistory = sidebarHistory.querySelector('.no-history');
+      if (noHistory) noHistory.remove();
+
+      // Check if section title exists
+      const sectionTitleExists = sidebarHistory.querySelector('.history-section-title[data-section-id="today"]');
+
+      // Create Today section content
+      todaySection = document.createElement('div');
+      todaySection.className = 'history-section-content';
+      todaySection.setAttribute('data-section-id', 'today');
+
+      if (!sectionTitleExists) {
+        // Create section title
+        const sectionTitle = document.createElement('div');
+        sectionTitle.className = 'history-section-title';
+        sectionTitle.setAttribute('data-section-id', 'today');
+        sectionTitle.innerHTML = `
             <span>Today</span>
             <button class="section-toggle-btn" data-section-id="today" title="Collapse">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="toggle-icon">
@@ -1617,25 +1645,25 @@ export function initializeChatApp(options: InitOptions = {}) {
               </svg>
             </button>
           `;
-          sidebarHistory.appendChild(sectionTitle);
-        }
-        
-        // Insert content after title
-        const sectionTitle = sidebarHistory.querySelector('.history-section-title[data-section-id="today"]');
-        if (sectionTitle) {
-          sidebarHistory.insertBefore(todaySection, sectionTitle.nextSibling);
-        } else {
-          sidebarHistory.appendChild(todaySection);
-        }
+        sidebarHistory.appendChild(sectionTitle);
       }
-      
-      if (todaySection) {
-        // Create new history item with minimal HTML for faster rendering
-        const historyItem = document.createElement('div');
-        historyItem.className = 'history-item active';
-        historyItem.setAttribute('data-session-id', sessionId);
-        historyItem.style.transition = 'none'; // Disable transition for instant appearance
-        historyItem.innerHTML = `
+
+      // Insert content after title
+      const sectionTitle = sidebarHistory.querySelector('.history-section-title[data-section-id="today"]');
+      if (sectionTitle) {
+        sidebarHistory.insertBefore(todaySection, sectionTitle.nextSibling);
+      } else {
+        sidebarHistory.appendChild(todaySection);
+      }
+    }
+
+    if (todaySection) {
+      // Create new history item with minimal HTML for faster rendering
+      const historyItem = document.createElement('div');
+      historyItem.className = 'history-item active';
+      historyItem.setAttribute('data-session-id', sessionId);
+      historyItem.style.transition = 'none'; // Disable transition for instant appearance
+      historyItem.innerHTML = `
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
           </svg>
@@ -1649,75 +1677,75 @@ export function initializeChatApp(options: InitOptions = {}) {
             </svg>
           </button>
         `;
-        
-        // Insert at the beginning of Today section
-        todaySection.insertBefore(historyItem, todaySection.firstChild);
-        
-        // Remove active class from all other items (optimize query)
-        const allItems = sidebarHistory.querySelectorAll('.history-item');
-        for (let i = 0; i < allItems.length; i++) {
-          const item = allItems[i] as HTMLElement;
-          if (item.getAttribute('data-session-id') !== sessionId) {
-            item.classList.remove('active');
+
+      // Insert at the beginning of Today section
+      todaySection.insertBefore(historyItem, todaySection.firstChild);
+
+      // Remove active class from all other items (optimize query)
+      const allItems = sidebarHistory.querySelectorAll('.history-item');
+      for (let i = 0; i < allItems.length; i++) {
+        const item = allItems[i] as HTMLElement;
+        if (item.getAttribute('data-session-id') !== sessionId) {
+          item.classList.remove('active');
+        }
+      }
+
+      // Re-enable transition after a brief moment for smooth interactions
+      setTimeout(() => {
+        historyItem.style.transition = '';
+      }, 10);
+
+      // Add click handler
+      historyItem.addEventListener('click', (e) => {
+        const target = e.target as HTMLElement;
+        if (target.closest('.history-item-menu') || target.closest('.history-item-dropdown')) return;
+
+        if (router) {
+          router.push(`/chat/${sessionId}`);
+        } else {
+          const allSessions = getAllSessions();
+          const session = allSessions.find(s => s.id === sessionId);
+          if (session) {
+            loadSession(session, false);
           }
         }
-        
-        // Re-enable transition after a brief moment for smooth interactions
-        setTimeout(() => {
-          historyItem.style.transition = '';
-        }, 10);
-        
-        // Add click handler
-        historyItem.addEventListener('click', (e) => {
-          const target = e.target as HTMLElement;
-          if (target.closest('.history-item-menu') || target.closest('.history-item-dropdown')) return;
-          
-          if (router) {
-            router.push(`/chat/${sessionId}`);
-          } else {
-            const allSessions = getAllSessions();
-            const session = allSessions.find(s => s.id === sessionId);
-            if (session) {
-              loadSession(session, false);
-            }
-          }
-        });
-        
-        // Update activeSessionId
-        activeSessionId = sessionId;
-      }
+      });
+
+      // Update activeSessionId
+      activeSessionId = sessionId;
+    }
   }
-  
+
   // Render session history in sidebar
   async function renderSessionHistory() {
     const sidebarHistory = document.getElementById('sidebar-history');
     if (!sidebarHistory) return;
-    
+
     const sessions = getAllSessions();
-    
+
     const now = Date.now();
     const oneDay = 24 * 60 * 60 * 1000;
-    
+
     const today: ChatSession[] = [];
     const yesterday: ChatSession[] = [];
     const older: ChatSession[] = [];
-    
+
     sessions.forEach(session => {
       const age = now - (session.createdAt || session.timestamp);
       if (age < oneDay) today.push(session);
       else if (age < 2 * oneDay) yesterday.push(session);
       else older.push(session);
     });
-    
+
     let html = '';
-    
+
     function renderSection(title: string, sessions: ChatSession[], sectionId: string, isOthersSection = false, defaultCollapsed = false) {
       if (sessions.length === 0) return '';
-      
+
       // Check if section is collapsed (stored in localStorage, otherwise use default)
       const storedCollapsed = localStorage.getItem(`section_collapsed_${sectionId}`);
       const isCollapsed = storedCollapsed !== null ? storedCollapsed === 'true' : defaultCollapsed;
-      
+
       let section = `
         <div class="history-section-title${isOthersSection ? ' others-section' : ''}" data-section-id="${sectionId}">
           <span>${title}</span>
@@ -1729,7 +1757,7 @@ export function initializeChatApp(options: InitOptions = {}) {
         </div>
         <div class="history-section-content ${isCollapsed ? 'collapsed' : ''}" data-section-id="${sectionId}">
       `;
-      
+
       sessions.forEach(session => {
         const isActive = session.id === activeSessionId;
         section += `
@@ -1750,11 +1778,11 @@ export function initializeChatApp(options: InitOptions = {}) {
           </div>
         `;
       });
-      
+
       section += '</div>';
       return section;
     }
-    
+
     if (sessions.length === 0) {
       html = '<div class="no-history">No chat history yet</div>';
     } else {
@@ -1762,13 +1790,13 @@ export function initializeChatApp(options: InitOptions = {}) {
       html += renderSection('Yesterday', yesterday, 'yesterday', false, true);
       html += renderSection('Older', older, 'older', false, true);
     }
-    
+
     sidebarHistory.innerHTML = html;
-    
+
     // Fetch and render others' chats in separate section
     const othersHistory = document.getElementById('others-history');
     let othersHtml = '';
-    
+
     const othersChats = await fetchAllUsersChats();
     if (othersChats.length > 0) {
       // Render all others' chats without date grouping
@@ -1777,7 +1805,7 @@ export function initializeChatApp(options: InitOptions = {}) {
         // Use conversation_id for URL routing, fallback to session_id for backward compatibility
         const urlId = chat.conversation_id || chat.session_id;
         const isActive = urlId === activeSessionId;
-        
+
         othersHtml += `
           <div class="history-item others-item ${isActive ? 'active' : ''}" data-session-id="${urlId}" data-is-others="true">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1790,31 +1818,31 @@ export function initializeChatApp(options: InitOptions = {}) {
     } else {
       othersHtml = '<div class="no-history">No others\' chats yet</div>';
     }
-    
+
     if (othersHistory) {
       othersHistory.innerHTML = othersHtml;
     }
-    
+
     // Add click handlers for both my chats and others' chats
-    const allHistoryItems = [...Array.from(sidebarHistory.querySelectorAll('.history-item')), 
-                             ...(othersHistory ? Array.from(othersHistory.querySelectorAll('.history-item')) : [])];
-    
+    const allHistoryItems = [...Array.from(sidebarHistory.querySelectorAll('.history-item')),
+    ...(othersHistory ? Array.from(othersHistory.querySelectorAll('.history-item')) : [])];
+
     allHistoryItems.forEach(item => {
       const sessionEl = item as HTMLElement;
       const sid = sessionEl.dataset.sessionId;
       const isOthers = sessionEl.dataset.isOthers === 'true';
-      
+
       sessionEl.addEventListener('click', (e) => {
         const target = e.target as HTMLElement;
         // Don't trigger if clicking on menu button or dropdown
         if (target.closest('.history-item-menu') || target.closest('.history-item-dropdown')) return;
-        
+
         // Update active state immediately for visual feedback
         allHistoryItems.forEach(item => {
           (item as HTMLElement).classList.remove('active');
         });
         sessionEl.classList.add('active');
-        
+
         /* =====================================================
            PHASE 2.5.2 – MANUAL SAVE BEFORE SESSION SWITCH
            
@@ -1824,7 +1852,7 @@ export function initializeChatApp(options: InitOptions = {}) {
            This is Fix #2 from Phase 2.5.1, re-implemented for
            client-side-only navigation architecture.
            ===================================================== */
-        
+
         // Save current session before switching (critical for data integrity)
         // ✅ FIX 1: Only save if session is not generating
         if (sessionId && typeof saveCurrentSession === 'function') {
@@ -1839,9 +1867,9 @@ export function initializeChatApp(options: InitOptions = {}) {
             console.error('[SIDEBAR] ❌ Failed to save before switch:', err);
           }
         }
-        
+
         /* ===================================================== */
-        
+
         // Now perform client-side session switch
         if (isOthers) {
           // Load others' session
@@ -1866,26 +1894,26 @@ export function initializeChatApp(options: InitOptions = {}) {
         /* ===================================================== */
       });
     });
-    
+
     // Use event delegation for delete button handlers (trash bin icon)
     // This ensures it works even when chat history is dynamically updated
     sidebarHistory.addEventListener('click', (e) => {
       const target = e.target as HTMLElement;
-      
+
       // Check if clicked on delete button or its child (SVG)
       const menuBtn = target.closest('.history-item-menu') as HTMLElement;
       if (menuBtn) {
         e.preventDefault();
         e.stopPropagation();
         const sid = menuBtn.dataset.sessionId;
-        
+
         console.log('[DELETE] Trash icon clicked for session:', sid);
-        
+
         // Close all other dropdowns first
         document.querySelectorAll('.history-item-dropdown').forEach(d => {
           d.remove();
         });
-        
+
         // Create dropdown element
         const dropdown = document.createElement('div');
         dropdown.className = 'history-item-dropdown';
@@ -1901,76 +1929,76 @@ export function initializeChatApp(options: InitOptions = {}) {
             </button>
           </div>
         `;
-        
+
         // Append to body to avoid overflow clipping
         document.body.appendChild(dropdown);
-        
+
         // Position dropdown relative to button
         const rect = menuBtn.getBoundingClientRect();
-        
+
         // Calculate position
         const dropdownWidth = 160;
         const dropdownHeight = 75; // Approximate height for text + Yes/No buttons
         let top = rect.bottom + 4;
         let left = rect.right - dropdownWidth + 145; // Positioned to the right
-        
+
         // Check if dropdown would go off bottom of screen
         const spaceBelow = window.innerHeight - rect.bottom;
         const spaceAbove = rect.top;
-        
+
         // If not enough space below but more space above, show above
         if (spaceBelow < dropdownHeight + 10 && spaceAbove > dropdownHeight + 10) {
           top = rect.top - dropdownHeight - 4; // Show above button
         }
-        
+
         // Ensure dropdown doesn't go off right edge
         if (left + dropdownWidth > window.innerWidth - 10) {
           left = window.innerWidth - dropdownWidth - 10;
         }
-        
+
         // Ensure dropdown doesn't go off left edge
         if (left < 10) {
           left = 10;
         }
-        
+
         // Ensure dropdown doesn't go off top
         if (top < 10) {
           top = 10;
         }
-        
+
         // Ensure dropdown doesn't go off bottom
         if (top + dropdownHeight > window.innerHeight - 10) {
           top = window.innerHeight - dropdownHeight - 10;
         }
-        
+
         dropdown.style.top = `${top}px`;
         dropdown.style.left = `${left}px`;
         console.log('[DELETE] Confirmation opened at:', { top, left, spaceBelow, spaceAbove });
-        
+
         return;
       }
     });
-    
+
     // Close dropdowns when sidebar scrolls
     sidebarHistory.addEventListener('scroll', () => {
       document.querySelectorAll('.history-item-dropdown').forEach(dropdown => {
         dropdown.remove();
       });
     });
-    
+
     // Add toggle handlers for section collapse/expand
     sidebarHistory.querySelectorAll('.section-toggle-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         const sectionId = (btn as HTMLElement).dataset.sectionId;
         if (!sectionId) return;
-        
+
         const content = sidebarHistory.querySelector(`.history-section-content[data-section-id="${sectionId}"]`);
         const icon = btn.querySelector('.toggle-icon');
-        
+
         if (content && icon) {
           const isCollapsed = content.classList.contains('collapsed');
-          
+
           if (isCollapsed) {
             content.classList.remove('collapsed');
             icon.classList.remove('collapsed');
@@ -1986,39 +2014,39 @@ export function initializeChatApp(options: InitOptions = {}) {
       });
     });
   }
-  
+
   // Delete a session (soft delete - moves to deleted collection)
   async function deleteSession(sid: string) {
     // No confirm dialog - Yes/No buttons in dropdown handle confirmation
-    
+
     let sessions = getAllSessions();
     const sessionToDelete = sessions.find(s => s.id === sid);
-    
+
     if (sessionToDelete) {
       // Add deleted timestamp to the session
       const deletedSession = {
         ...sessionToDelete,
         deletedAt: Date.now()
       };
-      
+
       // Move to deleted collection
       const deletedSessions = getDeletedSessions();
       deletedSessions.push(deletedSession);
       saveDeletedSessions(deletedSessions);
-      
+
       console.log('[DELETED_SESSIONS] Moved session to deleted collection:', sid);
     }
-    
+
     // Remove from active sessions
     sessions = sessions.filter(s => s.id !== sid);
     saveAllSessions(sessions);
-    
+
     // ✅ NEW: Delete from backend
     try {
       const response = await apiFetch(`/chat/sessions/${sid}`, {
         method: 'DELETE'
       });
-      
+
       if (response.ok) {
         console.log('[DELETE] Successfully deleted session from backend:', sid);
       } else if (response.status === 404) {
@@ -2033,27 +2061,27 @@ export function initializeChatApp(options: InitOptions = {}) {
       // Session is still deleted locally, but backend deletion failed
       // This is okay - it will be cleaned up on next sync
     }
-    
+
     // If deleted current session, clear the chat area immediately (like ChatGPT)
     if (sid === sessionId) {
       console.log('[DELETE] Deleted current session, clearing chat area');
-      
+
       // INSTANT: Clear the messages immediately
       const messagesList = document.getElementById('messages');
       if (messagesList) {
         messagesList.innerHTML = '';
       }
-      
+
       // DON'T create a new session immediately - wait until user sends a message (like ChatGPT)
       // Check if there are any remaining sessions
       const remainingSessions = getAllSessions();
-      
+
       if (remainingSessions.length === 0) {
         // This was the last chat - clear session and wait for user to start typing
         console.log('[DELETE] Last chat deleted - showing welcome screen');
         sessionId = null; // Clear session ID
         localStorage.removeItem(getUserStorageKey('chatbot_session_id'));
-        
+
         // Show welcome screen with example prompts
         updateEmptyState();
         reloadSuggestedQuestions();
@@ -2063,12 +2091,12 @@ export function initializeChatApp(options: InitOptions = {}) {
         const randomId = Math.random().toString(36).substr(2, 9);
         sessionId = `cf.conversation.${date}.${randomId}`;
         localStorage.setItem(getUserStorageKey('chatbot_session_id'), sessionId);
-        
+
         // Show welcome screen
         updateEmptyState();
         reloadSuggestedQuestions();
       }
-      
+
       // INSTANT: Update the history list synchronously (don't wait for async)
       const sidebarHistory = document.querySelector('.sidebar-history');
       if (sidebarHistory) {
@@ -2078,7 +2106,7 @@ export function initializeChatApp(options: InitOptions = {}) {
           deletedItem.remove();
         }
       }
-      
+
       // Background: Do full re-render in background (non-blocking)
       setTimeout(() => {
         renderSessionHistory().catch(err => console.error('[SESSION] Failed to render history:', err));
@@ -2092,7 +2120,7 @@ export function initializeChatApp(options: InitOptions = {}) {
           deletedItem.remove();
         }
       }
-      
+
       // Background: Do full re-render in background (non-blocking)
       setTimeout(() => {
         renderSessionHistory().catch(err => console.error('[SESSION] Failed to render history:', err));
@@ -2140,7 +2168,7 @@ export function initializeChatApp(options: InitOptions = {}) {
     if (!questions || questions.length === 0) {
       return '';
     }
-    
+
     const questionsHTML = questions
       .map((q: string) => `
         <button class="recommended-question-btn" data-action="ask-recommended-question" data-question="${q.replace(/"/g, '&quot;')}">
@@ -2151,7 +2179,7 @@ export function initializeChatApp(options: InitOptions = {}) {
         </button>
       `)
       .join('');
-    
+
     return `
       <div class="recommended-questions">
         <div class="recommended-questions-label">Related</div>
@@ -2185,18 +2213,18 @@ export function initializeChatApp(options: InitOptions = {}) {
     if (existingToast) {
       existingToast.remove();
     }
-    
+
     // Create toast element
     const toast = document.createElement('div');
     toast.className = `toast-notification ${type}`;
     toast.textContent = message;
     document.body.appendChild(toast);
-    
+
     // Trigger animation
     setTimeout(() => {
       toast.classList.add('show');
     }, 10);
-    
+
     // Remove after specified duration
     setTimeout(() => {
       toast.classList.remove('show');
@@ -2210,7 +2238,7 @@ export function initializeChatApp(options: InitOptions = {}) {
     if (sender === "user") {
       // Keep edit/copy buttons on all user messages
       // removeAllEditButtons(); // Commented out to show buttons on all messages
-      
+
       // For user messages, create wrapper with message and edit button below
       // Hide edit button in read-only mode
       const editButtonHTML = isReadOnlyMode ? '' : `
@@ -2220,7 +2248,7 @@ export function initializeChatApp(options: InitOptions = {}) {
             </svg>
           </button>
       `;
-      
+
       const wrapper = document.createElement("div");
       wrapper.className = "user-message-wrapper";
       wrapper.innerHTML = `
@@ -2256,7 +2284,7 @@ export function initializeChatApp(options: InitOptions = {}) {
   function addMessageHTML(content: string, sender: string, traceId: string | null = null) {
     const div = document.createElement("div");
     div.className = "message " + sender;
-    
+
     if (sender === "bot") {
       // For bot messages, wrap content and add copy button + retry button + feedback buttons
       div.innerHTML = `
@@ -2296,7 +2324,7 @@ export function initializeChatApp(options: InitOptions = {}) {
           <span class="feedback-text"></span>
         </div>
       `;
-      
+
       // Store trace_id if provided
       if (traceId) {
         div.dataset.traceId = traceId;
@@ -2305,7 +2333,7 @@ export function initializeChatApp(options: InitOptions = {}) {
       // For user messages, keep as is
       div.innerHTML = content;
     }
-    
+
     messagesDiv!.appendChild(div);
     console.log(`[UI] Added ${sender} message HTML. Total messages now: ${messagesDiv!.children.length}`);
     updateEmptyState();
@@ -2323,7 +2351,7 @@ export function initializeChatApp(options: InitOptions = {}) {
       let inList = false;
       let inOrderedList = false;
       const result = [];
-      
+
       for (const line of lines) {
         // Check for unordered list item
         if (line.match(/^\* /)) {
@@ -2352,13 +2380,13 @@ export function initializeChatApp(options: InitOptions = {}) {
             result.push('</ol>');
             inOrderedList = false;
           }
-          
+
           // Format the line
           let formattedLine = line
             .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
             .replace(/\*(.*?)\*/g, '<em>$1</em>')
             .replace(/`(.*?)`/g, '<code>$1</code>');
-          
+
           // Handle headings
           if (line.match(/^### /)) {
             formattedLine = line.replace(/^### (.*)$/, '<h3>$1</h3>');
@@ -2371,21 +2399,21 @@ export function initializeChatApp(options: InitOptions = {}) {
           } else {
             formattedLine = '';
           }
-          
+
           if (formattedLine) result.push(formattedLine);
         }
       }
-      
+
       // Close any remaining open lists
       if (inList) result.push('</ul>');
       if (inOrderedList) result.push('</ol>');
-      
+
       html = result.join('\n');
     }
-    
+
     // Add target="_blank" and rel="noopener noreferrer" to all links
     html = html.replace(/<a href=/g, '<a target="_blank" rel="noopener noreferrer" href=');
-    
+
     return html;
   }
 
@@ -2396,7 +2424,7 @@ export function initializeChatApp(options: InitOptions = {}) {
   function isUserNearBottom(): boolean {
     const messagesContainer = document.querySelector('.messages-container') as HTMLElement;
     if (!messagesContainer) return true;
-    
+
     const threshold = 150;
     const isNearBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight < threshold;
     return isNearBottom;
@@ -2409,8 +2437,8 @@ export function initializeChatApp(options: InitOptions = {}) {
       if (messagesContainer) {
         messagesContainer.scrollTo({
           top: messagesContainer.scrollHeight,
-        behavior: 'smooth'
-      });
+          behavior: 'smooth'
+        });
       }
     });
   }
@@ -2425,7 +2453,7 @@ export function initializeChatApp(options: InitOptions = {}) {
   async function sendMessage() {
     // ✅ PHASE-1: Check per-session state instead of global
     if (!sessionId || isSessionGenerating(sessionId)) return;
-    
+
     const question = input.value.trim();
     if (!question) return;
 
@@ -2435,7 +2463,7 @@ export function initializeChatApp(options: InitOptions = {}) {
       alert(`G��n+� Message is too long!\n\nYour message: ~${tokens.toLocaleString()} tokens (${question.length.toLocaleString()} characters)\nMaximum allowed: 5,000 tokens (20,000 characters)\n\nPlease shorten your message or split it into multiple parts.`);
       return;
     }
-    
+
     // Show warning for large prompts
     if (question.length > WARN_PROMPT_LENGTH) {
       const tokens = Math.round(question.length / 4);
@@ -2451,15 +2479,15 @@ export function initializeChatApp(options: InitOptions = {}) {
     input.value = "";
     // Reset textarea height after sending
     input.style.height = '24px';
-    
+
     // Hide character counter after sending
     const counter = document.getElementById('char-counter');
     if (counter) counter.style.display = 'none';
-    
+
     // Update sidebar IMMEDIATELY before saving (for instant visual feedback)
     // This shows the new chat in sidebar right away
     updateSidebarImmediately();
-    
+
     /* ================================
        PHASE 2.5.1 – CRITICAL FIX #1
        Persist user message immediately to localStorage BEFORE starting backend request
@@ -2473,7 +2501,7 @@ export function initializeChatApp(options: InitOptions = {}) {
        ================================ */
     saveCurrentSession();
     /* ================================ */
-    
+
     await sendMessageText(question);
   }
 
@@ -2482,29 +2510,29 @@ export function initializeChatApp(options: InitOptions = {}) {
       console.warn('[SEND] No question provided');
       return;
     }
-    
+
     // ✅ PHASE-1: Check per-session state instead of global
     if (!sessionId) {
       console.error('[SEND] No sessionId available');
       return;
     }
-    
+
     if (isSessionGenerating(sessionId)) {
       console.warn('[SEND] Session is already generating, skipping');
       return;
     }
-    
+
     console.log('[SEND] Starting message send for session:', sessionId);
-    
+
     // ✅ PHASE 2.5.4: Removed AbortController - streams complete independently
     // This allows background streams to finish even when navigating to /chat/new
     // Streams are no longer tied to component lifecycle
-    
+
     // Disable send buttons while generating
     setSessionGenerating(sessionId, true);
 
     const botDiv = addMessageHTML("", "bot", null);
-    
+
     /* ================================
        PHASE 2.5.3 – STREAM-SAFE PERSISTENCE
        Mark message as generating to prevent partial saves during session switches
@@ -2515,7 +2543,7 @@ export function initializeChatApp(options: InitOptions = {}) {
     (botDiv.dataset as any).generatingStartTime = Date.now().toString();
     botDiv.setAttribute('data-generating-start-time', Date.now().toString());
     /* ================================ */
-    
+
     // ✅ FIX: Ensure botDiv is visible and scrolled into view
     botDiv.style.display = 'block';
     botDiv.style.visibility = 'visible';
@@ -2524,14 +2552,14 @@ export function initializeChatApp(options: InitOptions = {}) {
       botDivVisible: botDiv.offsetParent !== null,
       botDivInDOM: messagesDiv!.contains(botDiv)
     });
-    
+
     // Status update function - simplified for better performance
     let isStreamingStatus = false;
-    
+
     const updateThinkingStatus = (status: string, message: string) => {
       // Skip if already showing content or if we're done with thinking phase
       if (isStreamingStatus) return;
-      
+
       // Update status immediately without word-by-word animation
       botDiv.innerHTML = `
         <div class="thinking">
@@ -2545,7 +2573,7 @@ export function initializeChatApp(options: InitOptions = {}) {
       `;
       autoScrollToBottom();
     };
-    
+
     // Initial "Thinking" state - wait for first status from backend
     botDiv.innerHTML = `
       <div class="thinking">
@@ -2557,7 +2585,7 @@ export function initializeChatApp(options: InitOptions = {}) {
         </span>
       </div>
     `;
-    
+
     setTimeout(() => autoScrollToBottom(), 50);
 
     try {
@@ -2569,14 +2597,14 @@ export function initializeChatApp(options: InitOptions = {}) {
         window.location.href = "/login?error=session_expired";
         return;
       }
-      
+
       // ✅ FIX 2: Session-based auth - no token validation needed
       // Session is validated automatically by backend via session_id cookie
-      const requestBody = { 
+      const requestBody = {
         question,
         session_id: sessionId
       };
-      
+
       // ✅ Session-based auth - session_id cookie sent automatically via proxy
       const response = await apiFetch('/chat/stream', {
         method: "POST",
@@ -2590,7 +2618,7 @@ export function initializeChatApp(options: InitOptions = {}) {
         window.location.href = "/login?error=session_expired";
         return;
       }
-      
+
       if (!response.ok) {
         const errorText = await response.text().catch(() => 'Unknown error');
         console.error(`[CHAT] HTTP error! status: ${response.status}, body: ${errorText}`);
@@ -2613,7 +2641,7 @@ export function initializeChatApp(options: InitOptions = {}) {
       while (true) {
         // ✅ PHASE 2.5.4: Removed abort check - streams complete independently
         // Streams now run to completion regardless of navigation
-        
+
         let readResult;
         try {
           readResult = await reader.read();
@@ -2629,19 +2657,19 @@ export function initializeChatApp(options: InitOptions = {}) {
           }
           throw readError; // Re-throw if it's a different error
         }
-        
+
         const { done, value } = readResult;
         if (done) break;
-        
+
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
         buffer = lines.pop() || "";
-        
+
         for (const line of lines) {
           if (line.startsWith('data: ')) {
             try {
               const data = JSON.parse(line.slice(6));
-              
+
               if (data.type === 'status') {
                 // Update thinking status with backend progress
                 updateThinkingStatus(data.status, data.message);
@@ -2654,7 +2682,7 @@ export function initializeChatApp(options: InitOptions = {}) {
               } else if (data.type === 'token') {
                 const token = data.token;
                 fullResponse += token;
-                
+
                 const now = Date.now();
                 if (now - lastRenderTime > renderThrottle) {
                   const contentDiv = botDiv.querySelector('.message-content');
@@ -2672,7 +2700,7 @@ export function initializeChatApp(options: InitOptions = {}) {
                 fullResponse = data.full_response || fullResponse;
                 const traceId = data.trace_id;
                 const recommendedQuestions = data.recommended_questions || [];
-                
+
                 // Store initial version (version 1) in responseVersions Map
                 if (traceId) {
                   // Use traceId as parent_trace_id for initial response
@@ -2683,11 +2711,11 @@ export function initializeChatApp(options: InitOptions = {}) {
                     isCurrent: true,
                     traceId: traceId
                   }]);
-                  
+
                   // Store parent_trace_id on message div
                   botDiv.dataset.parentTraceId = traceId;
                 }
-                
+
                 // Log trace_id status for debugging
                 if (traceId) {
                   console.log('[TRACE_ID] ✓ Received trace_id from backend:', traceId);
@@ -2695,47 +2723,47 @@ export function initializeChatApp(options: InitOptions = {}) {
                   console.warn('[TRACE_ID] ⚠️ WARNING: No trace_id received from backend');
                   console.warn('[TRACE_ID] This means Langfuse trace creation failed - feedback will use fallback ID');
                 }
-                
+
                 if (!fullResponse || fullResponse.trim() === '') {
                   fullResponse = "I apologize, but I wasn't able to generate a response. Please try again.";
                 }
-                
+
                 // Save recommended questions to localStorage for persistence
                 if (recommendedQuestions && recommendedQuestions.length > 0) {
                   const messageIndex = messagesDiv!.children.length - 1; // Current bot message index
                   saveRecommendedQuestions(messageIndex, recommendedQuestions);
                 }
-                
+
                 // Build recommended questions HTML
                 const recommendedQuestionsHTML = buildRecommendedQuestionsHTML(recommendedQuestions);
-                
+
                 // Render markdown and add UTM parameters to all links
                 const renderedMarkdown = renderMarkdown(fullResponse);
                 const contentWithLinks = linkifyText(renderedMarkdown);
-                
+
                 // ✅ Store trace_id BEFORE generating HTML (so we can disable buttons if missing)
                 if (traceId) {
                   botDiv.dataset.traceId = traceId;
                   // Also set the literal attribute so DevTools shows it immediately
                   botDiv.setAttribute('data-trace-id', traceId);
-                  
+
                   // Double-ensure the most recent bot message has the trace_id (in case DOM changes)
                   const latestBotMessage = messagesDiv?.querySelector('.message.bot:last-of-type') as HTMLElement | null;
                   if (latestBotMessage) {
                     latestBotMessage.dataset.traceId = traceId;
                     latestBotMessage.setAttribute('data-trace-id', traceId);
                   }
-                  
+
                   console.log('[TRACE_ID] ✓ Stored trace_id in botDiv:', traceId);
                 } else {
                   console.warn('[TRACE_ID] ⚠️ No trace_id to store - feedback buttons will be disabled');
                 }
-                
+
                 // ✅ Disable feedback buttons if traceId is missing
                 const feedbackDisabled = !traceId;
                 const feedbackDisabledAttr = feedbackDisabled ? 'disabled' : '';
                 const feedbackDisabledClass = feedbackDisabled ? 'disabled' : '';
-                
+
                 botDiv.innerHTML = `
                   <div class="message-content">${contentWithLinks}</div>
                   <div class="feedback-buttons">
@@ -2780,7 +2808,7 @@ export function initializeChatApp(options: InitOptions = {}) {
                   </div>
                   ${recommendedQuestionsHTML}
                 `;
-                
+
                 // Propagate trace_id to feedback buttons so click handlers always have access
                 if (traceId) {
                   const feedbackButtons = botDiv.querySelectorAll('.feedback-btn');
@@ -2788,10 +2816,10 @@ export function initializeChatApp(options: InitOptions = {}) {
                     (btn as HTMLElement).dataset.traceId = traceId;
                   });
                 }
-                
+
                 // Save session after bot response
                 saveCurrentSession();
-                
+
                 // If this was a new session from /chat/new, update URL to session-specific path
                 // ✅ ZERO REFRESH FIX: Use window.history.replaceState() to update URL silently
                 // This avoids Next.js router navigation which causes remount/loading
@@ -2799,12 +2827,12 @@ export function initializeChatApp(options: InitOptions = {}) {
                 if (sessionId && isNewSessionPendingNavigation) {
                   const currentPath = window.location.pathname;
                   const targetPath = `/chat/${sessionId}`;
-                  
+
                   // ✅ Only update URL if we're on /chat/new and path differs
                   if (currentPath === '/chat/new' && currentPath !== targetPath) {
                     console.log('[SESSION] Updating URL silently to:', targetPath);
                     isNewSessionPendingNavigation = false;
-                    
+
                     // ✅ Silent URL update without Next.js navigation
                     // This prevents remount/loading while keeping URL in sync
                     if (typeof window !== 'undefined') {
@@ -2816,11 +2844,11 @@ export function initializeChatApp(options: InitOptions = {}) {
                     isNewSessionPendingNavigation = false;
                   }
                 }
-                
+
                 // ✅ PHASE-1: Clean up after successful completion
                 // Re-enable send buttons after response complete
                 setSessionGenerating(sessionId!, false);
-                
+
                 /* ================================
                    PHASE 2.5.3 FINAL FIX – STREAM-SAFE PERSISTENCE
                    Mark message as complete and save the CORRECT session
@@ -2830,16 +2858,16 @@ export function initializeChatApp(options: InitOptions = {}) {
                    specific session from storage and append the completed message.
                    ================================ */
                 botDiv.dataset.generating = 'false';
-                
+
                 // Check which session this message belongs to
                 const completedSessionId = botDiv.dataset.sessionId;
-                
+
                 // ✅ FIX 2: CRITICAL - Clear generating flag for the completed session
                 // This prevents UI freezing and allows the session to receive new messages
                 if (completedSessionId) {
                   setSessionGenerating(completedSessionId, false);
                 }
-                
+
                 if (completedSessionId === sessionId) {
                   // Still on this session - save normally from DOM
                   saveCurrentSession();
@@ -2853,7 +2881,7 @@ export function initializeChatApp(options: InitOptions = {}) {
                   saveCurrentSession();
                 }
                 /* ================================ */
-                
+
                 return;
               } else if (data.type === 'error') {
                 throw new Error(data.error);
@@ -2864,29 +2892,29 @@ export function initializeChatApp(options: InitOptions = {}) {
           }
         }
       }
-      
+
     } catch (error) {
       console.error("Error sending message:", error);
       botDiv.innerHTML = "Sorry, there was an error. Please try again.";
-      
+
       // ✅ CORRECTION 2: Always clean up on error
       // Re-enable send buttons after error
       setSessionGenerating(sessionId!, false);
-      
+
       /* ================================
          PHASE 2.5.3 FINAL FIX – STREAM-SAFE PERSISTENCE
          Mark message as complete and save the CORRECT session even on error
          ================================ */
       botDiv.dataset.generating = 'false';
-      
+
       // Check which session this message belongs to
       const completedSessionId = botDiv.dataset.sessionId;
-      
+
       // ✅ FIX 2 (Error Handler): Clear generating flag for the completed session
       if (completedSessionId) {
         setSessionGenerating(completedSessionId, false);
       }
-      
+
       if (completedSessionId === sessionId) {
         // Still on this session - save normally from DOM
         saveCurrentSession();
@@ -2909,14 +2937,14 @@ export function initializeChatApp(options: InitOptions = {}) {
       console.warn('[RETRY] Cannot retry - session is generating or no session ID');
       return;
     }
-    
+
     // Find the message container
     const messageDiv = button.closest('.message.bot') as HTMLElement;
     if (!messageDiv) {
       console.error('[RETRY] Could not find message container');
       return;
     }
-    
+
     // Get trace ID from message
     const traceId = messageDiv.dataset.traceId || button.getAttribute('data-trace-id');
     if (!traceId) {
@@ -2924,7 +2952,7 @@ export function initializeChatApp(options: InitOptions = {}) {
       alert('Cannot retry: No trace ID found. The response may not have been logged yet.');
       return;
     }
-    
+
     // Find the user question from conversation history
     // Use the messages container from the DOM, not the variable
     const messagesContainer = document.querySelector('.messages-list') || document.querySelector('#messages') || messagesDiv;
@@ -2932,11 +2960,11 @@ export function initializeChatApp(options: InitOptions = {}) {
       console.error('[RETRY] Could not find messages container');
       return;
     }
-    
+
     const messages = Array.from(messagesContainer.querySelectorAll('.message'));
     const currentMessageIndex = messages.indexOf(messageDiv);
     let userQuestion = '';
-    
+
     // Look backwards for the user message
     for (let i = currentMessageIndex - 1; i >= 0; i--) {
       const msg = messages[i] as HTMLElement;
@@ -2949,16 +2977,16 @@ export function initializeChatApp(options: InitOptions = {}) {
         }
       }
     }
-    
+
     if (!userQuestion) {
       console.error('[RETRY] Could not find user question for retry');
       alert('Could not find the original question. Please ask again.');
       return;
     }
-    
+
     // Get parent trace ID to determine current version count
     const parentTraceId = messageDiv.dataset.parentTraceId || traceId;
-    
+
     // Calculate retry attempt based on existing versions
     let retryAttempt = 1;
     if (parentTraceId && responseVersions.has(parentTraceId)) {
@@ -2977,26 +3005,26 @@ export function initializeChatApp(options: InitOptions = {}) {
         }
       }
     }
-    
+
     // Disable retry button and show loading
     button.disabled = true;
     button.classList.add('loading');
     const originalHTML = button.innerHTML;
     button.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" class="spinning"><path d="M1 8a7 7 0 0 1 7-7v2M15 8a7 7 0 0 1-7 7v-2M8 1l2 2-2 2M8 15l-2-2 2-2"/></svg>';
-    
+
     // Store retry attempt on message
     messageDiv.dataset.retryAttempt = retryAttempt.toString();
     button.setAttribute('data-retry-attempt', retryAttempt.toString());
-    
+
     try {
       // Get current user
       const currentUser = getCurrentUser();
       if (!currentUser) {
         throw new Error('User not authenticated');
       }
-      
+
       console.log('[RETRY] Starting retry:', { question: userQuestion, traceId, attempt: retryAttempt });
-      
+
       // Call retry endpoint
       const response = await apiFetch('/chat/retry/stream', {
         method: 'POST',
@@ -3007,43 +3035,43 @@ export function initializeChatApp(options: InitOptions = {}) {
           retry_attempt: retryAttempt
         })
       });
-      
+
       if (response.status === 401 || response.status === 403) {
         console.error("[RETRY] Authentication failed, redirecting to login");
         localStorage.removeItem('user');
         window.location.href = "/login?error=session_expired";
         return;
       }
-      
+
       if (!response.ok) {
         const errorText = await response.text().catch(() => 'Unknown error');
         console.error('[RETRY] HTTP error:', response.status, errorText);
         throw new Error(`Retry failed: ${response.statusText}`);
       }
-      
+
       // Check if response body exists
       if (!response.body) {
         throw new Error('No response body received');
       }
-      
+
       // Get message content area
       const messageContent = messageDiv.querySelector('.message-content') as HTMLElement;
       if (!messageContent) {
         throw new Error('Could not find message content area');
       }
-      
+
       // Get parent_trace_id (use traceId as parent for versioning)
       const parentTraceId = traceId;
       if (!parentTraceId) {
         throw new Error('No parent trace ID found for versioning');
       }
-      
+
       // Store current version content before replacing
       const currentContent = messageContent.textContent || messageContent.innerText || '';
-      
+
       // Clear existing content and show loading
       messageContent.innerHTML = '<div class="thinking">Regenerating response<span class="thinking-dots"><span></span><span></span><span></span></span></div>';
-      
+
       // Stream the new response
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -3053,20 +3081,20 @@ export function initializeChatApp(options: InitOptions = {}) {
       let responseVersion: number = 1;
       let fullResponse = '';
       let isStreamingContent = false;
-      
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        
+
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
         buffer = lines.pop() || '';
-        
+
         for (const line of lines) {
           if (line.startsWith('data: ')) {
             try {
               const data = JSON.parse(line.slice(6));
-              
+
               if (data.type === 'status') {
                 console.log('[RETRY] Status:', data.message);
                 // Update status message
@@ -3091,17 +3119,17 @@ export function initializeChatApp(options: InitOptions = {}) {
                 parentTraceIdFromResponse = data.parent_trace_id || parentTraceId;
                 // Use response_version from backend (it's calculated correctly there)
                 responseVersion = data.response_version || (retryAttempt + 1);
-                
+
                 if (newTraceId) {
                   messageDiv.dataset.traceId = newTraceId;
                   messageDiv.dataset.parentTraceId = parentTraceIdFromResponse || '';
                   // Update retry button trace ID
                   button.setAttribute('data-trace-id', newTraceId);
                 }
-                
+
                 // Convert null to undefined for traceId
                 const traceIdForVersion = newTraceId ?? undefined;
-                
+
                 // Store new version in responseVersions Map
                 if (parentTraceIdFromResponse) {
                   if (!responseVersions.has(parentTraceIdFromResponse)) {
@@ -3114,7 +3142,7 @@ export function initializeChatApp(options: InitOptions = {}) {
                       traceId: traceId
                     }]);
                   }
-                  
+
                   // Add new version
                   const versions = responseVersions.get(parentTraceIdFromResponse)!;
                   // Mark all previous versions as not current
@@ -3127,14 +3155,14 @@ export function initializeChatApp(options: InitOptions = {}) {
                     isCurrent: true,
                     traceId: traceIdForVersion
                   });
-                  
+
                   // Update version navigation UI with correct version numbers
                   // responseVersion is the new version number, versions.length is total count
                   updateVersionNavigation(messageDiv, responseVersion, versions.length);
-                  
+
                   console.log(`[RETRY] Version ${responseVersion}/${versions.length} saved. Total versions: ${versions.length}`);
                 }
-                
+
                 messageContent.innerHTML = renderMarkdown(fullResponse);
                 console.log('[RETRY] Retry completed successfully, version:', responseVersion);
               } else if (data.type === 'error') {
@@ -3146,25 +3174,25 @@ export function initializeChatApp(options: InitOptions = {}) {
           }
         }
       }
-      
+
       // Restore button
       button.disabled = false;
       button.classList.remove('loading');
       button.innerHTML = originalHTML;
-      
+
       console.log('[RETRY] Successfully retried message');
-      
+
     } catch (error) {
       console.error('[RETRY] Error:', error);
       alert(`Failed to retry: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      
+
       // Restore button
       button.disabled = false;
       button.classList.remove('loading');
       button.innerHTML = originalHTML;
     }
   }
-  
+
   // Version navigation functions
   function updateVersionNavigation(messageDiv: HTMLElement, currentVersion: number, totalVersions: number) {
     if (totalVersions <= 1) {
@@ -3175,7 +3203,7 @@ export function initializeChatApp(options: InitOptions = {}) {
       }
       return;
     }
-    
+
     // Show navigation
     let nav = messageDiv.querySelector('.version-navigation') as HTMLElement;
     if (!nav) {
@@ -3190,7 +3218,7 @@ export function initializeChatApp(options: InitOptions = {}) {
         } else {
           feedbackButtons.appendChild(nav);
         }
-        
+
         // Add navigation HTML
         nav.innerHTML = `
           <button class="version-nav-btn prev" data-action="prev-version" title="Previous version" disabled>
@@ -3209,19 +3237,19 @@ export function initializeChatApp(options: InitOptions = {}) {
         return;
       }
     }
-    
+
     nav.style.display = 'flex';
-    
+
     // Update indicator
     const indicator = nav.querySelector('.version-indicator') as HTMLElement;
     if (indicator) {
       indicator.textContent = `${currentVersion}/${totalVersions}`;
     }
-    
+
     // Update button states
     const prevBtn = nav.querySelector('.version-nav-btn.prev') as HTMLButtonElement;
     const nextBtn = nav.querySelector('.version-nav-btn.next') as HTMLButtonElement;
-    
+
     if (prevBtn) {
       prevBtn.disabled = currentVersion === 1;
     }
@@ -3229,7 +3257,7 @@ export function initializeChatApp(options: InitOptions = {}) {
       nextBtn.disabled = currentVersion === totalVersions;
     }
   }
-  
+
   // Lazy load versions from backend if not already loaded
   async function ensureVersionsLoaded(parentTraceId: string, messageDiv: HTMLElement): Promise<boolean> {
     // Check if we already have versions loaded (more than just version 1)
@@ -3237,7 +3265,7 @@ export function initializeChatApp(options: InitOptions = {}) {
     if (existingVersions && existingVersions.length > 1) {
       return true; // Already loaded
     }
-    
+
     // Check if we're currently loading
     const loadingKey = `loading_${parentTraceId}`;
     if ((window as any)[loadingKey]) {
@@ -3256,7 +3284,7 @@ export function initializeChatApp(options: InitOptions = {}) {
         }, 100);
       });
     }
-    
+
     // Mark as loading and show loading state on navigation buttons
     (window as any)[loadingKey] = true;
     const nav = messageDiv.querySelector('.version-navigation') as HTMLElement;
@@ -3266,16 +3294,16 @@ export function initializeChatApp(options: InitOptions = {}) {
       if (prevBtn) prevBtn.disabled = true;
       if (nextBtn) nextBtn.disabled = true;
     }
-    
+
     try {
       const response = await apiFetch(`/chat/response-versions?parent_trace_id=${encodeURIComponent(parentTraceId)}`, {
         method: 'GET'
       });
-      
+
       if (response.ok) {
         const data = await response.json();
         const versions = data.versions || [];
-        
+
         if (versions.length > 0) {
           // Store versions in responseVersions Map
           const versionData = versions.map((v: any) => ({
@@ -3286,19 +3314,19 @@ export function initializeChatApp(options: InitOptions = {}) {
             traceId: messageDiv.dataset.traceId
           }));
           responseVersions.set(parentTraceId, versionData);
-          
+
           // Show navigation UI if multiple versions exist
           if (versions.length > 1) {
             const currentVersion = versions.find((v: any) => v.is_current) || versions[versions.length - 1];
             const currentVersionNum = currentVersion.response_version || versions.length;
             updateVersionNavigation(messageDiv, currentVersionNum, versions.length);
           }
-          
+
           delete (window as any)[loadingKey];
           return true;
         }
       }
-      
+
       delete (window as any)[loadingKey];
       return false;
     } catch (error) {
@@ -3307,29 +3335,29 @@ export function initializeChatApp(options: InitOptions = {}) {
       return false;
     }
   }
-  
+
   async function showVersion(messageDiv: HTMLElement, versionNumber: number) {
     const parentTraceId = messageDiv.dataset.parentTraceId;
     if (!parentTraceId) {
       console.error('[VERSION] No parent trace ID found');
       return;
     }
-    
+
     // Lazy load versions if not already loaded
     await ensureVersionsLoaded(parentTraceId, messageDiv);
-    
+
     const versions = responseVersions.get(parentTraceId);
     if (!versions || versions.length === 0) {
       console.error('[VERSION] No versions found for parent trace ID');
       return;
     }
-    
+
     const version = versions.find(v => v.version === versionNumber);
     if (!version) {
       console.error(`[VERSION] Version ${versionNumber} not found`);
       return;
     }
-    
+
     // Update content with markdown rendering and linkify
     const messageContent = messageDiv.querySelector('.message-content') as HTMLElement;
     if (messageContent) {
@@ -3337,48 +3365,48 @@ export function initializeChatApp(options: InitOptions = {}) {
       const contentWithLinks = linkifyText(renderedMarkdown);
       messageContent.innerHTML = contentWithLinks;
     }
-    
+
     // Update current version flags
     versions.forEach(v => v.isCurrent = (v.version === versionNumber));
-    
+
     // Update navigation UI
     updateVersionNavigation(messageDiv, versionNumber, versions.length);
-    
+
     console.log(`[VERSION] Switched to version ${versionNumber}`);
   }
-  
+
   async function prevVersion(button: HTMLButtonElement) {
     const messageDiv = button.closest('.message.bot') as HTMLElement;
     if (!messageDiv) return;
-    
+
     const parentTraceId = messageDiv.dataset.parentTraceId;
     if (!parentTraceId) return;
-    
+
     // Lazy load versions if not already loaded
     await ensureVersionsLoaded(parentTraceId, messageDiv);
-    
+
     const versions = responseVersions.get(parentTraceId);
     if (!versions || versions.length === 0) return;
-    
+
     const currentVersion = versions.find(v => v.isCurrent)?.version || versions.length;
     if (currentVersion > 1) {
       await showVersion(messageDiv, currentVersion - 1);
     }
   }
-  
+
   async function nextVersion(button: HTMLButtonElement) {
     const messageDiv = button.closest('.message.bot') as HTMLElement;
     if (!messageDiv) return;
-    
+
     const parentTraceId = messageDiv.dataset.parentTraceId;
     if (!parentTraceId) return;
-    
+
     // Lazy load versions if not already loaded
     await ensureVersionsLoaded(parentTraceId, messageDiv);
-    
+
     const versions = responseVersions.get(parentTraceId);
     if (!versions || versions.length === 0) return;
-    
+
     const currentVersion = versions.find(v => v.isCurrent)?.version || 1;
     if (currentVersion < versions.length) {
       await showVersion(messageDiv, currentVersion + 1);
@@ -3388,22 +3416,22 @@ export function initializeChatApp(options: InitOptions = {}) {
   function copyMessage(button: HTMLElement) {
     const messageDiv = button.closest('.message.bot');
     const contentDiv = messageDiv!.querySelector('.message-content') as HTMLElement;
-    
+
     // Copy HTML content to preserve formatting (bold, underline, strikethrough, etc.)
     // This way, when pasted into rich text editors, all formatting is maintained
     const htmlToCopy = contentDiv!.innerHTML;
-    
+
     // Use the Clipboard API to copy both HTML and plain text
     const blob = new Blob([htmlToCopy], { type: 'text/html' });
     const richTextItem = new ClipboardItem({
       'text/html': blob,
       'text/plain': new Blob([contentDiv!.innerText || contentDiv!.textContent || ''], { type: 'text/plain' })
     });
-    
+
     navigator.clipboard.write([richTextItem]).then(() => {
       console.log('[COPY] Message copied successfully with formatting');
       const originalHTML = button.innerHTML;
-      
+
       // Change to checkmark icon
       button.innerHTML = `
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10a37f" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -3412,14 +3440,14 @@ export function initializeChatApp(options: InitOptions = {}) {
       `;
       button.classList.add('copied');
       button.title = 'Copied!';
-      
+
       // Show toast notification
       try {
         showToast('Copied to clipboard');
       } catch (e) {
         console.error('[TOAST] Error showing toast:', e);
       }
-      
+
       setTimeout(() => {
         button.innerHTML = originalHTML;
         button.classList.remove('copied');
@@ -3440,13 +3468,13 @@ export function initializeChatApp(options: InitOptions = {}) {
       console.warn('[RECOMMENDED] No question found on button');
       return;
     }
-    
+
     // ✅ FIX: Ensure sessionId exists
     if (!sessionId) {
       console.error('[RECOMMENDED] No sessionId available');
       return;
     }
-    
+
     // ✅ FIX: Clear any stale generating state before checking
     // This prevents blocking if a previous response finished but flag wasn't cleared
     const currentGenerating = isSessionGenerating(sessionId);
@@ -3459,9 +3487,9 @@ export function initializeChatApp(options: InitOptions = {}) {
         // Check if it's been generating for more than 30 seconds (likely stuck)
         // ✅ FIX: Use type assertion and getAttribute fallback to avoid TypeScript errors
         const generatingTime = parseInt(
-          (lastBotMessage.dataset as any).generatingStartTime || 
-          lastBotMessage.getAttribute('data-generating-start-time') || 
-          '0', 
+          (lastBotMessage.dataset as any).generatingStartTime ||
+          lastBotMessage.getAttribute('data-generating-start-time') ||
+          '0',
           10
         );
         if (generatingTime && Date.now() - generatingTime > 30000) {
@@ -3483,16 +3511,16 @@ export function initializeChatApp(options: InitOptions = {}) {
         setSessionGenerating(sessionId, false);
       }
     }
-    
+
     console.log('[RECOMMENDED] Processing recommended question:', question);
-    
+
     // Remove ALL previous recommended questions from the DOM
     const allRecommendations = messagesDiv!.querySelectorAll('.recommended-questions');
     allRecommendations.forEach(rec => rec.remove());
-    
+
     // Add user message to chat FIRST (so it displays immediately)
     addMessage(question, "user");
-    
+
     // Clear input fields
     if (input) {
       input.value = "";
@@ -3502,7 +3530,7 @@ export function initializeChatApp(options: InitOptions = {}) {
       inputEmptyState.value = "";
       inputEmptyState.style.height = '24px';
     }
-    
+
     // Then send the question to get bot response
     console.log('[RECOMMENDED] Sending question to backend...');
     sendMessageText(question);
@@ -3515,7 +3543,7 @@ export function initializeChatApp(options: InitOptions = {}) {
         console.error('[FEEDBACK] Could not find message div');
         return;
       }
-      
+
       const traceId =
         messageDiv.dataset.traceId ||
         messageDiv.dataset.traceid ||
@@ -3523,18 +3551,18 @@ export function initializeChatApp(options: InitOptions = {}) {
         button.getAttribute('data-trace-id') ||
         (button.closest('[data-trace-id]') as HTMLElement | null)?.dataset.traceId ||
         '';
-      
+
       if (messageDiv.dataset.feedbackSubmitted === 'true') {
         console.log('[FEEDBACK] Feedback already submitted for this message');
         return;
       }
-      
+
       // If thumbs down, show detailed feedback modal
       if (rating === 'thumbs_down') {
         showFeedbackModal(messageDiv, traceId || '');
         return;
       }
-      
+
       // For thumbs up, submit immediately
       const feedbackButtons = messageDiv.querySelectorAll('.feedback-btn');
       feedbackButtons.forEach((btn) => {
@@ -3543,14 +3571,14 @@ export function initializeChatApp(options: InitOptions = {}) {
         buttonEl.style.cursor = 'not-allowed';
         buttonEl.style.opacity = '0.5';
       });
-      
+
       // Show loading state
       const feedbackText = messageDiv.querySelector('.feedback-text') as HTMLElement;
       if (feedbackText) {
         feedbackText.textContent = 'Submitting...';
         feedbackText.style.color = '#6b7280';
       }
-      
+
       // ✅ STRICT VALIDATION: trace_id is REQUIRED (no fallback)
       if (!traceId || traceId.trim() === '') {
         console.error('[FEEDBACK] ✗ Cannot submit feedback: trace_id is missing');
@@ -3571,7 +3599,7 @@ export function initializeChatApp(options: InitOptions = {}) {
         }
         return;
       }
-      
+
       // ✅ REJECT fallback trace_ids
       if (traceId.startsWith('feedback_fallback_')) {
         console.error('[FEEDBACK] ✗ Cannot submit feedback: invalid fallback trace_id');
@@ -3585,7 +3613,7 @@ export function initializeChatApp(options: InitOptions = {}) {
         }
         return;
       }
-      
+
       // ✅ Session-based auth - session_id cookie sent automatically via proxy
       const response = await apiFetch('/feedback', {
         method: "POST",
@@ -3596,23 +3624,23 @@ export function initializeChatApp(options: InitOptions = {}) {
           categories: []
         }),
       });
-      
+
       if (response.ok) {
         messageDiv.dataset.feedbackSubmitted = 'true';
         messageDiv.dataset.feedbackRating = 'thumbs_up';
         feedbackButtons.forEach((btn) => btn.classList.remove('selected'));
         button.classList.add('selected');
-        
+
         if (feedbackText) {
           feedbackText.textContent = 'Thanks for your feedback!';
           (feedbackText as HTMLElement).style.color = '#10a37f';
-          
+
           setTimeout(() => {
             feedbackText.textContent = '';
             (feedbackText as HTMLElement).style.color = '';
           }, 3000);
         }
-        
+
         console.log('[FEEDBACK] ✓ Feedback submitted successfully');
         // Persist feedback state to session storage
         saveCurrentSession();
@@ -3620,14 +3648,14 @@ export function initializeChatApp(options: InitOptions = {}) {
         // API error - re-enable buttons
         const errorText = await response.text().catch(() => 'Unknown error');
         console.error('[FEEDBACK] API error:', response.status, errorText);
-        
+
         feedbackButtons.forEach((btn) => {
           const buttonEl = btn as HTMLButtonElement;
           buttonEl.disabled = false;
           buttonEl.style.cursor = 'pointer';
           buttonEl.style.opacity = '1';
         });
-        
+
         if (feedbackText) {
           feedbackText.textContent = 'Failed to submit. Try again.';
           (feedbackText as HTMLElement).style.color = '#dc3545';
@@ -3636,12 +3664,12 @@ export function initializeChatApp(options: InitOptions = {}) {
             (feedbackText as HTMLElement).style.color = '';
           }, 3000);
         }
-        
+
         showToast('Failed to submit feedback. Please try again.');
       }
     } catch (error) {
       console.error("Error submitting feedback:", error);
-      
+
       // Re-enable buttons on error
       const messageDiv = button.closest('.message.bot') as HTMLElement;
       if (messageDiv) {
@@ -3652,7 +3680,7 @@ export function initializeChatApp(options: InitOptions = {}) {
           buttonEl.style.cursor = 'pointer';
           buttonEl.style.opacity = '1';
         });
-        
+
         const feedbackText = messageDiv.querySelector('.feedback-text') as HTMLElement;
         if (feedbackText) {
           feedbackText.textContent = 'Network error. Try again.';
@@ -3663,7 +3691,7 @@ export function initializeChatApp(options: InitOptions = {}) {
           }, 3000);
         }
       }
-      
+
       showToast('Network error. Please check your connection and try again.');
     }
   }
@@ -3674,7 +3702,7 @@ export function initializeChatApp(options: InitOptions = {}) {
       console.error('[FEEDBACK] Feedback modal not found in DOM');
       return;
     }
-    
+
     // ✅ STRICT VALIDATION: Check if traceId is available
     const finalTraceId = messageDiv.dataset.traceId || traceId || '';
     if (!finalTraceId || finalTraceId.trim() === '' || finalTraceId.startsWith('feedback_fallback_')) {
@@ -3690,31 +3718,31 @@ export function initializeChatApp(options: InitOptions = {}) {
       }
       return;
     }
-    
+
     // Check if feedback already submitted
     if (messageDiv.dataset.feedbackSubmitted === 'true') {
       console.log('[FEEDBACK] Feedback already submitted for this message');
       return;
     }
-    
+
     // Store reference to message div using a unique identifier
     const messageId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     messageDiv.dataset.feedbackMessageId = messageId;
-    
+
     // Store reference to message for later submission
     modal.dataset.messageId = messageId;
     modal.dataset.traceId = finalTraceId;  // ✅ Use validated trace_id
-    
+
     // Reset modal state - clear all category selections
     const categoryBtns = modal.querySelectorAll('.feedback-category-btn');
     categoryBtns.forEach(btn => btn.classList.remove('active'));
-    
+
     // Clear comment textarea
     const commentTextarea = document.getElementById('feedback-comment') as HTMLTextAreaElement;
     if (commentTextarea) {
       commentTextarea.value = '';
     }
-    
+
     // Show modal
     modal.style.display = 'flex';
   }
@@ -3725,25 +3753,25 @@ export function initializeChatApp(options: InitOptions = {}) {
       console.error('[FEEDBACK] Feedback modal not found');
       return;
     }
-    
+
     // Find message div using the stored message ID
     const messageId = modal.dataset.messageId || '';
     let messageDiv: HTMLElement | null = null;
-    
+
     if (messageId) {
       messageDiv = document.querySelector(`[data-feedback-message-id="${messageId}"]`) as HTMLElement;
     }
-    
+
     // Fallback: try to find by trace ID if message ID not found
     if (!messageDiv) {
       const traceId = modal.dataset.traceId || '';
       if (traceId) {
         // Try both camelCase and kebab-case selectors
         messageDiv = document.querySelector(`[data-trace-id="${traceId}"]`) as HTMLElement ||
-                     document.querySelector(`[data-traceId="${traceId}"]`) as HTMLElement;
+          document.querySelector(`[data-traceId="${traceId}"]`) as HTMLElement;
       }
     }
-    
+
     // Last resort: find the most recent bot message
     if (!messageDiv) {
       const allBotMessages = document.querySelectorAll('.message.bot');
@@ -3752,20 +3780,20 @@ export function initializeChatApp(options: InitOptions = {}) {
         console.warn('[FEEDBACK] Using fallback: found message by position');
       }
     }
-    
+
     if (!messageDiv) {
       console.error('[FEEDBACK] Could not find message div for feedback submission');
-        showToast('Error: Could not submit feedback. Please try again.');
+      showToast('Error: Could not submit feedback. Please try again.');
       return;
     }
-    
+
     // Check if feedback already submitted
     if (messageDiv.dataset.feedbackSubmitted === 'true') {
       console.log('[FEEDBACK] Feedback already submitted for this message');
       modal.style.display = 'none';
       return;
     }
-    
+
     // Get selected categories
     const selectedCategories: string[] = [];
     const categoryBtns = modal.querySelectorAll('.feedback-category-btn.active');
@@ -3775,14 +3803,14 @@ export function initializeChatApp(options: InitOptions = {}) {
         selectedCategories.push(category);
       }
     });
-    
+
     // Get comment
     const commentTextarea = document.getElementById('feedback-comment') as HTMLTextAreaElement;
     const comment = commentTextarea ? commentTextarea.value.trim() : '';
-    
+
     // Close modal immediately for better UX
     modal.style.display = 'none';
-    
+
     // Disable buttons while submitting
     const feedbackButtons = messageDiv.querySelectorAll('.feedback-btn');
     feedbackButtons.forEach((btn) => {
@@ -3791,18 +3819,18 @@ export function initializeChatApp(options: InitOptions = {}) {
       buttonEl.style.cursor = 'not-allowed';
       buttonEl.style.opacity = '0.5';
     });
-    
+
     // Show loading state
     const feedbackText = messageDiv.querySelector('.feedback-text') as HTMLElement;
     if (feedbackText) {
       feedbackText.textContent = 'Submitting feedback...';
       feedbackText.style.color = '#6b7280';
     }
-    
+
     // Submit feedback
     try {
       const traceId = modal.dataset.traceId || messageDiv.dataset.traceId || messageDiv.dataset.traceid || '';
-      
+
       // ✅ STRICT VALIDATION: trace_id is REQUIRED (no fallback)
       if (!traceId || traceId.trim() === '') {
         console.error('[FEEDBACK] ✗ Cannot submit feedback: trace_id is missing');
@@ -3823,7 +3851,7 @@ export function initializeChatApp(options: InitOptions = {}) {
         }
         return;
       }
-      
+
       // ✅ REJECT fallback trace_ids
       if (traceId.startsWith('feedback_fallback_')) {
         console.error('[FEEDBACK] ✗ Cannot submit feedback: invalid fallback trace_id');
@@ -3837,7 +3865,7 @@ export function initializeChatApp(options: InitOptions = {}) {
         }
         return;
       }
-      
+
       // ✅ Session-based auth - session_id cookie sent automatically via proxy
       const response = await apiFetch('/feedback', {
         method: "POST",
@@ -3848,7 +3876,7 @@ export function initializeChatApp(options: InitOptions = {}) {
           categories: selectedCategories
         }),
       });
-      
+
       if (response.ok) {
         // Success - update UI
         feedbackButtons.forEach((btn) => {
@@ -3858,26 +3886,26 @@ export function initializeChatApp(options: InitOptions = {}) {
           buttonEl.style.opacity = '0.5';
           btn.classList.remove('selected');
         });
-        
+
         const thumbsDownBtn = messageDiv.querySelector('.feedback-btn.thumbs-down');
         if (thumbsDownBtn) {
           thumbsDownBtn.classList.add('selected');
         }
-        
+
         messageDiv.dataset.feedbackSubmitted = 'true';
         messageDiv.dataset.feedbackRating = 'thumbs_down';
-        
+
         if (feedbackText) {
           feedbackText.textContent = 'Thanks! We\'ll improve.';
           // Match thumbs-down brand color for clarity
           feedbackText.style.color = '#ef4444';
-          
+
           setTimeout(() => {
             feedbackText.textContent = '';
             feedbackText.style.color = '';
           }, 3000);
         }
-        
+
         console.log('[FEEDBACK] ✓ Feedback submitted successfully');
         // Persist feedback state to session storage
         saveCurrentSession();
@@ -3885,14 +3913,14 @@ export function initializeChatApp(options: InitOptions = {}) {
         // API error - re-enable buttons and show error
         const errorText = await response.text().catch(() => 'Unknown error');
         console.error('[FEEDBACK] API error:', response.status, errorText);
-        
+
         feedbackButtons.forEach((btn) => {
           const buttonEl = btn as HTMLButtonElement;
           buttonEl.disabled = false;
           buttonEl.style.cursor = 'pointer';
           buttonEl.style.opacity = '1';
         });
-        
+
         if (feedbackText) {
           feedbackText.textContent = 'Failed to submit. Please try again.';
           feedbackText.style.color = '#dc3545';
@@ -3901,12 +3929,12 @@ export function initializeChatApp(options: InitOptions = {}) {
             feedbackText.style.color = '';
           }, 5000);
         }
-        
+
         showToast('Failed to submit feedback. Please try again.');
       }
     } catch (error) {
       console.error("[FEEDBACK] Error submitting detailed feedback:", error);
-      
+
       // Re-enable buttons on error
       feedbackButtons.forEach((btn) => {
         const buttonEl = btn as HTMLButtonElement;
@@ -3914,7 +3942,7 @@ export function initializeChatApp(options: InitOptions = {}) {
         buttonEl.style.cursor = 'pointer';
         buttonEl.style.opacity = '1';
       });
-      
+
       if (feedbackText) {
         feedbackText.textContent = 'Network error. Please try again.';
         feedbackText.style.color = '#dc3545';
@@ -3923,7 +3951,7 @@ export function initializeChatApp(options: InitOptions = {}) {
           feedbackText.style.color = '';
         }, 5000);
       }
-      
+
       showToast('Network error. Please check your connection and try again.');
     }
   }
@@ -3931,15 +3959,15 @@ export function initializeChatApp(options: InitOptions = {}) {
   function copyUserMessage(button: HTMLElement) {
     const wrapper = button.closest('.user-message-wrapper');
     if (!wrapper) return;
-    
+
     const messageDiv = wrapper.querySelector('.message.user') as HTMLElement;
     if (!messageDiv) return;
-    
+
     const text = messageDiv.textContent || '';
     navigator.clipboard.writeText(text).then(() => {
       console.log('[COPY USER] User message copied successfully');
       const originalHTML = button.innerHTML;
-      
+
       // Change to checkmark icon
       button.innerHTML = `
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10a37f" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -3947,14 +3975,14 @@ export function initializeChatApp(options: InitOptions = {}) {
         </svg>
       `;
       button.title = 'Copied!';
-      
+
       // Show toast notification
       try {
         showToast('Copied to clipboard');
       } catch (e) {
         console.error('[TOAST] Error showing toast:', e);
       }
-      
+
       setTimeout(() => {
         button.innerHTML = originalHTML;
         button.title = 'Copy message';
@@ -3967,17 +3995,17 @@ export function initializeChatApp(options: InitOptions = {}) {
   function editMessage(button: HTMLElement) {
     const wrapper = button.closest('.user-message-wrapper');
     if (!wrapper) return;
-    
+
     const messageDiv = wrapper.querySelector('.message.user') as HTMLElement;
     const editContainer = wrapper.querySelector('.edit-button-container');
-    
+
     if (!messageDiv || !editContainer) return;
-    
+
     const originalText = messageDiv.textContent || '';
-    
+
     // Add editing class to wrapper
     wrapper.classList.add('editing');
-    
+
     // Replace message with textarea
     messageDiv.innerHTML = `
       <textarea class="edit-textarea" rows="1">${originalText}</textarea>
@@ -3990,13 +4018,13 @@ export function initializeChatApp(options: InitOptions = {}) {
         </button>
       </div>
     `;
-    
+
     // Clear the edit container since we moved buttons inside messageDiv
     editContainer.innerHTML = ``;
-    
+
     // Store original text for cancel
     wrapper.setAttribute('data-original-text', originalText);
-    
+
     // Focus the textarea and set up auto-resize
     const textarea = messageDiv.querySelector('.edit-textarea') as HTMLTextAreaElement;
     if (textarea) {
@@ -4005,9 +4033,9 @@ export function initializeChatApp(options: InitOptions = {}) {
         textarea.style.height = '24px';
         textarea.style.height = Math.min(textarea.scrollHeight, 200) + 'px';
       };
-      
+
       textarea.addEventListener('input', autoResize);
-      
+
       // Enter key to save (without Shift)
       textarea.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
@@ -4016,9 +4044,9 @@ export function initializeChatApp(options: InitOptions = {}) {
           if (saveBtn) saveBtn.click();
         }
       });
-      
+
       autoResize(); // Initial resize
-      
+
       textarea.focus();
       textarea.setSelectionRange(textarea.value.length, textarea.value.length);
     }
@@ -4027,19 +4055,19 @@ export function initializeChatApp(options: InitOptions = {}) {
   function cancelEdit(button: HTMLElement) {
     const wrapper = button.closest('.user-message-wrapper');
     if (!wrapper) return;
-    
+
     const messageDiv = wrapper.querySelector('.message.user') as HTMLElement;
     const editContainer = wrapper.querySelector('.edit-button-container');
     const originalText = wrapper.getAttribute('data-original-text') || '';
-    
+
     if (!messageDiv || !editContainer) return;
-    
+
     // Remove editing class from wrapper
     wrapper.classList.remove('editing');
-    
+
     // Restore original message
     messageDiv.innerHTML = originalText;
-    
+
     // Restore original buttons
     editContainer.innerHTML = `
       <button class="copy-button-user" data-action="copy-user-message" title="Copy message">
@@ -4054,33 +4082,33 @@ export function initializeChatApp(options: InitOptions = {}) {
         </svg>
       </button>
     `;
-    
+
     wrapper.removeAttribute('data-original-text');
   }
 
   function saveEdit(button: HTMLElement) {
     // ✅ PHASE-1: Check per-session state
     if (!sessionId || isSessionGenerating(sessionId)) return;
-    
+
     const wrapper = button.closest('.user-message-wrapper');
     if (!wrapper) return;
-    
+
     const messageDiv = wrapper.querySelector('.message.user') as HTMLElement;
     const editContainer = wrapper.querySelector('.edit-button-container');
     const textarea = messageDiv?.querySelector('.edit-textarea') as HTMLTextAreaElement;
-    
+
     if (!textarea || !messageDiv || !editContainer) return;
-    
+
     const newText = textarea.value.trim();
-    
+
     if (!newText) {
       alert('Message cannot be empty');
       return;
     }
-    
+
     // Remove editing class from wrapper
     wrapper.classList.remove('editing');
-    
+
     // Find all messages after this one and remove them
     let nextElement = wrapper.nextElementSibling;
     while (nextElement) {
@@ -4088,10 +4116,10 @@ export function initializeChatApp(options: InitOptions = {}) {
       nextElement = nextElement.nextElementSibling;
       toRemove.remove();
     }
-    
+
     // Update the message
     messageDiv.innerHTML = newText;
-    
+
     // Restore original buttons
     editContainer.innerHTML = `
       <button class="copy-button-user" data-action="copy-user-message" title="Copy message">
@@ -4106,9 +4134,9 @@ export function initializeChatApp(options: InitOptions = {}) {
         </svg>
       </button>
     `;
-    
+
     wrapper.removeAttribute('data-original-text');
-    
+
     // Send the edited message to get a new response
     sendMessageText(newText);
   }
@@ -4127,14 +4155,14 @@ export function initializeChatApp(options: InitOptions = {}) {
   // ============================================================================
   // DYNAMIC SUGGESTED QUESTIONS SYSTEM
   // ============================================================================
-  
+
   // Fetch suggested questions from API
   async function loadSuggestedQuestions() {
     try {
       // Check if questions already exist in DOM (don't reload if they're already there)
       const emptyContainer = document.getElementById('suggested-questions-empty');
       const mainContainer = document.getElementById('suggested-questions-main');
-      
+
       // If containers exist and have content, skip reloading
       if (emptyContainer && emptyContainer.children.length > 0) {
         console.log('[QUESTIONS] Questions already loaded, skipping reload');
@@ -4144,28 +4172,28 @@ export function initializeChatApp(options: InitOptions = {}) {
         console.log('[QUESTIONS] Questions already loaded, skipping reload');
         return;
       }
-      
+
       console.log('[QUESTIONS] Loading dynamic suggested questions...');
       // ✅ Use apiFetch for all backend calls
       const response = await apiFetch('/api/suggested-questions/?limit=4');
-      
+
       if (!response.ok) {
         console.error('[QUESTIONS] Failed to load questions:', response.status);
         return;
       }
-      
+
       // 🔒 CRITICAL FIX: Defensive check for response data with type guards
       let questions: SuggestedQuestion[] = [];
       try {
         const data = await response.json();
-        
+
         // Type guard function to validate SuggestedQuestion
-        const isValidQuestion = (q: any): q is SuggestedQuestion => 
-          q && 
-          typeof q === 'object' && 
-          typeof q.id === 'string' && 
+        const isValidQuestion = (q: any): q is SuggestedQuestion =>
+          q &&
+          typeof q === 'object' &&
+          typeof q.id === 'string' &&
           typeof q.question_text === 'string';
-        
+
         // Backend returns array directly (from MongoDB via QuestionResponse)
         if (Array.isArray(data)) {
           // Filter and validate each item (backend may include extra fields like category, priority)
@@ -4181,30 +4209,30 @@ export function initializeChatApp(options: InitOptions = {}) {
         console.error('[QUESTIONS] Failed to parse response:', parseError);
         return;
       }
-      
+
       // Final safety check
       if (!Array.isArray(questions)) {
         console.warn('[QUESTIONS] Questions is not an array:', questions);
         questions = [];
       }
-      
+
       console.log('[QUESTIONS] Loaded', questions.length, 'questions');
       updateSuggestedQuestions(questions);
     } catch (error) {
       console.error('[QUESTIONS] Error loading questions:', error);
     }
   }
-  
+
   // Update both suggested questions containers
   function updateSuggestedQuestions(questions: SuggestedQuestion[]) {
     const containers = [
       document.getElementById('suggested-questions-empty'),
       document.getElementById('suggested-questions-main')
     ];
-    
+
     containers.forEach(container => {
       if (!container || !questions || questions.length === 0) return;
-      
+
       const html = questions.map((q: SuggestedQuestion) => `
         <button class="suggested-question-btn" 
                 data-question="${q.question_text.replace(/"/g, '&quot;')}"
@@ -4212,37 +4240,37 @@ export function initializeChatApp(options: InitOptions = {}) {
           ${q.question_text}
         </button>
       `).join('');
-      
+
       container.innerHTML = html;
     });
-    
+
     // Re-attach event listeners for new buttons
     attachSuggestedQuestionListeners();
   }
-  
+
   // Attach click handlers to suggested question buttons
   function attachSuggestedQuestionListeners() {
     const buttons = document.querySelectorAll('.suggested-question-btn');
-    
+
     buttons.forEach(btn => {
       btn.addEventListener('click', (e) => {
         const button = e.target as HTMLButtonElement;
         const question = button.getAttribute('data-question');
         const questionId = button.getAttribute('data-question-id');
-        
+
         if (question) {
           // Track click for analytics
           if (questionId) {
             trackQuestionClick(questionId);
           }
-          
+
           // Remove all previous recommended questions
           const allRecommendations = messagesDiv!.querySelectorAll('.recommended-questions');
           allRecommendations.forEach(rec => rec.remove());
-          
+
           // Add user message to chat
           addMessage(question, "user");
-          
+
           // Clear input fields
           if (input) {
             input.value = "";
@@ -4252,14 +4280,14 @@ export function initializeChatApp(options: InitOptions = {}) {
             inputEmptyState.value = "";
             inputEmptyState.style.height = '24px';
           }
-          
+
           // Send the question
           sendMessageText(question);
         }
       });
     });
   }
-  
+
   // Track question click for analytics (optional - silently fails if endpoint not available)
   function trackQuestionClick(questionId: string) {
     // Disabled for now - analytics endpoint not implemented yet
@@ -4273,26 +4301,26 @@ export function initializeChatApp(options: InitOptions = {}) {
     // }).catch(err => console.error('[ANALYTICS] Failed to track click:', err));
     console.log('[ANALYTICS] Question clicked:', questionId);
   }
-  
+
   // ============================================================================
   // AUTHENTICATION & INITIALIZATION
   // ============================================================================
-  
+
   // Initialize auth - simplified since auth check is done at component level
   async function initAuth() {
     // ✅ FIX 2: Session-based auth - check user exists (no token needed)
     const user = getCurrentUser();
-    
+
     // User is already authenticated at this point (checked in component)
     // Just load user info and chat history
     if (user) {
       // ✅ User type is compatible - no token fields needed
       updateUserInfo(user as any);
-      
+
       // If switching sessions, skip full reload and only reload session data
       if (isSwitchingSession) {
         console.log('[CHAT] Session switch detected - reloading only session data');
-        
+
         /* ================================
            PHASE 2.5.1 – CRITICAL FIX #2
            Save current session before switching away to prevent data loss
@@ -4307,7 +4335,7 @@ export function initializeChatApp(options: InitOptions = {}) {
         try {
           const newSessionId = sessionId;  // Save the new session ID
           sessionId = currentInitializedSessionId;  // Temporarily restore old session ID
-          
+
           // Now saveCurrentSession() will use the correct (old) session ID
           // It reads messages from DOM (which still has old session's messages)
           // and saves them with the old session ID
@@ -4315,22 +4343,22 @@ export function initializeChatApp(options: InitOptions = {}) {
             saveCurrentSession();
             console.log('[CHAT] ✅ Saved previous session before switch:', currentInitializedSessionId);
           }
-          
+
           sessionId = newSessionId;  // Restore new session ID for upcoming logic
         } catch (err) {
           console.error('[CHAT] Failed to save session before switch:', err);
         }
         /* ================================ */
-        
+
         // Update sidebar active state (lightweight, no re-render)
         updateSidebarActiveState(initialSessionId || null);
-        
+
         // Load the new session
         if (initialSessionId) {
           // Check if this is an Others Chat (conversation_id format or legacy user_chat_ format)
           const isConversationId = /^[0-9a-fA-F]{24}$/.test(initialSessionId);
           const isLegacyOthersChat = initialSessionId.startsWith('user_chat_');
-          
+
           if (isConversationId || isLegacyOthersChat) {
             console.log('[SESSION] Loading Others Chat from backend:', initialSessionId);
             loadOthersSession(initialSessionId);
@@ -4368,19 +4396,19 @@ export function initializeChatApp(options: InitOptions = {}) {
           if (mainContainer) mainContainer.innerHTML = '';
           loadSuggestedQuestions();
         }
-        
+
         // Update initialization state after session switch
         currentInitializedSessionId = initialSessionId || null;
         return;
       }
-      
+
       // Full initialization (first time only)
       // Add test data for UI testing (DISABLED IN PRODUCTION)
       // addTestSessions();
-      
+
       // Remove any existing test sessions (production cleanup)
       removeTestSessions();
-      
+
       // ✅ IMPORTANT: Fetch and merge sessions from backend BEFORE rendering sidebar
       // This ensures chats saved on other devices/browsers are available
       console.log('[SESSIONS] Fetching sessions from backend for cross-device sync...');
@@ -4391,20 +4419,20 @@ export function initializeChatApp(options: InitOptions = {}) {
         console.error('[SESSIONS] Failed to fetch sessions from backend:', error);
         // Continue even if backend fetch fails (use local sessions)
       }
-      
+
       // Load dynamic suggested questions (only on first initialization)
       loadSuggestedQuestions();
-      
+
       // Load session history in sidebar (async) - now includes backend sessions
       renderSessionHistory().catch(err => console.error('[SESSION] Failed to render history:', err));
-      
+
       // Load current session if it exists in localStorage
       // BUT only if we're on /chat/[sessionId] route (not /chat/new)
       if (initialSessionId) {
         // Check if this is an Others Chat (conversation_id format or legacy user_chat_ format)
         const isConversationId = /^[0-9a-fA-F]{24}$/.test(initialSessionId);
         const isLegacyOthersChat = initialSessionId.startsWith('user_chat_');
-        
+
         if (isConversationId || isLegacyOthersChat) {
           console.log('[SESSION] Loading Others Chat from backend:', initialSessionId);
           loadOthersSession(initialSessionId);
@@ -4429,7 +4457,7 @@ export function initializeChatApp(options: InitOptions = {}) {
       } else {
         console.log('[SESSION] New chat mode - not loading any existing session');
       }
-      
+
       // Mark as initialized
       isAppInitialized = true;
       currentInitializedSessionId = initialSessionId || null;
@@ -4449,7 +4477,7 @@ export function initializeChatApp(options: InitOptions = {}) {
     const userAvatar = document.getElementById('userAvatar');
     const userEmail = document.getElementById('userEmail');
     const userEmailSidebar = document.getElementById('userEmailSidebar');
-    
+
     if (user) {
       userName!.textContent = user.name || 'User';
       userAvatar!.textContent = (user.name || 'U').charAt(0).toUpperCase();
@@ -4469,23 +4497,23 @@ export function initializeChatApp(options: InitOptions = {}) {
       const response = await apiFetch(`/chat/history/${userId}`, {
         method: 'GET'
       });
-      
+
       if (response.ok) {
         const data = await response.json();
         const history = data.history || [];
-        
+
         if (history.length > 0) {
           messagesDiv!.innerHTML = '';
-          
+
           for (let i = 0; i < history.length; i++) {
             const message = history[i];
             const sender = message.role === 'user' ? 'user' : 'bot';
-            
+
             if (sender === 'bot') {
               // For bot messages, check if we have saved recommendations
               const savedRecommendations = loadRecommendedQuestions(i);
               const recommendedQuestionsHTML = buildRecommendedQuestionsHTML(savedRecommendations);
-              
+
               // Create bot message with recommendations
               const div = document.createElement("div");
               div.className = "message bot";
@@ -4513,7 +4541,7 @@ export function initializeChatApp(options: InitOptions = {}) {
               addMessage(message.content, sender);
             }
           }
-          
+
           scrollToBottom();
         }
       }
@@ -4524,25 +4552,25 @@ export function initializeChatApp(options: InitOptions = {}) {
 
   async function handleNewChat() {
     console.log('[NEW CHAT] Starting new chat...');
-    
+
     // Reset read-only mode when creating new chat
     isReadOnlyMode = false;
-    
+
     // If router is available, check if we need to navigate
     if (router) {
       // Save current session before clearing
       if (messagesDiv!.children.length > 0) {
         saveCurrentSession();
       }
-      
+
       // ✅ CRITICAL FIX: Always force a full page refresh when navigating to /chat/new
       // This ensures the component fully remounts and state is cleared
       const currentPath = typeof window !== 'undefined' ? window.location.pathname : '';
-      
+
       // Always reset initialization state when going to new chat
       isAppInitialized = false;
       currentInitializedSessionId = null;
-      
+
       if (currentPath === '/chat/new') {
         // Already on /chat/new - force refresh to ensure clean state
         console.log('[NEW CHAT] Already on /chat/new - forcing refresh');
@@ -4551,7 +4579,7 @@ export function initializeChatApp(options: InitOptions = {}) {
         }
         return;
       }
-      
+
       // Not on /chat/new - navigate with refresh
       console.log('[NEW CHAT] Navigating to /chat/new with refresh');
       if (typeof window !== 'undefined') {
@@ -4559,10 +4587,10 @@ export function initializeChatApp(options: InitOptions = {}) {
       }
       return;
     }
-    
+
     // Fallback to old behavior if no router
     const newChatBtn = document.getElementById('newChatBtn') as HTMLElement;
-    
+
     // Show loading state
     if (newChatBtn) {
       console.log('[NEW CHAT] Showing loading state');
@@ -4575,12 +4603,12 @@ export function initializeChatApp(options: InitOptions = {}) {
       `;
       newChatBtn.style.pointerEvents = 'none';
     }
-    
+
     // Save current session before creating new one
     if (messagesDiv!.children.length > 0) {
       saveCurrentSession();
     }
-    
+
     // ✅ Session-based auth - session_id cookie sent automatically via proxy
     try {
       await apiFetch(`/chat/history/${getCurrentUser()?.id || ''}`, {
@@ -4589,23 +4617,23 @@ export function initializeChatApp(options: InitOptions = {}) {
     } catch (error) {
       console.error('Failed to clear chat history:', error);
     }
-    
+
     // Clear old recommended questions
     clearRecommendedQuestions();
-    
+
     // Create new session
     sessionId = createNewSession();
     activeSessionId = sessionId;
     currentSessionTitle = '';
     localStorage.setItem(getUserStorageKey('chatbot_session_id'), sessionId);
-    
+
     // Clear messages
     messagesDiv!.innerHTML = '';
     updateEmptyState();
-    
+
     // Update sidebar to show new session is active (async with error handling)
     renderSessionHistory().catch(err => console.error('[SESSION] Failed to render history:', err));
-    
+
     // Show success state briefly with visual feedback
     if (newChatBtn) {
       console.log('[NEW CHAT] Showing success state');
@@ -4615,14 +4643,14 @@ export function initializeChatApp(options: InitOptions = {}) {
         </svg>
         <span class="btn-text">New chat</span>
       `;
-      
+
       // Show toast notification
       try {
         showToast('Started new chat');
       } catch (e) {
         console.error('[TOAST] Error showing toast:', e);
       }
-      
+
       setTimeout(() => {
         console.log('[NEW CHAT] Resetting to normal state');
         newChatBtn.innerHTML = `
@@ -4643,7 +4671,7 @@ export function initializeChatApp(options: InitOptions = {}) {
       const response = await apiFetch('/auth/logout', {
         method: 'POST'
       });
-      
+
       if (response.ok) {
         console.log('[AUTH] ✅ Logged out successfully');
       } else {
@@ -4654,10 +4682,10 @@ export function initializeChatApp(options: InitOptions = {}) {
     } finally {
       // ✅ Clear all user-specific localStorage data (must be before removing 'user')
       clearUserLocalStorage();
-      
+
       // ✅ Always clear user data (must be last to allow clearUserLocalStorage to get userId)
       localStorage.removeItem('user');
-      
+
       // 🔒 CRITICAL: Clear session expiration flag on manual logout
       // This prevents showing "session expired" error when user manually logs out
       sessionStorage.removeItem('session_expired');
@@ -4677,23 +4705,23 @@ export function initializeChatApp(options: InitOptions = {}) {
   if (sendBtn) {
     // Handle click events (desktop and mobile)
     sendBtn.addEventListener("click", sendMessage);
-    
+
     // ✅ MOBILE FIX: Add touch events for better mobile reliability
     let touchStartTime = 0;
     let touchStartY = 0;
-    
+
     sendBtn.addEventListener("touchstart", (e) => {
       touchStartTime = Date.now();
       // Store Y position to detect scrolling
       touchStartY = (e.touches[0] || e.changedTouches[0]).clientY;
       // Don't preventDefault here - allow scrolling if user drags
     }, { passive: true });
-    
+
     sendBtn.addEventListener("touchend", (e) => {
       const touchEndY = (e.changedTouches[0]).clientY;
       const touchDuration = Date.now() - touchStartTime;
       const touchDistance = Math.abs(touchEndY - touchStartY);
-      
+
       // Only trigger if:
       // 1. Quick tap (< 500ms)
       // 2. Minimal movement (< 10px) - not a scroll
@@ -4704,21 +4732,21 @@ export function initializeChatApp(options: InitOptions = {}) {
       }
     }, { passive: false });
   }
-  
+
   if (input) {
     // Auto-expand textarea and handle character validation
     input.addEventListener("input", (e) => {
       const target = e.target as HTMLTextAreaElement;
       target.style.height = '24px';
       target.style.height = Math.min(target.scrollHeight, 200) + 'px';
-      
+
       // Character counter and button validation
       const counter = document.getElementById('char-counter');
       const sendButton = document.getElementById('send-btn') as HTMLButtonElement;
       const tooltip = document.getElementById('tooltip-main');
       const length = target.value.length;
       const exceeded = length >= MAX_PROMPT_LENGTH;
-      
+
       // Show counter when approaching limit
       if (counter && length >= WARN_PROMPT_LENGTH) {
         counter.textContent = `${length.toLocaleString()} / ${MAX_PROMPT_LENGTH.toLocaleString()}`;
@@ -4728,14 +4756,14 @@ export function initializeChatApp(options: InitOptions = {}) {
       } else if (counter) {
         counter.style.display = 'none';
       }
-      
+
       // Disable button if limit exceeded
       if (sendButton) {
         sendButton.disabled = exceeded;
         sendButton.style.opacity = exceeded ? '0.5' : '1';
         sendButton.style.cursor = exceeded ? 'not-allowed' : 'pointer';
         sendButton.style.backgroundColor = exceeded ? '#9ca3af' : '';
-        
+
         // Show tooltip on hover when disabled
         if (exceeded) {
           sendButton.onmouseenter = () => { if (tooltip) tooltip.style.display = 'block'; };
@@ -4747,9 +4775,9 @@ export function initializeChatApp(options: InitOptions = {}) {
         }
       }
     });
-    
+
     // Handle Enter key
-    input.addEventListener("keydown", (e) => { 
+    input.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         const btn = document.getElementById('send-btn') as HTMLButtonElement;
@@ -4766,7 +4794,7 @@ export function initializeChatApp(options: InitOptions = {}) {
     const handleEmptyStateSend = () => {
       // ✅ PHASE-1: Check per-session state
       if (!sessionId || isSessionGenerating(sessionId)) return;
-      
+
       if (inputEmptyState) {
         const question = inputEmptyState.value.trim();
         if (question) {
@@ -4776,46 +4804,46 @@ export function initializeChatApp(options: InitOptions = {}) {
             alert(`G��n+� Message is too long!\n\nYour message: ~${tokens.toLocaleString()} tokens (${question.length.toLocaleString()} characters)\nMaximum allowed: 5,000 tokens (20,000 characters)\n\nPlease shorten your message or split it into multiple parts.`);
             return;
           }
-          
+
           // Show warning for large prompts
           if (question.length > WARN_PROMPT_LENGTH) {
             const tokens = Math.round(question.length / 4);
             const proceed = confirm(`G��n+� Large Message Warning\n\nYour message is approximately ${tokens.toLocaleString()} tokens (${question.length.toLocaleString()} characters).\n\nLarge messages may:\nG�� Take longer to process\nG�� Produce less focused responses\n\nDo you want to continue?`);
             if (!proceed) return;
           }
-          
+
           addMessage(question, "user");
           inputEmptyState.value = "";
           inputEmptyState.style.height = '24px';
-          
+
           // Hide character counter after sending
           const counter = document.getElementById('char-counter-empty');
           if (counter) counter.style.display = 'none';
-          
+
           sendMessageText(question);
         }
       }
     };
-    
+
     // Handle click events (desktop and mobile)
     sendBtnEmptyState.addEventListener("click", handleEmptyStateSend);
-    
+
     // ✅ MOBILE FIX: Add touch events for better mobile reliability
     let emptyStateTouchStartTime = 0;
     let emptyStateTouchStartY = 0;
-    
+
     sendBtnEmptyState.addEventListener("touchstart", (e) => {
       emptyStateTouchStartTime = Date.now();
       // Store Y position to detect scrolling
       emptyStateTouchStartY = (e.touches[0] || e.changedTouches[0]).clientY;
       // Don't preventDefault here - allow scrolling if user drags
     }, { passive: true });
-    
+
     sendBtnEmptyState.addEventListener("touchend", (e) => {
       const touchEndY = (e.changedTouches[0]).clientY;
       const touchDuration = Date.now() - emptyStateTouchStartTime;
       const touchDistance = Math.abs(touchEndY - emptyStateTouchStartY);
-      
+
       // Only trigger if:
       // 1. Quick tap (< 500ms)
       // 2. Minimal movement (< 10px) - not a scroll
@@ -4826,21 +4854,21 @@ export function initializeChatApp(options: InitOptions = {}) {
       }
     }, { passive: false });
   }
-  
+
   if (inputEmptyState) {
     // Auto-expand textarea and handle character validation
     inputEmptyState.addEventListener("input", (e) => {
       const target = e.target as HTMLTextAreaElement;
       target.style.height = '24px';
       target.style.height = Math.min(target.scrollHeight, 200) + 'px';
-      
+
       // Character counter and button validation
       const counter = document.getElementById('char-counter-empty');
       const sendButton = document.getElementById('send-btn-empty') as HTMLButtonElement;
       const tooltip = document.getElementById('tooltip-empty');
       const length = target.value.length;
       const exceeded = length >= MAX_PROMPT_LENGTH;
-      
+
       // Show counter when approaching limit
       if (counter && length >= WARN_PROMPT_LENGTH) {
         counter.textContent = `${length.toLocaleString()} / ${MAX_PROMPT_LENGTH.toLocaleString()}`;
@@ -4850,14 +4878,14 @@ export function initializeChatApp(options: InitOptions = {}) {
       } else if (counter) {
         counter.style.display = 'none';
       }
-      
+
       // Disable button if limit exceeded
       if (sendButton) {
         sendButton.disabled = exceeded;
         sendButton.style.opacity = exceeded ? '0.5' : '1';
         sendButton.style.cursor = exceeded ? 'not-allowed' : 'pointer';
         sendButton.style.backgroundColor = exceeded ? '#9ca3af' : '';
-        
+
         // Show tooltip on hover when disabled
         if (exceeded) {
           sendButton.onmouseenter = () => { if (tooltip) tooltip.style.display = 'block'; };
@@ -4869,9 +4897,9 @@ export function initializeChatApp(options: InitOptions = {}) {
         }
       }
     });
-    
+
     // Handle Enter key
-    inputEmptyState.addEventListener("keydown", (e) => { 
+    inputEmptyState.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         const btn = sendBtnEmptyState as HTMLButtonElement;
@@ -4881,24 +4909,24 @@ export function initializeChatApp(options: InitOptions = {}) {
       }
     });
   }
-  
+
   // Event listeners for suggested question buttons
   const suggestedQuestionBtns = document.querySelectorAll('.suggested-question-btn');
   suggestedQuestionBtns.forEach(btn => {
     btn.addEventListener('click', (e) => {
       // ✅ PHASE-1: Check per-session state
       if (!sessionId || isSessionGenerating(sessionId)) return;
-      
+
       const button = e.target as HTMLButtonElement;
       const question = button.getAttribute('data-question');
       if (question) {
         // Remove all previous recommended questions when user clicks a suggested question
         const allRecommendations = messagesDiv!.querySelectorAll('.recommended-questions');
         allRecommendations.forEach(rec => rec.remove());
-        
+
         // Add user message to chat
         addMessage(question, "user");
-        
+
         // Clear input fields
         if (input) {
           input.value = "";
@@ -4908,18 +4936,18 @@ export function initializeChatApp(options: InitOptions = {}) {
           inputEmptyState.value = "";
           inputEmptyState.style.height = '24px';
         }
-        
+
         // Send the question
         sendMessageText(question);
       }
     });
   });
-  
+
   const newChatBtn = document.getElementById('newChatBtn');
   if (newChatBtn) {
     newChatBtn.addEventListener('click', handleNewChat);
   }
-  
+
   const userMenu = document.getElementById('userMenu');
   if (userMenu) {
     // Support both click and hover to open the user dropdown
@@ -4933,53 +4961,53 @@ export function initializeChatApp(options: InitOptions = {}) {
       if (dropdown) dropdown.classList.remove('show');
     });
   }
-  
+
   const logoutBtn = document.getElementById('logoutBtn');
   if (logoutBtn) {
     logoutBtn.addEventListener('click', handleLogout);
   }
-  
+
   // Scroll to bottom button functionality
   const scrollToBottomBtn = document.getElementById('scroll-to-bottom-btn');
   const messagesContainer = document.querySelector('.messages-container') as HTMLElement;
-  
+
   // Helper function to check if user is near bottom
   function checkScrollPosition() {
     if (!scrollToBottomBtn || !messagesContainer) return;
-    
+
     const threshold = 150; // Show button when more than 150px from bottom
     const isNearBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight < threshold;
-    
+
     if (isNearBottom) {
       scrollToBottomBtn.classList.remove('show');
     } else {
       scrollToBottomBtn.classList.add('show');
     }
   }
-  
+
   if (scrollToBottomBtn && messagesContainer) {
     scrollToBottomBtn.addEventListener('click', () => {
       scrollToBottom();
       // Hide button immediately after clicking
       scrollToBottomBtn.classList.remove('show');
     });
-    
+
     // Show/hide scroll to bottom button based on scroll position
     messagesContainer.addEventListener('scroll', checkScrollPosition);
-    
+
     // Also check when content changes (new messages added)
     const observer = new MutationObserver(checkScrollPosition);
     observer.observe(messagesDiv!, { childList: true, subtree: true });
-    
+
     // Initially hide the button
     scrollToBottomBtn.classList.remove('show');
   }
-  
+
   document.addEventListener('click', (event) => {
     const userMenu = document.getElementById('userMenu');
     const dropdown = document.getElementById('userDropdown');
     const target = event.target as HTMLElement;
-    
+
     // Don't close if clicking on admin menu items
     const adminItems = document.querySelectorAll('.admin-submenu .admin-item');
     let isAdminItemClick = false;
@@ -4988,14 +5016,14 @@ export function initializeChatApp(options: InitOptions = {}) {
         isAdminItemClick = true;
       }
     });
-    
+
     // Don't close if clicking inside dropdown or admin items
     if (userMenu && !userMenu.contains(event.target as Node)) {
       if (dropdown && !dropdown.contains(event.target as Node) && !isAdminItemClick) {
         dropdown.classList.remove('show');
       }
     }
-    
+
     // Close history item dropdowns when clicking outside
     if (!target.closest('.history-item-menu') && !target.closest('.history-item-dropdown')) {
       document.querySelectorAll('.history-item-dropdown').forEach(dropdown => {
@@ -5008,7 +5036,7 @@ export function initializeChatApp(options: InitOptions = {}) {
   const feedbackModal = document.getElementById('feedback-modal');
   const feedbackModalClose = document.getElementById('feedback-modal-close');
   const feedbackSubmitBtn = document.getElementById('feedback-submit-btn');
-  
+
   // Close modal when clicking X button
   if (feedbackModalClose) {
     feedbackModalClose.addEventListener('click', () => {
@@ -5017,7 +5045,7 @@ export function initializeChatApp(options: InitOptions = {}) {
       }
     });
   }
-  
+
   // Close modal when clicking outside
   if (feedbackModal) {
     feedbackModal.addEventListener('click', (e) => {
@@ -5026,7 +5054,7 @@ export function initializeChatApp(options: InitOptions = {}) {
       }
     });
   }
-  
+
   // Toggle category selection
   const categoryBtns = document.querySelectorAll('.feedback-category-btn');
   categoryBtns.forEach(btn => {
@@ -5034,7 +5062,7 @@ export function initializeChatApp(options: InitOptions = {}) {
       btn.classList.toggle('active');
     });
   });
-  
+
   // Submit detailed feedback
   if (feedbackSubmitBtn) {
     feedbackSubmitBtn.addEventListener('click', submitDetailedFeedback);
@@ -5043,11 +5071,11 @@ export function initializeChatApp(options: InitOptions = {}) {
   // ============================================================================
   // GLOBAL EVENT LISTENERS (SET UP ONCE)
   // ============================================================================
-  
+
   // Handle Yes/No button clicks for delete confirmation (dropdown appended to body)
   document.body.addEventListener('click', async (e) => {
     const target = e.target as HTMLElement;
-    
+
     // Check if clicked on YES button
     const yesBtn = target.closest('.confirm-yes-option') as HTMLElement;
     if (yesBtn) {
@@ -5061,7 +5089,7 @@ export function initializeChatApp(options: InitOptions = {}) {
       document.querySelectorAll('.history-item-dropdown').forEach(d => d.remove());
       return;
     }
-    
+
     // Check if clicked on NO button
     const noBtn = target.closest('.confirm-no-option') as HTMLElement;
     if (noBtn) {
@@ -5074,7 +5102,7 @@ export function initializeChatApp(options: InitOptions = {}) {
       return;
     }
   });
-  
+
   // Close dropdown when clicking outside
   document.addEventListener('click', (e) => {
     const target = e.target as HTMLElement;
@@ -5089,7 +5117,7 @@ export function initializeChatApp(options: InitOptions = {}) {
   // Use event delegation to handle all button clicks, including dynamically created ones
   // This ensures buttons work on mobile devices where inline onclick handlers can fail
   // ============================================================================
-  
+
   function setupButtonEventDelegation() {
     let lastTouchTime = 0;
     // Use capture phase and handle both click and touch events for better mobile support
@@ -5108,16 +5136,16 @@ export function initializeChatApp(options: InitOptions = {}) {
       // Find the button element (might be clicking on an icon inside the button)
       const button = target.closest('[data-action]') as HTMLElement;
       if (!button) return;
-      
+
       const action = button.getAttribute('data-action');
       if (!action) return;
-      
+
       // Prevent default and stop propagation to avoid double-firing
       if (e.cancelable) {
         e.preventDefault();
       }
       e.stopPropagation();
-      
+
       // Handle different button actions
       switch (action) {
         case 'copy-message':
@@ -5167,14 +5195,14 @@ export function initializeChatApp(options: InitOptions = {}) {
           break;
       }
     };
-    
+
     // Add listeners for click and touch/pointer events for better mobile support
     // Use capture phase to ensure we catch events before they bubble
     document.addEventListener('click', handleButtonAction, true);
     document.addEventListener('pointerup', handleButtonAction, { capture: true, passive: false });
     document.addEventListener('touchend', handleButtonAction, { capture: true, passive: false });
   }
-  
+
   // Set up event delegation immediately
   setupButtonEventDelegation();
 

@@ -63,8 +63,6 @@ def format_docs(docs):
                 jira_header += "\n📝 ISSUE DESCRIPTION:\n"
             elif section and "comment" in section.lower():
                 jira_header += "\n💬 DEVELOPER SOLUTION/COMMENT:\n"
-            elif section and "ai" in section.lower():
-                jira_header += "\n🤖 AI-GENERATED SOLUTION:\n"
             
             content = jira_header + content
             
@@ -177,46 +175,10 @@ def setup_qa_chain(retriever):
             # Extract the query from the inputs dict
             query = inputs.get("query", "")
             
-            # Get relevant documents using pure semantic search
-            from app.vectorstore import vectorstore
-            
-            # PURE SEMANTIC SEARCH - Let the vectorstore handle semantic understanding
-            # No predefined keywords, no hardcoded terms, no forced inclusions
-            
-            # Primary semantic search with the original query
-            relevant_docs = vectorstore.similarity_search(query, k=25)
-            
-            # Secondary semantic search with query rephrasing for better coverage
-            # This helps catch semantically similar but differently worded content
-            try:
-                # Use the LLM with ZERO temperature to create deterministic rephrasings
-                # This ensures consistent retrieval for the same query
-                rephrase_llm = get_llm(
-                    temperature=0.0,  # Zero temperature for deterministic rephrasing
-                    max_tokens=200
-                )
-                
-                rephrase_prompt = f"""
-                Rephrase this question in 2-3 different ways to help find relevant information:
-                Original: {query}
-                
-                Provide 2-3 alternative phrasings that mean the same thing but use different words.
-                Each rephrasing should be on a new line and be concise.
-                """
-                
-                rephrase_result = rephrase_llm.invoke(rephrase_prompt)
-                rephrased_queries = [line.strip() for line in rephrase_result.content.split('\n') if line.strip()]
-                
-                # Search with each rephrased query
-                for rephrased_query in rephrased_queries[:2]:  # Limit to 2 rephrasings
-                    additional_docs = vectorstore.similarity_search(rephrased_query, k=12)
-                    relevant_docs.extend(additional_docs)
-                    
-            except Exception as e:
-                # If rephrasing fails, continue with original query only
-                print(f"Query rephrasing failed: {e}")
-                pass
-            
+            from app.weaviate_retriever import retrieve_from_weaviate
+            pairs = retrieve_from_weaviate(query, k=30)
+            relevant_docs = [d for d, _ in pairs]
+
             # Deduplicate documents while preserving relevance order
             seen_ids = set()
             unique_docs = []

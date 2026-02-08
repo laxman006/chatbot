@@ -1,14 +1,8 @@
-"""
-Separate PPTX extraction pipeline for PowerPoint files.
-
-This module provides a dedicated pipeline for extracting and processing PPTX files
-separately from the main vectorstore ingestion. This keeps the main vectorstore
-clean and avoids token waste from low-semantic-density presentation content.
-"""
-
+# Image extraction from PPTX is disabled; only slide text is extracted.
 import os
 import json
 import tempfile
+import base64
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 from langchain_core.documents import Document
@@ -69,24 +63,30 @@ class PPTXProcessor:
             for i, slide in enumerate(prs.slides):
                 slide_text_parts = []
                 slide_notes = []
+                slide_images = []
+                slide_title = f"Slide {i+1}"
                 
-                # Extract text from shapes
+                # Extract content from shapes
                 for shape in slide.shapes:
+                    # 1. Text extraction
                     if hasattr(shape, "text") and shape.text.strip():
                         # Check if it's a title or content
                         if hasattr(shape, "is_placeholder") and shape.is_placeholder:
                             if shape.placeholder_format.idx == 0:  # Title placeholder
-                                slide_text_parts.insert(0, f"# {shape.text.strip()}")
+                                slide_title = shape.text.strip()
+                                slide_text_parts.insert(0, f"# {slide_title}")
                             else:
                                 slide_text_parts.append(shape.text.strip())
                         else:
                             slide_text_parts.append(shape.text.strip())
                     
-                    # Extract notes if available
-                    if hasattr(shape, "notes_slide"):
-                        notes_slide = shape.notes_slide
-                        if notes_slide and notes_slide.notes_text_frame:
-                            slide_notes.append(notes_slide.notes_text_frame.text)
+                    # Image extraction disabled: only slide text is used for ingestion
+
+                # Extract notes if available
+                if hasattr(slide, "has_notes_slide") and slide.has_notes_slide:
+                    notes_slide = slide.notes_slide
+                    if notes_slide and notes_slide.notes_text_frame:
+                        slide_notes.append(notes_slide.notes_text_frame.text)
                 
                 # Combine slide content
                 slide_content = "\n".join(slide_text_parts)
@@ -94,9 +94,11 @@ class PPTXProcessor:
                 
                 slides.append({
                     "slide_number": i + 1,
+                    "title": slide_title,
                     "content": slide_content,
                     "notes": notes_content if notes_content else None,
-                    "has_content": bool(slide_content.strip())
+                    "images": slide_images,
+                    "has_content": bool(slide_content.strip()) or bool(slide_images)
                 })
             
             return slides

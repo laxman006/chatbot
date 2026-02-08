@@ -58,7 +58,6 @@ services:
     environment:
       # File paths (hardcoded, not from .env.ai)
       JSON_MEMORY_FILE: "/app/data/chat_history.json"
-      CHROMA_DB_PATH: "/app/data/chroma_db"
       # Production settings (hardcoded, not from .env.ai)
       PYTHONUNBUFFERED: "1"
       ENVIRONMENT: "production"

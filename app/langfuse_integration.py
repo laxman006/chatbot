@@ -314,6 +314,92 @@ class RAGPipelineTrace:
             # Still return trace_id even if completion failed
             return self.trace_id
 
+    # ---------- Antigravity evaluation spans (no RAGAS) ----------
+    def _parent_span(self):
+        """Parent for node spans: query_span if set, else trace."""
+        return self.query_span if getattr(self, "query_span", None) else self.trace
+
+    def log_intent_span(self, intent: str, confidence: float, metadata: Optional[Dict[str, Any]] = None):
+        """Span for classify_intent node."""
+        try:
+            p = self._parent_span()
+            return p.span(name="intent", input={}, output={"intent": intent, "confidence": confidence}, metadata=metadata or {})
+        except Exception as e:
+            print(f"[LANGFUSE] log_intent_span failed: {e}")
+            return None
+
+    def log_rerank_span(self, doc_count: int, top_k: int, rerank_top_k: int, metadata: Optional[Dict[str, Any]] = None):
+        """Span for rerank_results node."""
+        try:
+            p = self._parent_span()
+            return p.span(
+                name="rerank",
+                input={"input_count": doc_count},
+                output={"output_count": min(doc_count, rerank_top_k)},
+                metadata={**(metadata or {}), "top_k": top_k, "rerank_top_k": rerank_top_k}
+            )
+        except Exception as e:
+            print(f"[LANGFUSE] log_rerank_span failed: {e}")
+            return None
+
+    def log_validate_context_span(self, validation_result: Dict[str, Any], metadata: Optional[Dict[str, Any]] = None):
+        """Span for validate_context (CRAG) node. Also logs trace.score(crag_quality)."""
+        try:
+            p = self._parent_span()
+            meta = {
+                "relevance_scores": validation_result.get("relevance_scores", []),
+                "coverage_sufficient": validation_result.get("coverage_sufficient", False),
+                "diversity_score": validation_result.get("diversity_score", 0.0),
+                "issues": validation_result.get("issues", []),
+                "corrective_action": validation_result.get("corrective_action", "none"),
+                **(metadata or {}),
+            }
+            span = p.span(
+                name="validate_context",
+                input={},
+                output={"quality_score": validation_result.get("quality_score", 0.0)},
+                metadata=meta,
+            )
+            q = validation_result.get("quality_score")
+            if q is not None:
+                self.trace.score(name="crag_quality", value=float(q))
+            return span
+        except Exception as e:
+            print(f"[LANGFUSE] log_validate_context_span failed: {e}")
+            return None
+
+    def log_apply_corrective_action_span(self, action: str, retry_count: int, metadata: Optional[Dict[str, Any]] = None):
+        """Span for apply_corrective_action node."""
+        try:
+            p = self._parent_span()
+            return p.span(name="apply_corrective_action", input={"retry": retry_count}, output=action, metadata=metadata or {})
+        except Exception as e:
+            print(f"[LANGFUSE] log_apply_corrective_action_span failed: {e}")
+            return None
+
+    def log_compress_context_span(self, token_count: int, metadata: Optional[Dict[str, Any]] = None):
+        """Span for compress_context node."""
+        try:
+            p = self._parent_span()
+            return p.span(name="compress_context", input={}, output={"token_count": token_count}, metadata=metadata or {})
+        except Exception as e:
+            print(f"[LANGFUSE] log_compress_context_span failed: {e}")
+            return None
+
+    def log_extract_citations_span(self, citation_count: int, chunk_keys_cited: list, metadata: Optional[Dict[str, Any]] = None):
+        """Span for extract_citations node."""
+        try:
+            p = self._parent_span()
+            return p.span(
+                name="extract_citations",
+                input={},
+                output={"citation_count": citation_count},
+                metadata={**(metadata or {}), "chunk_keys_cited": chunk_keys_cited or []}
+            )
+        except Exception as e:
+            print(f"[LANGFUSE] log_extract_citations_span failed: {e}")
+            return None
+
 
 # Global tracker instance
 langfuse_tracker = LangfuseTracker()

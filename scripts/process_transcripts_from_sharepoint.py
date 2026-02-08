@@ -28,8 +28,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from langchain_core.documents import Document
 from app.transcript_processor import TranscriptProcessor, extract_transcripts_from_sharepoint
-from app.enhanced_helpers import EnhancedVectorstoreBuilder
-from config import CHROMA_DB_PATH, ENABLE_TRANSCRIPT_PROCESSING
+from config import ENABLE_TRANSCRIPT_PROCESSING
 
 
 def process_transcripts(
@@ -119,65 +118,12 @@ def process_transcripts(
         if len(documents) > 10:
             print(f"\n   ... and {len(documents) - 10} more documents")
         
-        print("\n[DRY RUN] Use without --dry-run to add to vectorstore")
+        print("\n[DRY RUN] For Weaviate ingestion run: python scripts/ingest_to_weaviate.py --source transcript")
         return documents, transcript_count
     
-    # Process through enhanced pipeline
-    print("\n[*] Processing transcripts through enhanced pipeline...")
-    builder = EnhancedVectorstoreBuilder()
-    builder.reporter.start_ingestion()
-    
-    # Process documents
-    processed_chunks = builder.process_documents(documents, "transcript")
-    
-    print(f"[OK] Processed into {len(processed_chunks)} chunks")
-    
-    # Build or update vectorstore
-    print("\n[*] Adding to vectorstore...")
-    try:
-        from langchain_openai import OpenAIEmbeddings
-        from langchain_chroma import Chroma
-        
-        embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
-        
-        # Try to load existing vectorstore
-        try:
-            vectorstore = Chroma(
-                persist_directory=CHROMA_DB_PATH,
-                embedding_function=embeddings
-            )
-            print("[OK] Loaded existing vectorstore")
-            
-            # Add new documents
-            if processed_chunks:
-                vectorstore.add_documents(processed_chunks)
-                print(f"[OK] Added {len(processed_chunks)} chunks to existing vectorstore")
-        except Exception as e:
-            # Create new vectorstore if it doesn't exist
-            print(f"[INFO] Creating new vectorstore: {e}")
-            vectorstore = Chroma.from_documents(
-                processed_chunks,
-                embeddings,
-                persist_directory=CHROMA_DB_PATH
-            )
-            print(f"[OK] Created new vectorstore with {len(processed_chunks)} chunks")
-        
-        # Get report
-        report = builder.get_report()
-        print("\n" + "=" * 70)
-        print("PROCESSING COMPLETE")
-        print("=" * 70)
-        print(f"   Transcripts processed: {transcript_count}")
-        print(f"   Documents created: {len(documents)}")
-        print(f"   Chunks added to vectorstore: {len(processed_chunks)}")
-        print(f"\n   Report: {report}")
-        
-    except Exception as e:
-        print(f"[ERROR] Failed to add to vectorstore: {e}")
-        import traceback
-        traceback.print_exc()
-        return documents, transcript_count
-    
+    # Return documents for Weaviate ingestion (chunking/embedding done by WeaviateIngestionPipeline)
+    print("\n[OK] Documents ready for Weaviate ingestion.")
+    print("      Run: python scripts/ingest_to_weaviate.py --source transcript")
     return documents, transcript_count
 
 

@@ -62,7 +62,7 @@ if __name__ == "__main__":
                     for project, count in sorted(projects.items()):
                         print(f"  {project}: {count} documents")
             
-            print(f"\nVectorstore Path: ./data/jira_chroma_db")
+            print(f"\nVectorstore Path: ./data/jira_vectorstore")
             print("Status: ✅ Active")
         else:
             print("\n⚠️ Vectorstore not found")

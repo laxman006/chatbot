@@ -264,7 +264,7 @@ class OutlookProcessor:
         full_content = "\n".join(content_parts)
         
         # Create Document with metadata
-        # Note: ChromaDB only accepts str, int, float, bool, or None as metadata values
+        # Use primitive types (str, int, float, bool) for vectorstore compatibility
         # Convert list to comma-separated string
         doc = Document(
             page_content=full_content,

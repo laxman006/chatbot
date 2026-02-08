@@ -6,11 +6,13 @@ Fetches Jira tickets (customer queries) with comments (developer solutions)
 and converts them into LangChain Documents for knowledge base integration.
 """
 
+import json
 import os
 import re
 import warnings
 import time
 import requests
+from pathlib import Path
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
@@ -36,7 +38,9 @@ from config import (
     JIRA_PROJECT_KEYS,
     JIRA_MAX_ISSUES,
     JIRA_JQL_QUERY,
-    JIRA_DATE_FILTER
+    JIRA_DATE_FILTER,
+    SAVE_JIRA_CHUNKS_JSON,
+    JIRA_CHUNKS_JSON_DIR,
 )
 
 
@@ -101,7 +105,96 @@ class JiraProcessor:
             return ""
         soup = BeautifulSoup(text, "html.parser")
         return soup.get_text(separator="\n", strip=True)
-    
+
+    def _adf_to_plain_text(self, obj: Any) -> str:
+        """
+        Convert Atlassian Document Format (ADF) to plain text.
+        Handles type 'doc' with content array; walks paragraph, heading, table, list, etc.
+        """
+        if obj is None:
+            return ""
+        if isinstance(obj, str):
+            return obj.strip()
+        if not isinstance(obj, dict):
+            return str(obj).strip()
+        node_type = obj.get("type") or ""
+        content = obj.get("content")
+        if not content and node_type != "doc":
+            return ""
+        if node_type == "doc":
+            parts = []
+            for child in (content or []):
+                parts.append(self._adf_to_plain_text(child))
+            return "\n".join(p for p in parts if p).strip()
+        if node_type in ("paragraph", "heading", "blockquote"):
+            parts = []
+            for item in (content or []):
+                parts.append(self._adf_node_inline_text(item))
+            return " ".join(p for p in parts if p).strip()
+        if node_type == "table":
+            rows = []
+            for row in (content or []):
+                if isinstance(row, dict) and row.get("type") == "tableRow":
+                    cells = []
+                    for cell in row.get("content") or []:
+                        if isinstance(cell, dict) and cell.get("type") == "tableCell":
+                            cell_parts = []
+                            for block in cell.get("content") or []:
+                                cell_parts.append(self._adf_to_plain_text(block))
+                            cells.append(" ".join(p for p in cell_parts if p))
+                    rows.append(" | ".join(cells))
+            return "\n".join(rows).strip()
+        if node_type in ("bulletList", "orderedList"):
+            items = []
+            for item in (content or []):
+                if isinstance(item, dict) and item.get("type") == "listItem":
+                    for block in item.get("content") or []:
+                        items.append(self._adf_to_plain_text(block))
+            return "\n".join(p for p in items if p).strip()
+        if node_type in ("mediaSingle", "media"):
+            return "[image]"
+        if node_type == "codeBlock":
+            return "\n".join(
+                self._adf_node_inline_text(item) for item in (content or [])
+                if isinstance(item, dict)
+            ).strip()
+        return ""
+
+    def _adf_node_inline_text(self, node: Any) -> str:
+        """Extract text from ADF inline nodes (text, mention, hardBreak, etc.)."""
+        if node is None:
+            return ""
+        if isinstance(node, str):
+            return node
+        if not isinstance(node, dict):
+            return str(node)
+        node_type = node.get("type") or ""
+        if node_type == "text":
+            return (node.get("text") or "").strip()
+        if node_type == "mention":
+            return (node.get("attrs", {}).get("text") or node.get("text") or "").strip()
+        if node_type == "hardBreak":
+            return "\n"
+        if node_type == "inlineCard":
+            return (node.get("attrs", {}).get("url") or "").strip()
+        content = node.get("content")
+        if content:
+            return " ".join(self._adf_node_inline_text(c) for c in content).strip()
+        return ""
+
+    def _text_from_field(self, value: Any) -> str:
+        """
+        Get plain text from description/comment body: ADF dict or HTML string.
+        Use in _extract_ticket_data for description and comment.body.
+        """
+        if value is None:
+            return ""
+        if isinstance(value, dict) and (value.get("type") == "doc" or "content" in value):
+            return self._adf_to_plain_text(value)
+        if isinstance(value, str):
+            return self._clean_html(value)
+        return self._clean_html(str(value))
+
     def _fetch_issues_rest_api(self, jql: str, start_at: int = 0, max_results: int = 100) -> List:
         """
         Fetch issues using REST API directly (bypasses jira-python library).
@@ -496,59 +589,42 @@ class JiraProcessor:
     def _extract_ticket_data(self, issue) -> Optional[Dict[str, Any]]:
         """Extract ticket data from Jira issue."""
         try:
-            # Get description (customer query)
+            # Get description (customer query); may be ADF dict or HTML string
             description = ""
             if hasattr(issue.fields, 'description') and issue.fields.description:
-                description = self._clean_html(str(issue.fields.description))
+                description = self._text_from_field(issue.fields.description)
             
             # Get comments (developer solutions) - fetch explicitly if not in expand
             comments = []
-            ai_suggestions = None
             
             try:
                 # Try to get comments from fields first
                 if hasattr(issue.fields, 'comment') and issue.fields.comment:
                     for comment in issue.fields.comment.comments:
-                        comment_body = self._clean_html(str(comment.body))
+                        raw_body = getattr(comment, 'body', None)
+                        comment_body = self._text_from_field(raw_body)
                         if comment_body.strip():
-                            # Check if this comment contains AI suggestions
-                            is_ai_suggestion = self._is_ai_suggestion_comment(comment_body)
-                            
-                            if is_ai_suggestion:
-                                # Extract AI suggestions from comment
-                                ai_suggestions = self._extract_suggestions_from_comment(comment_body)
-                                print(f"[OK] Found AI suggestions in comment for {issue.key}")
-                            else:
-                                # Regular comment
+                            comments.append({
+                                "author": str(comment.author),
+                                "body": comment_body,
+                                "created": str(comment.created),
+                                "updated": str(comment.updated) if hasattr(comment, 'updated') else None
+                            })
+                
+                # If no comments found, fetch them explicitly
+                if not comments:
+                    issue_with_comments = self.jira.issue(issue.key, expand='comments')
+                    if hasattr(issue_with_comments.fields, 'comment') and issue_with_comments.fields.comment:
+                        for comment in issue_with_comments.fields.comment.comments:
+                            raw_body = getattr(comment, 'body', None)
+                            comment_body = self._text_from_field(raw_body)
+                            if comment_body.strip():
                                 comments.append({
                                     "author": str(comment.author),
                                     "body": comment_body,
                                     "created": str(comment.created),
                                     "updated": str(comment.updated) if hasattr(comment, 'updated') else None
                                 })
-                
-                # If no comments found, fetch them explicitly
-                if not comments and not ai_suggestions:
-                    issue_with_comments = self.jira.issue(issue.key, expand='comments')
-                    if hasattr(issue_with_comments.fields, 'comment') and issue_with_comments.fields.comment:
-                        for comment in issue_with_comments.fields.comment.comments:
-                            comment_body = self._clean_html(str(comment.body))
-                            if comment_body.strip():
-                                # Check if this comment contains AI suggestions
-                                is_ai_suggestion = self._is_ai_suggestion_comment(comment_body)
-                                
-                                if is_ai_suggestion:
-                                    # Extract AI suggestions from comment
-                                    ai_suggestions = self._extract_suggestions_from_comment(comment_body)
-                                    print(f"[OK] Found AI suggestions in comment for {issue.key}")
-                                else:
-                                    # Regular comment
-                                    comments.append({
-                                        "author": str(comment.author),
-                                        "body": comment_body,
-                                        "created": str(comment.created),
-                                        "updated": str(comment.updated) if hasattr(comment, 'updated') else None
-                                    })
             except Exception as e:
                 print(f"[WARNING] Could not fetch comments for {issue.key}: {e}")
             
@@ -557,8 +633,7 @@ class JiraProcessor:
             combination = self._extract_custom_field(issue, 'customfield_10236', 'Combination')
             fix_description = self._extract_custom_field(issue, 'customfield_10402', 'Fix Description')
             
-            # Return tickets with description (comments or ai_suggestions are optional but preferred)
-            # For now, we'll accept tickets with just description to see what we can extract
+            # Return tickets with description (comments optional but preferred)
             if not description.strip():
                 return None
             
@@ -576,11 +651,10 @@ class JiraProcessor:
                 "resolved": str(issue.fields.resolutiondate) if hasattr(issue.fields, 'resolutiondate') and issue.fields.resolutiondate else None,
                 "url": f"{self.server}/browse/{issue.key}",
                 "project_key": issue.fields.project.key if hasattr(issue.fields.project, 'key') else (issue.fields.project.get('key', 'UNKNOWN') if isinstance(issue.fields.project, dict) else 'UNKNOWN'),
-                "root_cause": root_cause,  # Root Cause
-                "combination": combination,  # Combination field
-                "fix_description": fix_description,  # Fix Description
+                "root_cause": root_cause,
+                "combination": combination,
+                "fix_description": fix_description,
                 "comments": comments,
-                "ai_suggestions": ai_suggestions  # Add AI suggestions
             }
         except Exception as e:
             print(f"[WARNING] Failed to extract data from {issue.key}: {e}")
@@ -607,7 +681,9 @@ class JiraProcessor:
                                 values.append(str(item))
                         return ', '.join(values) if values else None
                     elif isinstance(field_value, dict):
-                        # Some custom fields return dicts
+                        # ADF (Atlassian Document Format) for Rich Text custom fields
+                        if field_value.get("type") == "doc" or "content" in field_value:
+                            return self._adf_to_plain_text(field_value)
                         return str(field_value.get('value', field_value))
                     elif hasattr(field_value, 'value'):
                         # JIRA CustomFieldOption objects
@@ -618,74 +694,6 @@ class JiraProcessor:
             print(f"[WARNING] Could not extract {field_name} ({field_id}) for {issue.key}: {e}")
         return None
     
-    def _is_ai_suggestion_comment(self, comment_body: str) -> bool:
-        """Check if a comment contains AI-generated suggestions."""
-        comment_lower = comment_body.lower()
-        # Look for AI suggestion markers
-        ai_markers = [
-            'uses ai',
-            'verify results',
-            'ai-generated',
-            'rovo',
-            'ai suggestion',
-            '↑ uses ai'
-        ]
-        return any(marker in comment_lower for marker in ai_markers)
-    
-    def _extract_suggestions_from_comment(self, comment_body: str) -> Optional[Dict[str, Any]]:
-        """Extract structured AI suggestions from comment text."""
-        # Clean the comment body
-        text = comment_body.strip()
-        
-        # Look for solution section
-        solution_steps = []
-        
-        # Pattern 1: Numbered list (1. 2. 3. etc.)
-        numbered_pattern = r'(\d+)\.\s+([^\n]+)'
-        numbered_matches = re.findall(numbered_pattern, text)
-        
-        if numbered_matches:
-            for num, step in numbered_matches:
-                step_clean = step.strip()
-                # Filter out very short or non-meaningful steps
-                if len(step_clean) > 15 and not step_clean.lower().startswith(('step', 'solution')):
-                    solution_steps.append(step_clean)
-        
-        # Pattern 2: If no numbered list, look for "Solution:" section
-        if not solution_steps:
-            solution_match = re.search(r'solution:?\s*\n(.*?)(?:\n\n|\Z)', text, re.IGNORECASE | re.DOTALL)
-            if solution_match:
-                solution_text = solution_match.group(1)
-                # Try to extract steps from solution text
-                lines = solution_text.split('\n')
-                for line in lines:
-                    line = line.strip()
-                    # Look for lines that start with dash or number
-                    if re.match(r'^[-*•]\s+', line) or re.match(r'^\d+[.)]\s+', line):
-                        step = re.sub(r'^[-*•\d.)]\s+', '', line)
-                        if len(step) > 15:
-                            solution_steps.append(step)
-        
-        # Pattern 3: Extract summary text before solution
-        summary = None
-        summary_match = re.search(r'^([^S]*?)(?=Solution:)', text, re.IGNORECASE | re.DOTALL)
-        if summary_match:
-            summary_text = summary_match.group(1).strip()
-            # Clean up summary
-            summary_lines = [line.strip() for line in summary_text.split('\n') if line.strip()]
-            if summary_lines:
-                summary = ' '.join(summary_lines[:3])  # First 3 lines as summary
-        
-        if solution_steps:
-            return {
-                "summary": summary,
-                "solution_steps": solution_steps,
-                "step_count": len(solution_steps),
-                "source": "ai_suggestion_comment"
-            }
-        
-        return None
-    
     def format_ticket_documents(self, ticket_data: Dict[str, Any]) -> List[Document]:
         """
         Create field-aware chunks from Jira ticket.
@@ -693,14 +701,15 @@ class JiraProcessor:
         
         Chunking Strategy:
         - Summary: Single chunk (no splitting)
-        - Description: Will be semantically chunked (400-500 tokens) by EnhancedVectorstoreBuilder
+        - Description: Single chunk (or semantically chunked by pipeline if enabled)
         - Root Cause: Single chunk (NEVER split - critical section)
+        - Fix Description: Single chunk (NEVER split)
         - Comments: One chunk per comment (no splitting)
-        - AI Suggestions: Single chunk (no splitting)
         """
         documents = []
         ticket_key = ticket_data['key']
         base_metadata = {
+            "doc_id": ticket_key,
             "source_type": "jira",
             "source": "jira_ticket",
             "tag": f"jira/{ticket_data['project_key'].lower()}",
@@ -719,7 +728,6 @@ class JiraProcessor:
             "root_cause": ticket_data.get('root_cause', ''),
             "fix_description": ticket_data.get('fix_description', ''),
             "comments_count": len(ticket_data['comments']),
-            "has_ai_suggestions": bool(ticket_data.get('ai_suggestions')),
             "url": ticket_data['url']
         }
         
@@ -742,7 +750,8 @@ Assignee: {ticket_data['assignee']}"""
             metadata={
                 **base_metadata,
                 "section": "summary",
-                "section_priority": "high"
+                "section_priority": "high",
+                "ticket_chunk_type": "summary",
             }
         )
         documents.append(summary_doc)
@@ -759,7 +768,8 @@ Reporter: {ticket_data['reporter']}
                 metadata={
                     **base_metadata,
                     "section": "description",
-                    "section_priority": "high"
+                    "section_priority": "high",
+                    "ticket_chunk_type": "problem",
                 }
             )
             documents.append(description_doc)
@@ -776,7 +786,8 @@ Reporter: {ticket_data['reporter']}
                     **base_metadata,
                     "section": "root_cause",
                     "section_priority": "critical",  # Highest priority
-                    "root_cause": ticket_data['root_cause']  # Keep full text in metadata
+                    "root_cause": ticket_data['root_cause'],  # Keep full text in metadata
+                    "ticket_chunk_type": "problem",
                 }
             )
             documents.append(root_cause_doc)
@@ -793,44 +804,13 @@ Reporter: {ticket_data['reporter']}
                     **base_metadata,
                     "section": "fix_description",
                     "section_priority": "critical",  # Highest priority
-                    "fix_description": ticket_data['fix_description']  # Keep full text in metadata
+                    "fix_description": ticket_data['fix_description'],  # Keep full text in metadata
+                    "ticket_chunk_type": "resolution",
                 }
             )
             documents.append(fix_description_doc)
         
-        # === 4. AI SUGGESTIONS CHUNK (Optional - Single chunk per suggestion) ===
-        # NOTE: AI suggestions are optional - if not present, this section is skipped
-        if ticket_data.get('ai_suggestions'):
-            suggestions = ticket_data['ai_suggestions']
-            ai_content_parts = [
-                "## AI-Generated Solution (Rovo)",
-                "",
-                "**Note:** This is an AI-generated solution. Verify results.",
-                ""
-            ]
-            
-            if suggestions.get('summary'):
-                ai_content_parts.append(f"**Summary:** {suggestions['summary']}")
-                ai_content_parts.append("")
-            
-            if suggestions.get('solution_steps'):
-                ai_content_parts.append("**Solution Steps:**")
-                ai_content_parts.append("")
-                for idx, step in enumerate(suggestions['solution_steps'], 1):
-                    ai_content_parts.append(f"{idx}. {step}")
-            
-            ai_doc = Document(
-                page_content="\n".join(ai_content_parts),
-                metadata={
-                    **base_metadata,
-                    "section": "ai_suggestions",
-                    "section_priority": "critical",
-                    "ai_solution_steps": suggestions.get('step_count', 0)
-                }
-            )
-            documents.append(ai_doc)
-        
-        # === 5. COMMENTS CHUNKS (One chunk per comment) ===
+        # === 4. COMMENTS CHUNKS (One chunk per comment) ===
         for idx, comment in enumerate(ticket_data['comments'], 1):
             comment_content = f"""## Developer Solution {idx}
 
@@ -847,12 +827,70 @@ Date: {comment['created'][:10]}
                     "section_priority": "medium",
                     "comment_index": idx,
                     "comment_author": comment['author'],
-                    "comment_date": comment['created']
+                    "comment_date": comment['created'],
+                    "ticket_chunk_type": "resolution",
                 }
             )
             documents.append(comment_doc)
         
         return documents
+
+    def _save_chunks_json(self, all_documents: List[Document]) -> None:
+        """
+        Save how each ticket was chunked for Weaviate to JSON (section, ticket_chunk_type, content per chunk).
+        Writes to data/jira_ingestion/jira_chunks_latest.json and a timestamped copy for audit.
+        """
+        if not SAVE_JIRA_CHUNKS_JSON or not all_documents:
+            return
+        out_dir = Path(JIRA_CHUNKS_JSON_DIR)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        # Group by doc_id (ticket_key)
+        by_doc: Dict[str, List[Document]] = {}
+        for doc in all_documents:
+            doc_id = (doc.metadata.get("doc_id") or "").strip() or "unknown"
+            if doc_id not in by_doc:
+                by_doc[doc_id] = []
+            by_doc[doc_id].append(doc)
+        tickets_payload = []
+        for doc_id, docs in by_doc.items():
+            ticket_key = doc_id
+            chunks_list = []
+            for doc in docs:
+                meta = doc.metadata
+                chunk_entry = {
+                    "section": meta.get("section", ""),
+                    "ticket_chunk_type": meta.get("ticket_chunk_type", ""),
+                    "content": doc.page_content or "",
+                }
+                if meta.get("section") == "comment" and meta.get("comment_index") is not None:
+                    chunk_entry["comment_index"] = meta["comment_index"]
+                chunks_list.append(chunk_entry)
+            tickets_payload.append({
+                "ticket_key": ticket_key,
+                "doc_id": doc_id,
+                "chunks": chunks_list,
+                "chunk_count": len(chunks_list),
+            })
+        now = datetime.utcnow()
+        timestamp_str = now.strftime("%Y-%m-%dT%H%M%SZ")
+        payload = {
+            "ingestion_timestamp": timestamp_str,
+            "source": "jira",
+            "collection": "JiraTickets",
+            "tickets": tickets_payload,
+            "total_tickets": len(tickets_payload),
+            "total_chunks": len(all_documents),
+        }
+        latest_path = out_dir / "jira_chunks_latest.json"
+        ts_path = out_dir / f"jira_chunks_{now.strftime('%Y%m%d_%H%M%S')}.json"
+        try:
+            with open(latest_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2, ensure_ascii=False)
+            with open(ts_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2, ensure_ascii=False)
+            print(f"[OK] Saved chunk structure to {latest_path} and {ts_path}")
+        except Exception as e:
+            print(f"[WARNING] Could not save Jira chunks JSON: {e}")
     
     def process_jira_content(self) -> List[Document]:
         """
@@ -879,8 +917,11 @@ Date: {comment['created'][:10]}
         print(f"     Sections: Summary={sum(1 for d in all_documents if d.metadata.get('section') == 'summary')}, "
               f"Description={sum(1 for d in all_documents if d.metadata.get('section') == 'description')}, "
               f"Root Cause={sum(1 for d in all_documents if d.metadata.get('section') == 'root_cause')}, "
-              f"Comments={sum(1 for d in all_documents if d.metadata.get('section') == 'comment')}, "
-              f"AI Suggestions={sum(1 for d in all_documents if d.metadata.get('section') == 'ai_suggestions')}")
+              f"Fix Description={sum(1 for d in all_documents if d.metadata.get('section') == 'fix_description')}, "
+              f"Comments={sum(1 for d in all_documents if d.metadata.get('section') == 'comment')}")
+        
+        # Save chunk structure to JSON (how each ticket was chunked for Weaviate) for audit/debug
+        self._save_chunks_json(all_documents)
         
         # Return documents directly - EnhancedVectorstoreBuilder will handle semantic chunking
         # for Description section only (if needed)

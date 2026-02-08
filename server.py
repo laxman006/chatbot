@@ -4,8 +4,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from app.endpoints import router as chat_router
 from app.routes.suggested_questions import router as questions_router
-from app.routes.jira_sync import router as jira_sync_router
 from app.mongodb_memory import close_mongodb_connection
+from app.weaviate_client import reset_weaviate_client
 import uvicorn
 import asyncio
 from contextlib import asynccontextmanager
@@ -45,36 +45,6 @@ else:
 
 scheduler = BackgroundScheduler(timezone=scheduler_timezone)
 
-def scheduled_jira_sync():
-    """
-    Background job for scheduled Jira sync.
-    Runs daily at 2 AM to sync new/updated tickets.
-    """
-    try:
-        from app.jira_vectorstore import add_jira_tickets_incrementally
-        from app.jira_sync_tracker import update_last_sync_time
-        
-        logger.info("[SCHEDULER] 🔄 Starting scheduled Jira sync...")
-        
-        result = add_jira_tickets_incrementally()
-        
-        if result:
-            total_docs = result._collection.count()
-            logger.info(f"[SCHEDULER] ✅ Sync completed successfully. Total documents: {total_docs}")
-        else:
-            logger.info("[SCHEDULER] ℹ️  No new tickets to sync")
-            
-    except Exception as e:
-        error_msg = str(e)
-        logger.error(f"[SCHEDULER] ❌ Sync failed: {error_msg}", exc_info=True)
-        
-        # Record failure for admin alerts
-        try:
-            from app.jira_sync_tracker import update_last_sync_time
-            update_last_sync_time(status="failed", documents_added=0, error_message=error_msg)
-        except:
-            pass
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan events."""
@@ -90,59 +60,34 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"[STARTUP] ❌ Failed to initialize MongoDB memory storage: {e}", exc_info=True)
     
-    # Start blog polling service if enabled (teammate's feature)
-    poller_task = None
+    # Log Weaviate vectorstore collection counts at startup
     try:
-        from config import BLOG_POLLING_ENABLED, BLOG_POLLING_INTERVAL
-        from app.blog_poller import BlogPoller
-        
-        if BLOG_POLLING_ENABLED:
-            logger.info("[STARTUP] Starting blog polling service...")
-            poller = BlogPoller()
-            
-            # Run polling in background
-            async def run_polling():
-                loop = asyncio.get_event_loop()
-                while True:
-                    try:
-                        # Run poll_once synchronously in thread pool to avoid blocking
-                        await loop.run_in_executor(None, poller.poll_once)
-                        # Wait for next interval
-                        await asyncio.sleep(BLOG_POLLING_INTERVAL)
-                    except asyncio.CancelledError:
-                        logger.info("[BLOG POLLER] Polling task cancelled (shutdown)")
-                        break
-                    except Exception as e:
-                        logger.error(f"[BLOG POLLER] Error in polling loop: {e}", exc_info=True)
-                        # Wait 1 minute before retrying after error
-                        await asyncio.sleep(60)
-            
-            poller_task = asyncio.create_task(run_polling())
-            logger.info(f"[STARTUP] ✅ Blog polling service started (interval: {BLOG_POLLING_INTERVAL}s)")
+        from app.weaviate_client import get_weaviate_client
+        from app.weaviate_schema import COLLECTIONS
+
+        client = get_weaviate_client()
+        if client is not None:
+            logger.info("[STARTUP] Loading existing vectorstore...")
+            total_docs = 0
+            for col_name in COLLECTIONS:
+                try:
+                    if client.collections.exists(col_name):
+                        coll = client.collections.get(col_name)
+                        agg = coll.aggregate.over_all(total_count=True)
+                        count = int(agg.total_count) if getattr(agg, "total_count", None) is not None else 0
+                        total_docs += count
+                        logger.info(f"[STARTUP]   {col_name}: {count} documents")
+                    else:
+                        logger.info(f"[STARTUP]   {col_name}: 0 documents (collection not found)")
+                except Exception as e:
+                    logger.warning(f"[STARTUP]   {col_name}: error reading count ({e})")
+            logger.info(f"[STARTUP] Total documents: {total_docs}")
         else:
-            logger.info("[STARTUP] Blog polling is disabled (BLOG_POLLING_ENABLED=false)")
+            logger.warning("[STARTUP] Weaviate not available, skipping vectorstore load summary")
     except Exception as e:
-        logger.error(f"[STARTUP] ❌ Failed to start blog polling service: {e}", exc_info=True)
-        logger.warning("[STARTUP] Server will continue without blog polling")
-    
-    # Start Jira sync scheduler (your feature)
-    try:
-        sync_hour = int(os.getenv("JIRA_SYNC_HOUR", "2"))  # Default: 2 AM
-        timezone_str = SCHEDULER_TIMEZONE if SCHEDULER_TIMEZONE else "system local timezone"
-        
-        scheduler.add_job(
-            func=scheduled_jira_sync,
-            trigger=CronTrigger(hour=sync_hour, minute=0, timezone=scheduler_timezone),  # Daily at specified hour
-            id='jira_sync_job',
-            name='Daily Jira Ticket Sync',
-            replace_existing=True
-        )
-        scheduler.start()
-        logger.info(f"[STARTUP] ✅ Jira sync scheduler started (runs daily at {sync_hour}:00 {timezone_str})")
-    except Exception as e:
-        logger.error(f"[STARTUP] ❌ Failed to start Jira sync scheduler: {e}", exc_info=True)
-    
-    # Start Weekly Report scheduler
+        logger.warning(f"[STARTUP] Failed to log vectorstore counts: {e}")
+
+    # Start scheduler for weekly reports (and future jobs)
     try:
         from config import WEEKLY_REPORT_ENABLED, WEEKLY_REPORT_SEND_HOUR, WEEKLY_REPORT_SEND_MINUTE
         
@@ -158,6 +103,7 @@ async def lifespan(app: FastAPI):
                 name='Weekly Team Leaderboard Report',
                 replace_existing=True
             )
+            scheduler.start()
             logger.info(f"[STARTUP] ✅ Weekly report scheduler started (runs every Monday at {WEEKLY_REPORT_SEND_HOUR:02d}:{WEEKLY_REPORT_SEND_MINUTE:02d} {timezone_str})")
         else:
             logger.info("[STARTUP] Weekly report scheduler is disabled (WEEKLY_REPORT_ENABLED=false)")
@@ -165,25 +111,12 @@ async def lifespan(app: FastAPI):
         logger.error(f"[STARTUP] ❌ Failed to start weekly report scheduler: {e}", exc_info=True)
     
     yield
-    
+
     # Shutdown
-    # Cancel blog polling task
-    if poller_task:
-        try:
-            logger.info("[SHUTDOWN] Stopping blog polling service...")
-            poller_task.cancel()
-            try:
-                await poller_task
-            except asyncio.CancelledError:
-                pass
-            logger.info("[SHUTDOWN] ✅ Blog polling service stopped")
-        except Exception as e:
-            logger.warning(f"[SHUTDOWN] ⚠️  Error stopping blog polling service: {e}")
-    
     try:
-        logger.info("[SHUTDOWN] Stopping Jira sync scheduler...")
+        logger.info("[SHUTDOWN] Stopping scheduler...")
         scheduler.shutdown()
-        logger.info("[SHUTDOWN] ✅ Jira sync scheduler stopped")
+        logger.info("[SHUTDOWN] ✅ Scheduler stopped")
     except Exception as e:
         logger.warning(f"[SHUTDOWN] ⚠️  Error stopping scheduler: {e}")
     
@@ -193,6 +126,14 @@ async def lifespan(app: FastAPI):
         logger.info("[SHUTDOWN] ✅ MongoDB memory storage closed")
     except Exception as e:
         logger.warning(f"[SHUTDOWN] ⚠️  Error closing MongoDB memory storage: {e}")
+
+    # Close Weaviate client to avoid unclosed socket warnings on restart
+    try:
+        logger.info("[SHUTDOWN] Closing Weaviate client...")
+        reset_weaviate_client()
+        logger.info("[SHUTDOWN] ✅ Weaviate client closed")
+    except Exception as e:
+        logger.warning(f"[SHUTDOWN] ⚠️  Error closing Weaviate client: {e}")
 
 
 async def auto_seed_questions():
@@ -295,7 +236,6 @@ async def health_check():
 
 app.include_router(chat_router)
 app.include_router(questions_router)
-app.include_router(jira_sync_router)
 
 # Mount static directories for images and other assets
 app.mount("/images", StaticFiles(directory="images"), name="images")

@@ -155,11 +155,10 @@ class SharePointGraphExtractor:
                     tmp_path = None
                     try:
                         import tempfile
-                        tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
-                        tmp_path = tmp_file.name
-                        for chunk in response.iter_content(chunk_size=8192):
-                            tmp_file.write(chunk)
-                        tmp_file.close()  # Explicitly close before processing
+                        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+                            tmp_path = tmp_file.name
+                            for chunk in response.iter_content(chunk_size=8192):
+                                tmp_file.write(chunk)
                         
                         from app.pdf_processor import extract_text_from_pdf
                         content = extract_text_from_pdf(tmp_path)
@@ -168,26 +167,27 @@ class SharePointGraphExtractor:
                         print(f"      [WARNING] PDF extraction failed for {file_name}: {e}")
                         return None
                     finally:
-                        # Clean up temp file after processing is complete
                         if tmp_path and os.path.exists(tmp_path):
                             try:
                                 # Wait a bit and retry if file is locked
-                                import time
-                                time.sleep(0.1)
-                                os.unlink(tmp_path)
+                                for _ in range(3):
+                                    try:
+                                        os.unlink(tmp_path)
+                                        break
+                                    except PermissionError:
+                                        time.sleep(0.2)
                             except Exception:
-                                pass  # Ignore cleanup errors
+                                pass
                 
                 elif file_ext in ['doc', 'docx']:
                     # Word document - use DOC processor
                     tmp_path = None
                     try:
                         import tempfile
-                        tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=f'.{file_ext}')
-                        tmp_path = tmp_file.name
-                        for chunk in response.iter_content(chunk_size=8192):
-                            tmp_file.write(chunk)
-                        tmp_file.close()  # Explicitly close before processing
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{file_ext}') as tmp_file:
+                            tmp_path = tmp_file.name
+                            for chunk in response.iter_content(chunk_size=8192):
+                                tmp_file.write(chunk)
                         
                         from app.doc_processor import extract_text_from_docx
                         content = extract_text_from_docx(tmp_path)
@@ -196,25 +196,27 @@ class SharePointGraphExtractor:
                         print(f"      [WARNING] Word extraction failed for {file_name}: {e}")
                         return None
                     finally:
-                        # Clean up temp file after processing is complete
                         if tmp_path and os.path.exists(tmp_path):
                             try:
-                                import time
-                                time.sleep(0.1)
-                                os.unlink(tmp_path)
+                                for _ in range(3):
+                                    try:
+                                        os.unlink(tmp_path)
+                                        break
+                                    except PermissionError:
+                                        time.sleep(0.2)
                             except Exception:
-                                pass  # Ignore cleanup errors
+                                pass
                 
                 elif file_ext in ['xls', 'xlsx']:
-                    # Excel file - use Excel processor
+                    # Excel: row-level extraction is done in extract_from_folder via extract_excel_rows_as_chunks.
+                    # Fallback: return flat text for non-SharePoint callers.
                     tmp_path = None
                     try:
                         import tempfile
-                        tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=f'.{file_ext}')
-                        tmp_path = tmp_file.name
-                        for chunk in response.iter_content(chunk_size=8192):
-                            tmp_file.write(chunk)
-                        tmp_file.close()  # Explicitly close before processing
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{file_ext}') as tmp_file:
+                            tmp_path = tmp_file.name
+                            for chunk in response.iter_content(chunk_size=8192):
+                                tmp_file.write(chunk)
                         
                         from app.excel_processor import extract_text_from_excel
                         content = extract_text_from_excel(tmp_path)
@@ -223,12 +225,9 @@ class SharePointGraphExtractor:
                         print(f"      [WARNING] Excel extraction failed for {file_name}: {e}")
                         return None
                     finally:
-                        # Clean up temp file after processing is complete
                         if tmp_path and os.path.exists(tmp_path):
                             try:
-                                import time
-                                time.sleep(0.1)  # Give file handles time to release
-                                # Retry deletion up to 3 times
+                                time.sleep(0.1)
                                 for _ in range(3):
                                     try:
                                         os.unlink(tmp_path)
@@ -236,7 +235,7 @@ class SharePointGraphExtractor:
                                     except PermissionError:
                                         time.sleep(0.2)
                             except Exception:
-                                pass  # Ignore cleanup errors
+                                pass
                 
                 elif file_ext in ['txt', 'csv', 'json', 'xml', 'html', 'md']:
                     # Text file - read directly
@@ -382,31 +381,17 @@ class SharePointGraphExtractor:
                                                 processor.save_extraction(extraction_result, format="json")
                                                 print(f"      [OK] PPTX saved to file: {item_name}")
                                             
-                                            # ADD TO VECTORSTORE - Use extracted content
-                                            file_content = extraction_result.get("combined_content", "")
-                                            
-                                            # Create metadata for vectorstore
+                                            # Build metadata base for all chunks from this file
                                             folder_path_str = " > ".join(folder_path).lower() if folder_path else ""
-                                            is_certificate = (
-                                                ('certificate' in folder_path_str or 'cert' in folder_path_str) and
-                                                '2025' in folder_path_str
-                                            )
+                                            is_certificate = ('certificate' in folder_path_str or 'cert' in folder_path_str) and '2025' in folder_path_str
+                                            is_downloadable = is_certificate or any(dp in folder_path_str for dp in self.downloadable_folders)
                                             
-                                            is_downloadable = False
-                                            if is_certificate:
-                                                is_downloadable = True
-                                            else:
-                                                for downloadable_path in self.downloadable_folders:
-                                                    if downloadable_path in folder_path_str:
-                                                        is_downloadable = True
-                                                        break
-                                            
-                                            # Build tag
-                                            current_folder_path = folder_path + [item_name] if folder_path else [item_name]
-                                            sanitized_path = [f.replace('/', '-').replace('\\', '-').strip() for f in current_folder_path if f.strip()]
+                                            current_folder_path_list = folder_path + [item_name] if folder_path else [item_name]
+                                            sanitized_path = [f.replace('/', '-').replace('\\', '-').strip() for f in current_folder_path_list if f.strip()]
                                             tag = "/".join(["sharepoint"] + sanitized_path)
-                                            
-                                            metadata = {
+
+                                            base_metadata = {
+                                                "doc_id": f"sharepoint:{item_id_current}",
                                                 "source_type": "sharepoint",
                                                 "source": "cloudfuze_doc360",
                                                 "file_name": item_name,
@@ -415,23 +400,31 @@ class SharePointGraphExtractor:
                                                 "folder_tags": tag,
                                                 "tag": tag,
                                                 "page_url": web_url,
-                                                "content_type": "pptx_slide",
                                                 "is_certificate": is_certificate,
                                                 "is_downloadable": is_downloadable,
-                                                "total_slides": extraction_result.get("total_slides", 0),
                                                 "depth": depth
                                             }
-                                            
                                             if is_downloadable:
-                                                metadata["download_url"] = web_url
-                                            
-                                            # Create document with extracted PPTX content
-                                            doc = Document(
-                                                page_content=file_content[:15000],  # Limit content size
-                                                metadata=metadata
-                                            )
-                                            all_documents.append(doc)
-                                            print(f"      [OK] Added PPTX to vectorstore: {item_name}")
+                                                base_metadata["download_url"] = web_url
+
+                                            # 1. Add Slides as separate documents
+                                            for slide in extraction_result.get("slides", []):
+                                                if not slide.get("has_content"):
+                                                    continue
+                                                
+                                                slide_metadata = base_metadata.copy()
+                                                slide_metadata.update({
+                                                    "content_type": "pptx_slide",
+                                                    "page_number": slide["slide_number"],
+                                                    "chunk_type": "explanation", # Use explanation for slide text
+                                                    "section_title": slide.get("title")
+                                                })
+                                                
+                                                doc = Document(page_content=slide["content"], metadata=slide_metadata)
+                                                all_documents.append(doc)
+                                                # Images from slides are not ingested (image ingestion disabled)
+
+                                            print(f"      [OK] Added PPTX ({len(extraction_result.get('slides', []))} slides) to vectorstore: {item_name}")
                                             continue  # Skip normal processing
                                         else:
                                             print(f"      [WARNING] PPTX extraction failed for {item_name}")
@@ -441,8 +434,356 @@ class SharePointGraphExtractor:
                                 traceback.print_exc()
                         
                         # If PPTX pipeline is disabled, fall through to normal processing (will skip with "Skipping binary file")
-                    
-                    # Download file content (for non-PPTX files, or if PPTX pipeline is disabled)
+
+                    # Excel: one row = one chunk (feature/limitation) for enterprise knowledge
+                    if file_ext in ['xls', 'xlsx']:
+                        tmp_path = None
+                        try:
+                            drive_id = self.get_drive_id()
+                            if drive_id:
+                                graph_url = f"{self.graph_base_url}/drives/{drive_id}/items/{item_id_current}/content"
+                                headers = sharepoint_auth.get_headers()
+                                resp = requests.get(graph_url, headers=headers, timeout=60, stream=True)
+                                if resp.status_code == 200:
+                                    with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{file_ext}') as tmp_file:
+                                        tmp_path = tmp_file.name
+                                        for b in resp.iter_content(chunk_size=8192):
+                                            tmp_file.write(b)
+                                    
+                                    from app.excel_processor import extract_excel_rows_as_chunks
+                                    row_chunks = extract_excel_rows_as_chunks(tmp_path, display_file_name=item_name)
+                                    folder_path_str = " > ".join(folder_path).lower() if folder_path else ""
+                                    is_downloadable = any(dp in folder_path_str for dp in self.downloadable_folders)
+                                    # File-level doc_id so all rows group as one document; chunk_id = row index
+                                    file_doc_id = f"sharepoint:{item_id_current}"
+                                    for idx, rc in enumerate(row_chunks):
+                                        ct = rc.get("chunk_type", "feature")
+                                        feat = rc.get("feature") or rc.get("sheet_name") or ""
+                                        meta = {
+                                            "doc_id": file_doc_id,
+                                            "source_type": "sharepoint",
+                                            "source": "cloudfuze_doc360",
+                                            "file_name": item_name,
+                                            "file_url": web_url,
+                                            "folder_path": " > ".join(folder_path) if folder_path else "Documents",
+                                            "folder_tags": tag,
+                                            "tag": tag,
+                                            "page_url": web_url,
+                                            "site_url": str(self.site_url),
+                                            "content_type": "excel_fact",
+                                            "chunk_type": ct,
+                                            "feature": rc.get("feature"),
+                                            "supported": rc.get("supported"),
+                                            "is_certificate": False,
+                                            "is_downloadable": is_downloadable,
+                                            "depth": depth,
+                                            "row_index": idx,
+                                            "sheet_name": rc.get("sheet_name", ""),
+                                        }
+                                        # Preserve section/category context when Excel contains in-sheet blocks
+                                        if rc.get("section_title"):
+                                            meta["section_title"] = rc.get("section_title")
+                                        if rc.get("limitation") or ct == "limitation":
+                                            meta["is_limitation"] = True
+                                        if is_downloadable:
+                                            meta["download_url"] = web_url
+                                        meta["raw_kv"] = rc.get("raw_kv", "")
+                                        if rc.get("migration_type"):
+                                            meta["migration_type"] = rc.get("migration_type")
+                                        if rc.get("migration_combination"):
+                                            meta["migration_combination"] = rc.get("migration_combination")
+                                        if rc.get("ingestion_version"):
+                                            meta["ingestion_version"] = rc.get("ingestion_version")
+                                        if rc.get("layout") is not None:
+                                            meta["layout"] = rc.get("layout")
+                                        doc = Document(page_content=rc["content"], metadata=meta)
+                                        all_documents.append(doc)
+                                    if row_chunks:
+                                        by_type = {}
+                                        for c in row_chunks:
+                                            t = c.get("chunk_type") or "unknown"
+                                            by_type[t] = by_type.get(t, 0) + 1
+                                        summary = ", ".join(
+                                            f"{k}={v}" for k, v in sorted(by_type.items(), key=lambda kv: (-kv[1], kv[0]))
+                                        )
+                                        print(f"   [OK] Excel row-level: {item_name} → {len(row_chunks)} chunks | {summary}")
+                                    continue
+                        except Exception as e:
+                            print(f"      [WARNING] Excel row-level extraction failed for {item_name}: {e}")
+                        finally:
+                            if tmp_path and os.path.exists(tmp_path):
+                                try:
+                                    time.sleep(0.1)
+                                    for _ in range(3):
+                                        try:
+                                            os.unlink(tmp_path)
+                                            break
+                                        except PermissionError:
+                                            time.sleep(0.2)
+                                except Exception:
+                                    pass
+
+                    # CSV: treat like Excel (one logical sheet = file base name, same chunk types)
+                    if file_ext == 'csv':
+                        tmp_path = None
+                        try:
+                            drive_id = self.get_drive_id()
+                            if drive_id:
+                                graph_url = f"{self.graph_base_url}/drives/{drive_id}/items/{item_id_current}/content"
+                                headers = sharepoint_auth.get_headers()
+                                resp = requests.get(graph_url, headers=headers, timeout=60, stream=True)
+                                if resp.status_code == 200:
+                                    with tempfile.NamedTemporaryFile(delete=False, suffix='.csv') as tmp_file:
+                                        tmp_path = tmp_file.name
+                                        for b in resp.iter_content(chunk_size=8192):
+                                            tmp_file.write(b)
+
+                                    from app.excel_processor import extract_csv_rows_as_chunks
+                                    row_chunks = extract_csv_rows_as_chunks(tmp_path, display_file_name=item_name)
+                                    folder_path_str = " > ".join(folder_path).lower() if folder_path else ""
+                                    is_downloadable = any(dp in folder_path_str for dp in self.downloadable_folders)
+                                    file_doc_id = f"sharepoint:{item_id_current}"
+                                    for idx, rc in enumerate(row_chunks):
+                                        ct = rc.get("chunk_type", "feature")
+                                        feat = rc.get("feature") or rc.get("sheet_name") or ""
+                                        meta = {
+                                            "doc_id": file_doc_id,
+                                            "source_type": "sharepoint",
+                                            "source": "cloudfuze_doc360",
+                                            "file_name": item_name,
+                                            "file_url": web_url,
+                                            "folder_path": " > ".join(folder_path) if folder_path else "Documents",
+                                            "folder_tags": tag,
+                                            "tag": tag,
+                                            "page_url": web_url,
+                                            "site_url": str(self.site_url),
+                                            "content_type": "excel_fact",
+                                            "chunk_type": ct,
+                                            "feature": rc.get("feature"),
+                                            "supported": rc.get("supported"),
+                                            "is_certificate": False,
+                                            "is_downloadable": is_downloadable,
+                                            "depth": depth,
+                                            "row_index": idx,
+                                            "sheet_name": rc.get("sheet_name", ""),
+                                        }
+                                        if rc.get("section_title"):
+                                            meta["section_title"] = rc.get("section_title")
+                                        if rc.get("limitation") or ct == "limitation":
+                                            meta["is_limitation"] = True
+                                        if is_downloadable:
+                                            meta["download_url"] = web_url
+                                        meta["raw_kv"] = rc.get("raw_kv", "")
+                                        if rc.get("migration_type"):
+                                            meta["migration_type"] = rc.get("migration_type")
+                                        if rc.get("migration_combination"):
+                                            meta["migration_combination"] = rc.get("migration_combination")
+                                        if rc.get("ingestion_version"):
+                                            meta["ingestion_version"] = rc.get("ingestion_version")
+                                        if rc.get("layout") is not None:
+                                            meta["layout"] = rc.get("layout")
+                                        doc = Document(page_content=rc["content"], metadata=meta)
+                                        all_documents.append(doc)
+                                    if row_chunks:
+                                        print(f"   [OK] CSV row-level (as Excel): {item_name} → {len(row_chunks)} chunks")
+                                    continue
+                        except Exception as e:
+                            print(f"      [WARNING] CSV row-level extraction failed for {item_name}: {e}")
+                        finally:
+                            if tmp_path and os.path.exists(tmp_path):
+                                try:
+                                    time.sleep(0.1)
+                                    for _ in range(3):
+                                        try:
+                                            os.unlink(tmp_path)
+                                            break
+                                        except PermissionError:
+                                            time.sleep(0.2)
+                                except Exception:
+                                    pass
+
+                    # DOCX: table row = one chunk; paragraphs = rule/process chunks (enterprise knowledge)
+                    if file_ext == 'docx':
+                        tmp_path = None
+                        try:
+                            drive_id = self.get_drive_id()
+                            if drive_id:
+                                graph_url = f"{self.graph_base_url}/drives/{drive_id}/items/{item_id_current}/content"
+                                headers = sharepoint_auth.get_headers()
+                                resp = requests.get(graph_url, headers=headers, timeout=60, stream=True)
+                                if resp.status_code == 200:
+                                    with tempfile.NamedTemporaryFile(delete=False, suffix='.docx') as tmp_file:
+                                        tmp_path = tmp_file.name
+                                        for b in resp.iter_content(chunk_size=8192):
+                                            tmp_file.write(b)
+                                    
+                                    from app.doc_processor import extract_docx_blocks_as_chunks
+                                    docx_chunks = extract_docx_blocks_as_chunks(tmp_path)
+                                    folder_path_str = " > ".join(folder_path).lower() if folder_path else ""
+                                    is_downloadable = any(dp in folder_path_str for dp in self.downloadable_folders)
+                                    # File-level doc_id so all blocks group as one document; chunk_id = block index
+                                    file_doc_id = f"sharepoint:{item_id_current}"
+                                    for idx, dc in enumerate(docx_chunks):
+                                        ct = dc.get("chunk_type", "process")
+                                        # Skip image_context chunks (images not ingested)
+                                        if ct == "image_context":
+                                            continue
+                                        feat = dc.get("feature") or ""
+                                        meta = {
+                                            "doc_id": file_doc_id,
+                                            "source_type": "sharepoint",
+                                            "source": "cloudfuze_doc360",
+                                            "file_name": item_name,
+                                            "file_url": web_url,
+                                            "folder_path": " > ".join(folder_path) if folder_path else "Documents",
+                                            "folder_tags": tag,
+                                            "tag": tag,
+                                            "page_url": web_url,
+                                            "site_url": str(self.site_url),
+                                            "content_type": "sharepoint_file",
+                                            "chunk_type": ct,
+                                            "feature": dc.get("feature"),
+                                            "supported": dc.get("supported"),
+                                            "is_certificate": False,
+                                            "is_downloadable": is_downloadable,
+                                            "depth": depth,
+                                            "block_index": idx,
+                                            "section_title": dc.get("section_title"),
+                                        }
+                                        if dc.get("limitation") or ct == "limitation":
+                                            meta["is_limitation"] = True
+                                        if is_downloadable:
+                                            meta["download_url"] = web_url
+                                        meta["raw_kv"] = dc.get("raw_kv", "")
+                                        if dc.get("migration_type"):
+                                            meta["migration_type"] = dc.get("migration_type")
+                                        if dc.get("migration_combination"):
+                                            meta["migration_combination"] = dc.get("migration_combination")
+                                        doc = Document(page_content=dc["content"], metadata=meta)
+                                        all_documents.append(doc)
+                                    if docx_chunks:
+                                        by_type = {}
+                                        for c in docx_chunks:
+                                            t = c.get("chunk_type") or "unknown"
+                                            by_type[t] = by_type.get(t, 0) + 1
+                                        summary = ", ".join(
+                                            f"{k}={v}" for k, v in sorted(by_type.items(), key=lambda kv: (-kv[1], kv[0]))
+                                        )
+                                        print(f"   [OK] DOCX block-level: {item_name} → {len(docx_chunks)} chunks | {summary}")
+                                    continue
+                        except Exception as e:
+                            print(f"      [WARNING] DOCX block-level extraction failed for {item_name}: {e}")
+                        finally:
+                            if tmp_path and os.path.exists(tmp_path):
+                                try:
+                                    time.sleep(0.1)
+                                    os.unlink(tmp_path)
+                                except Exception:
+                                    pass
+
+                    # PDF: Atomic Truth Extraction (Tables -> Rules, Images -> Evidence, Text -> Explanations)
+                    if file_ext == 'pdf':
+                        tmp_path = None
+                        try:
+                            drive_id = self.get_drive_id()
+                            if drive_id:
+                                graph_url = f"{self.graph_base_url}/drives/{drive_id}/items/{item_id_current}/content"
+                                headers = sharepoint_auth.get_headers()
+                                resp = requests.get(graph_url, headers=headers, timeout=60, stream=True)
+                                if resp.status_code == 200:
+                                    with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+                                        tmp_path = tmp_file.name
+                                        for b in resp.iter_content(chunk_size=8192):
+                                            tmp_file.write(b)
+                                    
+                                    from app.pdf_processor import extract_pdf_tables_as_chunks, extract_pdf_atomic_chunks
+                                    # Tables: layered (raw_content, table_row, feature_capability, limitation, summary)
+                                    pdf_table_chunks = extract_pdf_tables_as_chunks(tmp_path, file_name=item_name)
+                                    # Non-table: body text (explanation) only; images skipped (no image_context ingestion)
+                                    atomic_chunks = extract_pdf_atomic_chunks(tmp_path, file_name=item_name)
+                                    pdf_other_chunks = [c for c in atomic_chunks if c.get("chunk_type") == "explanation"]
+                                    pdf_chunks = pdf_table_chunks + pdf_other_chunks
+
+                                    folder_path_str = " > ".join(folder_path).lower() if folder_path else ""
+                                    is_certificate = (
+                                        ('certificate' in folder_path_str or 'cert' in folder_path_str) and
+                                        '2025' in folder_path_str
+                                    )
+                                    is_downloadable = is_certificate or any(dp in folder_path_str for dp in self.downloadable_folders)
+                                    file_doc_id = f"sharepoint:{item_id_current}"
+
+                                    # Count chunk types for accurate logging (after combining both sources)
+                                    table_count = sum(1 for c in pdf_chunks if c.get("chunk_type") in ("feature_capability", "limitation", "table_row", "migration_capability_summary"))
+                                    text_count = sum(1 for c in pdf_chunks if c.get("chunk_type") == "explanation")
+                                    total = len(pdf_chunks)
+
+                                    for idx, chunk in enumerate(pdf_chunks):
+                                        meta = {
+                                            "doc_id": file_doc_id,
+                                            "source_type": "sharepoint",
+                                            "source": "cloudfuze_doc360",
+                                            "file_name": item_name,
+                                            "file_url": web_url,
+                                            "folder_path": " > ".join(folder_path) if folder_path else "Documents",
+                                            "folder_tags": tag,
+                                            "tag": tag,
+                                            "page_url": web_url,
+                                            "site_url": str(self.site_url),
+                                            "content_type": f"pdf_{chunk.get('chunk_type', 'unknown')}",
+                                            "chunk_type": chunk.get("chunk_type"),
+                                            "feature": chunk.get("feature"),
+                                            "supported": chunk.get("supported"),
+                                            "is_certificate": is_certificate,
+                                            "is_downloadable": is_downloadable,
+                                            "depth": depth,
+                                            "block_index": idx,
+                                            "page_number": chunk.get("page_number"),
+                                            "section_title": chunk.get("section_title"),
+                                        }
+                                        if chunk.get("limitation") or chunk.get("chunk_type") == "limitation":
+                                            meta["is_limitation"] = True
+                                        if is_downloadable:
+                                            meta["download_url"] = web_url
+                                        meta["raw_kv"] = chunk.get("raw_kv", "")
+                                        if chunk.get("migration_type"):
+                                            meta["migration_type"] = chunk.get("migration_type")
+                                        if chunk.get("migration_combination"):
+                                            meta["migration_combination"] = chunk.get("migration_combination")
+                                        if chunk.get("layout") is not None:
+                                            meta["layout"] = chunk.get("layout")
+                                        # Positional metadata for text chunks (for interleaving)
+                                        if chunk.get("vertical_position") is not None:
+                                            meta["vertical_position"] = chunk.get("vertical_position")
+
+                                        all_documents.append(Document(page_content=chunk["content"], metadata=meta))
+
+                                    if pdf_chunks:
+                                        by_type = {}
+                                        for c in pdf_chunks:
+                                            t = c.get("chunk_type") or "unknown"
+                                            by_type[t] = by_type.get(t, 0) + 1
+                                        summary = ", ".join(
+                                            f"{k}={v}" for k, v in sorted(by_type.items(), key=lambda kv: (-kv[1], kv[0]))
+                                        )
+                                        print(f"   [OK] PDF: {item_name} → {total} chunks ({table_count} tables, {text_count} text) | {summary}")
+                                    continue
+                        except Exception as e:
+                            print(f"      [WARNING] PDF layered extraction failed for {item_name}: {e}")
+                            import traceback
+                            traceback.print_exc()
+                        finally:
+                            if tmp_path and os.path.exists(tmp_path):
+                                try:
+                                    time.sleep(0.1)
+                                    os.unlink(tmp_path)
+                                except Exception:
+                                    pass
+
+                    # Standalone images (JPG, PNG): skipped — only document content is ingested
+                    if file_ext in ['png', 'jpg', 'jpeg']:
+                        continue
+
+                    # Download file content (for non-PPTX, non-Excel, non-DOCX, non-PDF-section files, or fallbacks)
                     file_content = self.download_file_content(item_id_current, item_name)
                     
                     # If we couldn't download text content, create a document with enriched metadata context
@@ -497,16 +838,19 @@ Note: Full text content could not be extracted from this file, but it is availab
                     # Detect Excel files for proper metadata tagging
                     is_excel = file_ext in ['xls', 'xlsx']
                     
-                    # Create metadata
+                    # Create metadata (file-level doc_id for stable grouping)
                     metadata = {
+                        "doc_id": f"sharepoint:{item_id_current}",
                         "source_type": "sharepoint",
                         "source": "cloudfuze_doc360",
                         "file_name": item_name,
                         "file_url": web_url,
                         "folder_path": " > ".join(folder_path) if folder_path else "Documents",
+                        "folder_name": " > ".join(folder_path) if folder_path else "Documents",
                         "folder_tags": tag,
                         "tag": tag,
                         "page_url": web_url,
+                        "site_url": str(self.site_url),
                         "content_type": "excel_data" if is_excel else ("sharepoint_video" if is_video else "sharepoint_file"),  # Mark Excel files
                         "is_certificate": is_certificate,
                         "depth": depth
@@ -531,7 +875,7 @@ Note: Full text content could not be extracted from this file, but it is availab
                         metadata["video_name"] = item_name.rsplit('.', 1)[0]
                     
                     doc = Document(
-                        page_content=file_content[:15000],
+                        page_content=file_content,
                         metadata=metadata
                     )
                     all_documents.append(doc)

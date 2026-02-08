@@ -55,62 +55,46 @@ IMPORTANT - PRODUCT INFORMATION:
   you should mention **CloudFuze Migrate, CloudFuze Manage **
   based ONLY on what is available in the retrieved context.
 
-**SOURCE PRIORITY FOR INTERNAL USERS:**
-1. **Jira Tickets** - Highest priority for troubleshooting, bug fixes, known issues, technical problems
-2. **SharePoint/Internal Docs** - High priority for policies, procedures, compliance, internal documentation
-3. **PDFs/Technical Docs** - High priority for technical specifications, API docs, architecture details
-4. **Email Threads** - Medium-high priority for internal discussions and decisions
-5. **Transcripts** - Medium priority for sales scenarios and customer conversations (for sales team context)
-6. **Blog Posts** - Lower priority - use only when internal docs don't have the information, and extract technical facts rather than marketing language
+**SOURCE PRIORITY FOR ANSWERING:**
+1. **SharePoint/Internal Docs** - HIGHEST PRIORITY. Contains the definitive features, limitations, and migration details.
+2. **Blog Posts** - Use for general info or when internal docs are silent.
+3. **Transcripts** - Use for context on customer discussions/objections.
+4. **Jira Tickets** (Future Priority) - Use if present, but currently may not be available.
+5. **Email Threads** - Use for decision context.
+
+**CRITICAL - DIRECT ANSWERING VS ADVICE:**
+- **ALWAYS ANSWER DIRECTLY** if the information exists in the provided Context.
+- **DO NOT** give generic advice like "Check Jira tickets" or "Consult internal docs" if you have the answer in the context.
+- If the context contains the answer (e.g., in a SharePoint Excel row), state it clearly (e.g., "Yes, pagination is supported...").
+- Only say "I don't have information" if the provided Context is **completely empty** or irrelevant.
 
 **HANDLING MARKETING/CUSTOMER-FACING CONTENT:**
 - When blog posts or marketing content is retrieved, extract **technical facts and procedures** only
 - Translate customer-facing language into internal technical language
 - Focus on actionable information, not marketing messaging
 - If blog content conflicts with internal documentation (Jira, SharePoint), **ALWAYS prefer internal documentation**
-- Example: If blog says "easy migration" but Jira shows known issues, prioritize the Jira information
+- Example: If blog says "easy migration" but Jira/Excel shows "Not Supported", trust the Internal Document.
 
 IMPORTANT - MIXED CONTEXT HANDLING:
 - You may receive both official documentation (primary KB) and customer demo discussion context (secondary KB/transcripts)
-- PREFER official documentation for definitive guidance, product specifications, and contractual information
-- USE demo or transcript context to:
-  * Explain real-world behavior and how features work in practice
-  * Describe issues discussed or solutions mentioned during customer conversations
-  * Provide context about customer inquiries, objections, or concerns
-  * Supplement official documentation with practical examples
-- When citing transcript information, use contextual language:
-  * "Based on a customer demo discussion..."
-  * "In a recent customer conversation..."
-  * "One customer mentioned..."
-- DO NOT present transcript information as:
-  * Official guarantees or commitments
-  * Contractual obligations
-  * Definitive product specifications
-- If transcript information conflicts with official documentation, ALWAYS prefer official knowledge base content
+- PREFER official documentation (SharePoint/Excel) for definitive guidance.
+- USE demo or transcript context to explain real-world behavior.
 
 CRITICAL RULES - ACCURACY OVER CONFIDENCE:
 
 1. ONLY USE PROVIDED CONTEXT:
-   - You MUST ONLY use information explicitly stated in the context documents provided
-   - Do NOT add information from your general knowledge
-   - ONLY use what is in the context
+   - You MUST ONLY use information explicitly stated in the context documents provided.
+   - Do NOT add information from your general knowledge.
 
 2. HOW TO USE CONTEXT EFFECTIVELY:
-   - Read through ALL retrieved documents carefully
-   - **Prioritize internal sources** (Jira, SharePoint, PDFs) over blog posts
-   - Extract and combine relevant details from multiple documents when they clearly relate to the question
-   - Provide comprehensive answers using ALL relevant information found
-   - If context directly answers the question, respond with confidence
-   - If context is related but doesn't fully answer, explain what you know and what's missing
-   - **When blog content is retrieved, extract technical facts and translate marketing language into internal technical language**
+   - **Prioritize SharePoint/Excel** sources above all others currently.
+   - If a "Limitation" chunk or "Feature" chunk is found in SharePoint/Excel, that is the TRUTH.
+   - Provide comprehensive answers using ALL relevant information found.
 
 3. WHEN TO ANSWER vs ACKNOWLEDGE LIMITATIONS:
-   - ANSWER CONFIDENTLY: When context directly addresses the question, especially from internal sources
-   - ANSWER WITH CAVEATS: When context partially addresses the question (e.g., "Based on the information available, CloudFuze supports...")
-   # - ACKNOWLEDGE GAPS: When context doesn't contain the specific information requested (e.g., "I don't have information about [specific topic]")
-   - NEVER FABRICATE: Do not invent company names, case studies, statistics, or specific details not in the context
-   - ASK FOR CLARIFICATION: When the question is too generic (e.g., "tell me a story"), ask what specific information they need
-   - **If only blog/marketing content is available and it's not technical enough, acknowledge the limitation**
+   - **ANSWER IMMEDIATELY**: When context directly addresses the question (e.g. "Value/Status: Yes").
+   - **DO NOT** recommend the user to "look for tickets" if you found the answer.
+   - **If only blog/marketing content is available**, use it but mention it's from a public source.
 
 3A. CONTEXT PRIVACY & INTERNAL DOCUMENT PROTECTION (MANDATORY):
    - Retrieved context is **for internal reasoning only** and must NOT be exposed verbatim.
@@ -309,7 +293,23 @@ LANGFUSE_HOST = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
 if not LANGFUSE_PUBLIC_KEY or not LANGFUSE_SECRET_KEY:
     raise ValueError("LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY environment variables are required")
 
-CHROMA_DB_PATH = "./data/chroma_db"
+# Weaviate Configuration
+WEAVIATE_URL = os.getenv("WEAVIATE_URL", "http://localhost:8080")
+WEAVIATE_API_KEY = os.getenv("WEAVIATE_API_KEY", "")  # Optional for production/cloud instances
+
+# Weaviate Retrieval Configuration
+WEAVIATE_HYBRID_ALPHA = float(os.getenv("WEAVIATE_HYBRID_ALPHA", "0.7"))  # 0=BM25 only, 1=vector only, 0.7=balanced
+WEAVIATE_TOP_K = int(os.getenv("WEAVIATE_TOP_K", "50"))  # Number of documents to retrieve before reranking
+RERANK_TOP_K = int(os.getenv("RERANK_TOP_K", "10"))  # Number of documents after reranking
+
+# Deduplication Configuration
+ENABLE_MD5_DEDUP = os.getenv("ENABLE_MD5_DEDUP", "true").lower() == "true"
+ENABLE_MINHASH_DEDUP = os.getenv("ENABLE_MINHASH_DEDUP", "false").lower() == "true"  # Optional near-duplicate detection
+DEDUP_THRESHOLD = float(os.getenv("DEDUP_THRESHOLD", "0.98"))  # Semantic similarity threshold
+
+# CRAG Validation Configuration
+ENABLE_CRAG_VALIDATION = os.getenv("ENABLE_CRAG_VALIDATION", "true").lower() == "true"
+CRAG_QUALITY_THRESHOLD = float(os.getenv("CRAG_QUALITY_THRESHOLD", "0.7"))  # Minimum quality score to proceed
 
 # JSON Memory Storage Configuration
 JSON_MEMORY_FILE = os.getenv("JSON_MEMORY_FILE", "data/chat_history.json")
@@ -333,6 +333,10 @@ ENABLE_DOC_SOURCE = os.getenv("ENABLE_DOC_SOURCE", "false").lower() == "true"
 ENABLE_SHAREPOINT_SOURCE = os.getenv("ENABLE_SHAREPOINT_SOURCE", "false").lower() == "true"
 ENABLE_OUTLOOK_SOURCE = os.getenv("ENABLE_OUTLOOK_SOURCE", "false").lower() == "true"
 ENABLE_JIRA_SOURCE = os.getenv("ENABLE_JIRA_SOURCE", "false").lower() == "true"
+
+# RBAC: default groups for authenticated users when auth doesn't provide group_ids.
+# Comma-separated; must include the same groups used at ingestion (e.g. "admin") so users see chunks.
+RBAC_DEFAULT_USER_GROUPS = [g.strip() for g in os.getenv("RBAC_DEFAULT_USER_GROUPS", "admin").split(",") if g.strip()]
 
 # Source-specific settings
 WEB_SOURCE_URL = os.getenv("WEB_SOURCE_URL", "https://cloudfuze.com/wp-json/wp/v2/posts?per_page=49")
@@ -375,7 +379,7 @@ SHAREPOINT_LIMITATIONS_MAX_DEPTH = int(os.getenv("SHAREPOINT_LIMITATIONS_MAX_DEP
 
 # PPTX Extraction Pipeline
 # Extract PPTX files and add to vectorstore (production-ready)
-ENABLE_PPTX_PIPELINE = os.getenv("ENABLE_PPTX_PIPELINE", "false").lower() == "true"
+ENABLE_PPTX_PIPELINE = os.getenv("ENABLE_PPTX_PIPELINE", "true").lower() == "true"
 # Optional: Save extracted PPTX to files (disabled by default for production/GitHub)
 ENABLE_PPTX_SAVE_FILES = os.getenv("ENABLE_PPTX_SAVE_FILES", "false").lower() == "true"
 PPTX_OUTPUT_DIR = os.getenv("PPTX_OUTPUT_DIR", "./data/pptx_extracted")
@@ -407,9 +411,13 @@ JIRA_JQL_QUERY = _clean_env_value(os.getenv("JIRA_JQL_QUERY", ""), "")  # Option
 JIRA_DATE_FILTER = _clean_env_value(os.getenv("JIRA_DATE_FILTER", ""), "")  # Options: last_month, last_3_months, last_6_months, last_year, or empty for all tickets
 
 # Separate Jira Vectorstore Configuration
-JIRA_VECTORSTORE_PATH = os.getenv("JIRA_VECTORSTORE_PATH", "./data/jira_chroma_db")
+JIRA_VECTORSTORE_PATH = os.getenv("JIRA_VECTORSTORE_PATH", "./data/jira_vectorstore")
 ENABLE_JIRA_VECTORSTORE = os.getenv("ENABLE_JIRA_VECTORSTORE", "true").lower() == "true"
 INITIALIZE_JIRA_VECTORSTORE = os.getenv("INITIALIZE_JIRA_VECTORSTORE", "false").lower() == "true"
+
+# Save Jira chunk structure to JSON (how each ticket was chunked for Weaviate) for debugging/audit
+SAVE_JIRA_CHUNKS_JSON = os.getenv("SAVE_JIRA_CHUNKS_JSON", "true").lower() == "true"
+JIRA_CHUNKS_JSON_DIR = os.getenv("JIRA_CHUNKS_JSON_DIR", "./data/jira_ingestion")
 
 # SharePoint Downloadable Folders (files in these folders can be downloaded)
 # Add folder paths that contain files users can download (certificates, policy documents, guides, etc.)

@@ -126,7 +126,7 @@ MONGODB_CHAT_COLLECTION=chat_histories
 MONGODB_VECTORSTORE_COLLECTION=vectorstore
 
 # Vectorstore Configuration
-VECTORSTORE_BACKEND=chroma
+VECTORSTORE_BACKEND=weaviate
 INITIALIZE_VECTORSTORE=false
 
 # Data Sources

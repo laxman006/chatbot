@@ -17,12 +17,8 @@ langchain==1.0.1
 langchain-openai==1.0.1
 langchain-community==0.4
 langchain-core==1.0.0
-langchain-chroma==1.0.0
 openai>=1.109.1
 langfuse==2.51.2
-
-# Vector Database (for loading pre-built vectorstore)
-chromadb>=1.0.20
 
 # HTTP and Web Scraping
 requests>=2.32.5

@@ -8,7 +8,7 @@ Questions can be:
 - AI-generated based on popular topics
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, List
 from datetime import datetime
 from enum import Enum
@@ -53,9 +53,9 @@ class SuggestedQuestion(BaseModel):
     # Targeting (optional)
     target_user_roles: Optional[List[str]] = Field(None, description="Show only to specific user roles")
     keywords: Optional[List[str]] = Field(None, description="Keywords for context-aware display")
-    
-    class Config:
-        json_schema_extra = {
+
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "question_text": "How do I migrate data from Slack to Microsoft Teams?",
                 "category": "migration",
@@ -67,6 +67,7 @@ class SuggestedQuestion(BaseModel):
                 "click_rate": 6.96
             }
         }
+    )
 
 
 class QuestionCreate(BaseModel):

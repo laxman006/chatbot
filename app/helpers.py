@@ -8,10 +8,9 @@ from bs4 import BeautifulSoup
 from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
-from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
 from config import (
-    CHROMA_DB_PATH, BLOG_POSTS_PER_PAGE, BLOG_MAX_PAGES, BLOG_START_PAGE,
+    BLOG_POSTS_PER_PAGE, BLOG_MAX_PAGES, BLOG_START_PAGE, BLOG_LAST_POLL_FILE,
     SHAREPOINT_SALES_SITE_URL, SHAREPOINT_SALES_FOLDER_PATH, SHAREPOINT_SALES_MAX_DEPTH,
     SHAREPOINT_PRESALES_SITE_URL, SHAREPOINT_PRESALES_FOLDER_PATH, SHAREPOINT_PRESALES_MAX_DEPTH,
     SHAREPOINT_LIMITATIONS_SITE_URL, SHAREPOINT_LIMITATIONS_FOLDER_PATH, SHAREPOINT_LIMITATIONS_MAX_DEPTH
@@ -146,21 +145,27 @@ def fetch_latest_web_content(url: str, max_posts: int = 50, since_date: str = No
     
     # Add date filter if provided (WordPress API supports after parameter)
     if since_date:
-        # Validate date is not in the future
+        # Normalize to YYYY-MM-DD (stored value may be ISO from older runs)
+        since_date_ymd = since_date[:10] if len(since_date) >= 10 else since_date
         try:
-            date_obj = datetime.strptime(since_date, "%Y-%m-%d")
+            date_obj = datetime.strptime(since_date_ymd, "%Y-%m-%d")
             today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
             if date_obj > today:
-                print(f"[WARN] Date {since_date} is in the future. Skipping date filter.")
+                print(f"[WARN] Date {since_date_ymd} is in the future. Skipping date filter.")
             else:
                 # WordPress API expects ISO 8601 datetime format (YYYY-MM-DDTHH:MM:SS)
-                # Convert date string to ISO datetime format
-                iso_datetime = f"{since_date}T00:00:00"
+                iso_datetime = f"{since_date_ymd}T00:00:00"
                 base_params["after"] = iso_datetime
                 print(f"[*] Filtering posts after {iso_datetime}...")
         except ValueError:
-            # Invalid date format, skip the filter
-            print(f"[WARN] Invalid date format '{since_date}'. Expected YYYY-MM-DD. Skipping date filter.")
+            # Fail fast: invalid date would cause partial fetch and destructive deletes
+            raise ValueError(
+                f"Invalid date format for incremental blog fetch: '{since_date}'. "
+                "Expected YYYY-MM-DD (or ISO string). Aborting to avoid partial fetch."
+            )
+    
+    # Request embedded author for author_name (WordPress REST API)
+    base_params["_embed"] = "author"
     
     # Fetch only first page with limited posts
     data = fetch_posts(
@@ -185,10 +190,17 @@ def fetch_latest_web_content(url: str, max_posts: int = 50, since_date: str = No
         
         # Extract post metadata from WordPress API response
         title = post.get("title", {}).get("rendered", "Untitled")
-        slug = post.get("slug", "")
+        slug = post.get("slug", "") or post.get("link", "").strip("/").split("/")[-1] or str(post.get("id", ""))
         link = post.get("link", "")  # Full URL to the blog post
         content = post["content"]["rendered"]
         post_date = post.get("date", "")  # ISO date string from WordPress API
+        modified = post.get("modified") or post_date
+        # Author display name (WordPress _embed=author returns _embedded.author[0].name)
+        emb = post.get("_embedded") or {}
+        author_list = emb.get("author")
+        author_name = ""
+        if isinstance(author_list, list) and author_list and isinstance(author_list[0], dict):
+            author_name = (author_list[0].get("name") or "").strip()
         
         # Clean HTML tags from blog content
         soup = BeautifulSoup(content, "html.parser")
@@ -196,6 +208,9 @@ def fetch_latest_web_content(url: str, max_posts: int = 50, since_date: str = No
         
         if not clean_text.strip():
             continue
+        
+        # One doc-level summary per post (used for parent-doc expansion / CRAG)
+        doc_summary = clean_text[:400].rstrip() + ("..." if len(clean_text) > 400 else "")
         
         # Chunk this post's content
         splitter = RecursiveCharacterTextSplitter(
@@ -208,17 +223,29 @@ def fetch_latest_web_content(url: str, max_posts: int = 50, since_date: str = No
         content_with_title = f"# {title}\n\n{clean_text}"
         chunks = splitter.create_documents([content_with_title])
         
-        # Add comprehensive metadata to each chunk
+        # Stable doc_id for grouping (ingestion pipeline groups by doc_id)
+        doc_id = slug or link or str(post.get("id", ""))
+        
+        # Add canonical blog metadata to each chunk (Weaviate gold path)
         for chunk in chunks:
-            chunk.metadata["source_type"] = "web"
+            chunk.metadata["doc_id"] = doc_id
+            chunk.metadata["source_type"] = "blog"
             chunk.metadata["source"] = "cloudfuze_blog"
             chunk.metadata["tag"] = "blog"
             chunk.metadata["post_title"] = title
             chunk.metadata["post_slug"] = slug
             chunk.metadata["post_url"] = link
             chunk.metadata["is_blog_post"] = True
+            # Universal/canonical fields for retrieval and citations
+            chunk.metadata["title"] = title
+            chunk.metadata["url"] = link
+            chunk.metadata["author_name"] = author_name
+            chunk.metadata["doc_summary"] = doc_summary
             if post_date:
-                chunk.metadata["post_date"] = post_date  # Store post date for filtering
+                chunk.metadata["post_date"] = post_date
+                chunk.metadata["created_at"] = post_date
+                chunk.metadata["updated_at"] = modified
+                chunk.metadata["publish_date"] = post_date
         
         all_docs.extend(chunks)
         posts_processed += 1
@@ -227,20 +254,37 @@ def fetch_latest_web_content(url: str, max_posts: int = 50, since_date: str = No
     return all_docs
 
 
-def get_last_blog_post_date() -> Optional[str]:
-    """Get the date of the most recent blog post from vectorstore metadata.
-    
-    Returns:
-        ISO date string (YYYY-MM-DD) of the last processed blog post, or None if not found
-    """
+def _blog_metadata_path() -> str:
+    """Path to file-based blog metadata (replaces legacy vectorstore metadata)."""
+    return os.path.join(os.path.dirname(BLOG_LAST_POLL_FILE), "blog_metadata.json")
+
+
+def load_blog_metadata() -> dict:
+    """Load blog metadata from file (last_blog_poll, blog_post_count, last_blog_post_date, etc.)."""
     try:
-        from app.vectorstore import load_stored_metadata
-        metadata = load_stored_metadata()
-        if metadata and "last_blog_post_date" in metadata:
-            return metadata["last_blog_post_date"]
+        path = _blog_metadata_path()
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
     except Exception as e:
-        print(f"[WARN] Could not get last blog post date: {e}")
-    return None
+        print(f"[WARN] Could not load blog metadata: {e}")
+    return {}
+
+
+def save_blog_metadata(metadata: dict) -> None:
+    """Write blog metadata to file. Creates parent dir if needed."""
+    try:
+        path = _blog_metadata_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(metadata, f, indent=2)
+    except Exception as e:
+        print(f"[WARN] Could not save blog metadata: {e}")
+
+
+def get_last_blog_post_date() -> Optional[str]:
+    """Get the date of the most recent blog post from file-based blog metadata."""
+    return load_blog_metadata().get("last_blog_post_date")
 
 def fetch_web_content(url: str):
     """Fetch and chunk web content into LangChain Documents with blog post URLs and metadata.
@@ -268,6 +312,7 @@ def fetch_web_content(url: str):
         base_params = dict(parse_qsl(parsed.query))
         base_params.pop("page", None)
         base_params.pop("per_page", None)
+        base_params["_embed"] = "author"
         data = fetch_posts(
             base_url,
             per_page=BLOG_POSTS_PER_PAGE,
@@ -286,10 +331,16 @@ def fetch_web_content(url: str):
         
         # Extract post metadata from WordPress API response
         title = post.get("title", {}).get("rendered", "Untitled")
-        slug = post.get("slug", "")
+        slug = post.get("slug", "") or (post.get("link", "").strip("/").split("/")[-1] if post.get("link") else "") or str(post.get("id", ""))
         link = post.get("link", "")  # Full URL to the blog post
         content = post["content"]["rendered"]
         post_date = post.get("date", "")  # ISO date string from WordPress API
+        modified = post.get("modified") or post_date
+        emb = post.get("_embedded") or {}
+        author_list = emb.get("author")
+        author_name = ""
+        if isinstance(author_list, list) and author_list and isinstance(author_list[0], dict):
+            author_name = (author_list[0].get("name") or "").strip()
         
         # Clean HTML tags from blog content
         soup = BeautifulSoup(content, "html.parser")
@@ -297,6 +348,8 @@ def fetch_web_content(url: str):
         
         if not clean_text.strip():
             continue
+        
+        doc_summary = clean_text[:400].rstrip() + ("..." if len(clean_text) > 400 else "")
         
         # Chunk this post's content
         splitter = RecursiveCharacterTextSplitter(
@@ -309,17 +362,26 @@ def fetch_web_content(url: str):
         content_with_title = f"# {title}\n\n{clean_text}"
         chunks = splitter.create_documents([content_with_title])
         
-        # Add comprehensive metadata to each chunk
+        doc_id = slug or link or str(post.get("id", ""))
+        
         for chunk in chunks:
-            chunk.metadata["source_type"] = "web"
+            chunk.metadata["doc_id"] = doc_id
+            chunk.metadata["source_type"] = "blog"
             chunk.metadata["source"] = "cloudfuze_blog"
             chunk.metadata["tag"] = "blog"
-            chunk.metadata["post_title"] = title  # Blog post title
-            chunk.metadata["post_slug"] = slug  # URL slug
-            chunk.metadata["post_url"] = link  # Full blog post URL
-            chunk.metadata["is_blog_post"] = True  # Flag to identify blog content
+            chunk.metadata["post_title"] = title
+            chunk.metadata["post_slug"] = slug
+            chunk.metadata["post_url"] = link
+            chunk.metadata["is_blog_post"] = True
+            chunk.metadata["title"] = title
+            chunk.metadata["url"] = link
+            chunk.metadata["author_name"] = author_name
+            chunk.metadata["doc_summary"] = doc_summary
             if post_date:
-                chunk.metadata["post_date"] = post_date  # Store post date for filtering
+                chunk.metadata["post_date"] = post_date
+                chunk.metadata["created_at"] = post_date
+                chunk.metadata["updated_at"] = modified
+                chunk.metadata["publish_date"] = post_date
         
         all_docs.extend(chunks)
         posts_processed += 1
@@ -717,388 +779,16 @@ def preserve_markdown(md_text: str) -> str:
     return clean_text
 
 def build_vectorstore(url: str):
-    """Build and persist embeddings for web documents with HNSW graph indexing."""
-    raw_text = load_webpage(url)
-    
-    # CRITICAL: Clean HTML tags from web content for better semantic search
-    print("Cleaning HTML tags from web content...")
-    soup = BeautifulSoup(raw_text, "html.parser")
-    clean_text = soup.get_text(separator="\n", strip=True)
-    print(f"[OK] Cleaned web content: {len(raw_text)} chars -> {len(clean_text)} chars")
-    
-    # Use larger chunks with more overlap for better semantic search
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1500,  # Larger chunks for more context
-        chunk_overlap=300,  # More overlap to maintain context across chunks
-        separators=["\n\n", "\n", ". ", " ", ""]  # Smart splitting by paragraphs, sentences
+    """Deprecated. ChromaDB removed. Use Weaviate: python scripts/ingest_to_weaviate.py --source blog"""
+    raise NotImplementedError(
+        "ChromaDB has been removed. Use Weaviate for ingestion: "
+        "python scripts/ingest_to_weaviate.py --source blog"
     )
-    docs = splitter.create_documents([clean_text])
-    embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
-    
-    # Create vectorstore with HNSW graph indexing for better retrieval
-    vectorstore = Chroma.from_documents(
-        docs, 
-        embeddings, 
-        persist_directory=CHROMA_DB_PATH,
-        collection_metadata={
-            "hnsw:space": "cosine",
-            "hnsw:construction_ef": 200,
-            "hnsw:search_ef": 100,
-            "hnsw:M": 48,
-        }
-    )
-    print("[OK] Vectorstore created with HNSW graph indexing")
-    return vectorstore
-
-def build_combined_vectorstore(url: str = None, pdf_directory: str = None, excel_directory: str = None, doc_directory: str = None, sharepoint_enabled: bool = False, outlook_enabled: bool = False):
-    """Build and persist embeddings for enabled sources only."""
-    all_docs = []
-    
-    # Process web content if URL provided
-    if url:
-        print("Loading web content...")
-        # Use fetch_web_content which now includes blog post URLs and metadata
-        web_docs = fetch_web_content(url)
-        all_docs.extend(web_docs)
-        print(f"  - Web documents: {len(web_docs)}")
-    else:
-        print("Web content disabled - skipping...")
-    
-    # Process PDF documents if directory provided
-    if pdf_directory and os.path.exists(pdf_directory):
-        print("Processing PDF documents...")
-        pdf_docs = process_pdf_directory(pdf_directory)
-        pdf_chunks = chunk_pdf_documents(pdf_docs, chunk_size=1000, chunk_overlap=200)
-        all_docs.extend(pdf_chunks)
-        print(f"  - PDF documents: {len(pdf_chunks)}")
-    else:
-        print("PDF processing disabled or directory not found - skipping...")
-    
-    # Process Excel files if directory provided
-    if excel_directory and os.path.exists(excel_directory):
-        print("Processing Excel documents...")
-        excel_docs = process_excel_directory(excel_directory)
-        excel_chunks = chunk_excel_documents(excel_docs, chunk_size=1000, chunk_overlap=200)
-        all_docs.extend(excel_chunks)
-        print(f"  - Excel documents: {len(excel_chunks)}")
-    else:
-        print("Excel processing disabled or directory not found - skipping...")
-    
-    # Process Word documents if directory provided
-    if doc_directory and os.path.exists(doc_directory):
-        print("Processing Word documents...")
-        doc_docs = process_doc_directory(doc_directory)
-        doc_chunks = chunk_doc_documents(doc_docs, chunk_size=1000, chunk_overlap=200)
-        all_docs.extend(doc_chunks)
-        print(f"  - Word documents: {len(doc_chunks)}")
-    else:
-        print("Word document processing disabled or directory not found - skipping...")
-    
-    # Process SharePoint content if enabled
-    if sharepoint_enabled:
-        print("Processing SharePoint content...")
-        try:
-            sharepoint_docs = process_sharepoint_content()
-            all_docs.extend(sharepoint_docs)
-            print(f"  - SharePoint documents: {len(sharepoint_docs)}")
-        except Exception as e:
-            print(f"[ERROR] SharePoint processing failed: {e}")
-            print("  - SharePoint documents: 0 (failed)")
-    else:
-        print("SharePoint processing disabled - skipping...")
-    
-    # Process Outlook email content if enabled
-    if outlook_enabled:
-        print("Processing Outlook email content...")
-        try:
-            from app.outlook_processor import process_outlook_content
-            outlook_docs = process_outlook_content()
-            all_docs.extend(outlook_docs)
-            print(f"  - Outlook email documents: {len(outlook_docs)}")
-        except Exception as e:
-            print(f"[ERROR] Outlook processing failed: {e}")
-            print("  - Outlook email documents: 0 (failed)")
-    else:
-        print("Outlook processing disabled - skipping...")
-    
-    # Process Jira tickets and comments if enabled
-    jira_enabled = os.getenv("ENABLE_JIRA_SOURCE", "false").lower() == "true"
-    if jira_enabled:
-        print("Processing Jira tickets and comments...")
-        try:
-            from app.jira_processor import process_jira_content
-            jira_docs = process_jira_content()
-            all_docs.extend(jira_docs)
-            print(f"  - Jira ticket documents: {len(jira_docs)}")
-        except Exception as e:
-            print(f"[ERROR] Jira processing failed: {e}")
-            print("  - Jira ticket documents: 0 (failed)")
-    else:
-        print("Jira processing disabled - skipping...")
-    
-    print(f"Total documents to process: {len(all_docs)}")
-    
-    # Create embeddings and vectorstore with batch processing to avoid token limits
-    embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
-    
-    # Process in batches to avoid OpenAI token limit (300k tokens per request)
-    # Each batch: ~50 docs = ~50k tokens (safe margin)
-    batch_size = 50
-    total_batches = (len(all_docs) + batch_size - 1) // batch_size
-    
-    print(f"\n[*] Creating vectorstore with HNSW graph indexing...")
-    print(f"[*] Processing {total_batches} batches of up to {batch_size} documents each...")
-    
-    vectorstore = None
-    for i in range(0, len(all_docs), batch_size):
-        batch = all_docs[i:i + batch_size]
-        batch_num = (i // batch_size) + 1
-        print(f"   [*] Processing batch {batch_num}/{total_batches} ({len(batch)} documents)...")
-        
-        if vectorstore is None:
-            # Create vectorstore with first batch and HNSW graph indexing
-            vectorstore = Chroma.from_documents(
-                batch, 
-                embeddings, 
-                persist_directory=CHROMA_DB_PATH,
-                collection_metadata={
-                    "hnsw:space": "cosine",  # Cosine similarity for semantic search
-                    "hnsw:construction_ef": 200,  # Better indexing accuracy
-                    "hnsw:search_ef": 100,  # Better search accuracy
-                    "hnsw:M": 48,  # More graph connections for better recall
-                }
-            )
-        else:
-            # Add subsequent batches
-            vectorstore.add_documents(batch)
-        
-        print(f"   [OK] Batch {batch_num}/{total_batches} complete")
-    
-    print("\n[OK] Selective knowledge base created with HNSW graph indexing!")
-    return vectorstore
-
-    return vectorstore
-
 
 
 def build_combined_vectorstore(url: str = None, pdf_directory: str = None, excel_directory: str = None, doc_directory: str = None, sharepoint_enabled: bool = False, outlook_enabled: bool = False):
-
-    """Build and persist embeddings for enabled sources only."""
-
-    all_docs = []
-
-    
-
-    # Process web content if URL provided
-
-    if url:
-
-        print("Loading web content...")
-
-        # Use fetch_web_content which now includes blog post URLs and metadata
-
-        web_docs = fetch_web_content(url)
-
-        all_docs.extend(web_docs)
-
-        print(f"  - Web documents: {len(web_docs)}")
-
-    else:
-
-        print("Web content disabled - skipping...")
-
-    
-
-    # Process PDF documents if directory provided
-
-    if pdf_directory and os.path.exists(pdf_directory):
-
-        print("Processing PDF documents...")
-
-        pdf_docs = process_pdf_directory(pdf_directory)
-
-        pdf_chunks = chunk_pdf_documents(pdf_docs, chunk_size=1000, chunk_overlap=200)
-
-        all_docs.extend(pdf_chunks)
-
-        print(f"  - PDF documents: {len(pdf_chunks)}")
-
-    else:
-
-        print("PDF processing disabled or directory not found - skipping...")
-
-    
-
-    # Process Excel files if directory provided
-
-    if excel_directory and os.path.exists(excel_directory):
-
-        print("Processing Excel documents...")
-
-        excel_docs = process_excel_directory(excel_directory)
-
-        excel_chunks = chunk_excel_documents(excel_docs, chunk_size=1000, chunk_overlap=200)
-
-        all_docs.extend(excel_chunks)
-
-        print(f"  - Excel documents: {len(excel_chunks)}")
-
-    else:
-
-        print("Excel processing disabled or directory not found - skipping...")
-
-    
-
-    # Process Word documents if directory provided
-
-    if doc_directory and os.path.exists(doc_directory):
-
-        print("Processing Word documents...")
-
-        doc_docs = process_doc_directory(doc_directory)
-
-        doc_chunks = chunk_doc_documents(doc_docs, chunk_size=1000, chunk_overlap=200)
-
-        all_docs.extend(doc_chunks)
-
-        print(f"  - Word documents: {len(doc_chunks)}")
-
-    else:
-
-        print("Word document processing disabled or directory not found - skipping...")
-
-    
-
-    # Process SharePoint content if enabled
-
-    if sharepoint_enabled:
-
-        print("Processing SharePoint content...")
-
-        try:
-
-            sharepoint_docs = process_sharepoint_content()
-
-            all_docs.extend(sharepoint_docs)
-
-            print(f"  - SharePoint documents: {len(sharepoint_docs)}")
-
-        except Exception as e:
-
-            print(f"[ERROR] SharePoint processing failed: {e}")
-
-            print("  - SharePoint documents: 0 (failed)")
-
-    else:
-
-        print("SharePoint processing disabled - skipping...")
-
-    
-
-    # Process Outlook email content if enabled
-
-    if outlook_enabled:
-
-        print("Processing Outlook email content...")
-
-        try:
-
-            from app.outlook_processor import process_outlook_content
-
-            outlook_docs = process_outlook_content()
-
-            all_docs.extend(outlook_docs)
-
-            print(f"  - Outlook email documents: {len(outlook_docs)}")
-
-        except Exception as e:
-
-            print(f"[ERROR] Outlook processing failed: {e}")
-
-            print("  - Outlook email documents: 0 (failed)")
-
-    else:
-
-        print("Outlook processing disabled - skipping...")
-
-    
-
-    print(f"Total documents to process: {len(all_docs)}")
-
-    
-
-    # Create embeddings and vectorstore with batch processing to avoid token limits
-
-    embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
-
-    
-
-    # Process in batches to avoid OpenAI token limit (300k tokens per request)
-
-    # Each batch: ~50 docs = ~50k tokens (safe margin)
-
-    batch_size = 50
-
-    total_batches = (len(all_docs) + batch_size - 1) // batch_size
-
-    
-
-    print(f"\n[*] Creating vectorstore with HNSW graph indexing...")
-
-    print(f"[*] Processing {total_batches} batches of up to {batch_size} documents each...")
-
-    
-
-    vectorstore = None
-
-    for i in range(0, len(all_docs), batch_size):
-
-        batch = all_docs[i:i + batch_size]
-
-        batch_num = (i // batch_size) + 1
-
-        print(f"   [*] Processing batch {batch_num}/{total_batches} ({len(batch)} documents)...")
-
-        
-
-        if vectorstore is None:
-
-            # Create vectorstore with first batch and HNSW graph indexing
-
-            vectorstore = Chroma.from_documents(
-
-                batch, 
-
-                embeddings, 
-
-                persist_directory=CHROMA_DB_PATH,
-
-                collection_metadata={
-
-                    "hnsw:space": "cosine",  # Cosine similarity for semantic search
-
-                    "hnsw:construction_ef": 200,  # Better indexing accuracy
-
-                    "hnsw:search_ef": 100,  # Better search accuracy
-
-                    "hnsw:M": 48,  # More graph connections for better recall
-
-                }
-
-            )
-
-        else:
-
-            # Add subsequent batches
-
-            vectorstore.add_documents(batch)
-
-        
-
-        print(f"   [OK] Batch {batch_num}/{total_batches} complete")
-
-    
-
-    print("\n[OK] Selective knowledge base created with HNSW graph indexing!")
-
-    return vectorstore
+    """Deprecated. ChromaDB removed. Use Weaviate: python scripts/ingest_to_weaviate.py --source <source>"""
+    raise NotImplementedError(
+        "ChromaDB has been removed. Use Weaviate for ingestion: "
+        "python scripts/ingest_to_weaviate.py --source sharepoint|blog|transcript|excel|email|jira"
+    )
