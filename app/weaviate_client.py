@@ -58,9 +58,15 @@ def get_weaviate_client() -> Optional[weaviate.WeaviateClient]:
             
             _weaviate_client = weaviate.connect_to_local(**connection_params)
         else:
-            # Custom/cloud connection
+            # Custom/cloud connection (parse URL to host and port)
+            # Parse URL like http://weaviate:8080 or https://cloud.weaviate.io
+            url_parts = WEAVIATE_URL.replace("http://", "").replace("https://", "").split(":")
+            host = url_parts[0]
+            port = int(url_parts[1]) if len(url_parts) > 1 else (443 if WEAVIATE_URL.startswith("https://") else 8080)
+            
             connection_params = {
-                "url": WEAVIATE_URL,
+                "host": host,
+                "port": port,
             }
             
             # Add auth if API key provided
