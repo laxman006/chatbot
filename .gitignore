@@ -60,6 +60,8 @@ Thumbs.db
 data/
 data.zip
 *.zip
+weaviate_backup/
+weaviate_data_backup.zip
 chatbot-code.tar.gz
 frontend/slack2teams-frontend-ai.tar
 slack2teams-backend-ai.tar
