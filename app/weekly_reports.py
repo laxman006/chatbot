@@ -29,44 +29,170 @@ logger = logging.getLogger(__name__)
 COLORS = ['#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#6366f1', '#ef4444', '#14b8a6', '#f97316', '#06b6d4']
 
 
+async def _get_all_time_team_data(exclude_teams_list: List[str]) -> Dict:
+    """
+    Get all-time team data from user_activity collection.
+    This is the SAME logic as /admin/teams/summary when no dates are provided.
+    """
+    from app.mongodb_memory import mongodb_memory
+    from app.models.teams import (
+        get_team_by_name, get_team_color, get_team_by_member_email, TEAMS_STRUCTURE
+    )
+    
+    user_activity_collection = mongodb_memory.database["user_activity"]
+    
+    # Get all user_activity documents
+    cursor = user_activity_collection.find({})
+    all_users = await cursor.to_list(length=None)
+    
+    logger.info(f"[WEEKLY REPORT] Found {len(all_users)} users in user_activity (all-time)")
+    
+    # Group users by team_name
+    teams_data = {}
+    skipped_no_team = 0
+    skipped_excluded = 0
+    
+    for user_doc in all_users:
+        user_email = user_doc.get("user_email", "").lower()
+        user_name = user_doc.get("user_name", "")
+        team_name = user_doc.get("team_name")
+        total_messages = user_doc.get("total_messages", 0)
+        
+        # Skip users with no messages
+        if total_messages == 0:
+            continue
+        
+        # Fallback to teams.py if team_name not found in user_activity
+        if not team_name or team_name.strip() == "":
+            team_name = get_team_by_member_email(user_email)
+            if team_name == "Unassigned":
+                team_name = None
+        
+        # Skip users without team assignment
+        if not team_name or team_name.strip() == "":
+            skipped_no_team += 1
+            continue
+        
+        # Skip excluded teams
+        if exclude_teams_list and team_name in exclude_teams_list:
+            skipped_excluded += 1
+            logger.debug(f"[WEEKLY REPORT] Skipping team '{team_name}' - excluded")
+            continue
+        
+        # Initialize team if not exists
+        if team_name not in teams_data:
+            teams_data[team_name] = {
+                "team_name": team_name,
+                "total_messages": 0,
+                "active_members": set(),
+                "member_details": []
+            }
+        
+        # Aggregate team data
+        teams_data[team_name]["total_messages"] += total_messages
+        teams_data[team_name]["active_members"].add(user_email)
+        teams_data[team_name]["member_details"].append({
+            "email": user_email,
+            "name": user_name,
+            "messages": total_messages
+        })
+    
+    # Convert to list format and get team info from teams.py
+    teams_list = []
+    for team_name, team_data in teams_data.items():
+        team_info = get_team_by_name(team_name)
+        if not team_info:
+            team_info = {
+                "lead": None,
+                "lead_email": None,
+                "members": [],
+                "color": "#6B7280",
+                "description": team_name
+            }
+        
+        teams_list.append({
+            "team_name": team_name,
+            "lead": team_info.get("lead"),
+            "lead_email": team_info.get("lead_email"),
+            "color": get_team_color(team_name) or team_info.get("color", "#6B7280"),
+            "description": team_info.get("description", team_name),
+            "total_messages": team_data["total_messages"],
+            "total_questions": team_data["total_messages"],
+            "unique_questions": 0,
+            "top_questions": [],
+            "active_members_count": len(team_data["active_members"]),
+            "member_count": len(team_info.get("members", [])),
+            "members": team_data["member_details"]
+        })
+    
+    # Sort by total_messages descending
+    teams_list.sort(key=lambda x: x["total_messages"], reverse=True)
+    
+    logger.info(f"[WEEKLY REPORT] Fetched {len(teams_list)} teams (all-time)")
+    logger.info(f"[WEEKLY REPORT] Skipped {skipped_no_team} users (no team), {skipped_excluded} excluded teams")
+    if teams_list:
+        logger.info(f"[WEEKLY REPORT] Top team: {teams_list[0]['team_name']} with {teams_list[0]['total_messages']} messages")
+    
+    return {
+        "status": "success",
+        "total_teams": len(TEAMS_STRUCTURE),
+        "teams": teams_list,
+        "generated_at": datetime.utcnow().isoformat(),
+        "data_source": "user_activity (all-time)",
+        "time_range": "all-time",
+        "filters_applied": {
+            "excluded_teams": exclude_teams_list,
+            "excluded_teams_count": len(exclude_teams_list)
+        }
+    }
+
+
 def get_weekly_date_range() -> Tuple[datetime, datetime, str]:
     """
-    Calculate the date range for the last complete week (Monday to Sunday).
+    Calculate the date range for the last complete week (Monday to Sunday) in UTC.
+    Uses UTC so the range matches message_events.created_at (stored with datetime.utcnow()).
+    
+    For testing: If today is Sunday, includes current week (Mon-Sun including today).
+    Otherwise: Last complete week (Mon-Sun).
     
     Returns:
         Tuple of (start_date, end_date, date_range_string)
-        start_date: Last Monday at 00:00:00
-        end_date: Last Sunday at 23:59:59
+        start_date: Monday at 00:00:00 UTC (naive)
+        end_date: Sunday at 23:59:59 UTC (naive)
         date_range_string: Formatted string like "Jan 17, 2026 - Jan 23, 2026"
     """
-    today = datetime.now()
+    today_utc = datetime.utcnow()
+    weekday = today_utc.weekday()  # 0=Monday, 6=Sunday
     
-    # Find last Monday (go back to find the most recent Monday)
-    days_since_monday = (today.weekday()) % 7
-    if days_since_monday == 0:  # Today is Monday
-        # If today is Monday, use last week's Monday
-        last_monday = today - timedelta(days=7)
+    # If today is Sunday (6), include this week (Mon-Sun of current week)
+    # Otherwise, use last complete week
+    if weekday == 6:  # Sunday - use current week (Mon through today)
+        days_since_monday = 6
+        last_monday = today_utc - timedelta(days=days_since_monday)
+        last_sunday = today_utc  # Today (Sunday)
+        logger.info(f"[WEEKLY REPORT] Today is Sunday - using current week (Mon-Sun including today)")
     else:
-        last_monday = today - timedelta(days=days_since_monday + 7)
+        # Not Sunday - use last complete week
+        days_since_monday = weekday
+        last_monday = today_utc - timedelta(days=days_since_monday + 7)
+        last_sunday = last_monday + timedelta(days=6)
+        logger.info(f"[WEEKLY REPORT] Using last complete week (Mon-Sun)")
     
-    # Last Sunday is 6 days after last Monday
-    last_sunday = last_monday + timedelta(days=6)
-    
-    # Set times
+    # Set times (naive UTC - no tzinfo)
     start_date = last_monday.replace(hour=0, minute=0, second=0, microsecond=0)
     end_date = last_sunday.replace(hour=23, minute=59, second=59, microsecond=999999)
     
-    # Format date range string
+    # Format date range string for display
     date_range_string = f"{start_date.strftime('%b %d, %Y')} - {end_date.strftime('%b %d, %Y')}"
     
-    logger.info(f"[WEEKLY REPORT] Date range: {date_range_string} ({start_date.date()} to {end_date.date()})")
+    logger.info(f"[WEEKLY REPORT] Date range (UTC): {date_range_string} ({start_date} to {end_date})")
     
     return start_date, end_date, date_range_string
 
 
 async def generate_team_report_data(
-    from_date: datetime,
-    to_date: datetime,
+    from_date: Optional[datetime],
+    to_date: Optional[datetime],
     exclude_teams: Optional[List[str]] = None
 ) -> Dict:
     """
@@ -74,8 +200,8 @@ async def generate_team_report_data(
     Uses direct MongoDB queries (bypasses HTTP endpoint and authentication).
     
     Args:
-        from_date: Start date (datetime)
-        to_date: End date (datetime)
+        from_date: Start date (datetime), None = all-time data
+        to_date: End date (datetime), None = all-time data
         exclude_teams: Optional list of team names to exclude
     
     Returns:
@@ -91,24 +217,73 @@ async def generate_team_report_data(
         # Ensure MongoDB is connected
         await mongodb_memory.connect()
         
-        # Parse dates - convert to naive UTC (matching how message_events stores them)
+        # Parse exclude_teams
+        exclude_teams_list = exclude_teams if exclude_teams else []
+        
+        # If no dates provided, use all-time data from user_activity (same as UI)
+        if not from_date and not to_date:
+            logger.info("[WEEKLY REPORT] No dates provided - using ALL-TIME data from user_activity")
+            return await _get_all_time_team_data(exclude_teams_list)
+        
+        # Parse dates - expect naive UTC (from get_weekly_date_range()) to match message_events.created_at (datetime.utcnow())
         start_date = from_date.replace(tzinfo=None) if from_date.tzinfo else from_date
         end_date = to_date.replace(tzinfo=None) if to_date.tzinfo else to_date
         
         # Parse exclude_teams
         exclude_teams_list = exclude_teams if exclude_teams else []
         
-        # Query message_events collection for date range
+        # Query message_events collection for date range (created_at is stored in UTC)
         message_events_collection = mongodb_memory.database["message_events"]
         user_activity_collection = mongodb_memory.database["user_activity"]
         
-        # Build date filter
+        # DIAGNOSTIC: Check user_activity for team assignments
+        total_user_activity = await user_activity_collection.count_documents({})
+        users_with_team = await user_activity_collection.count_documents({"team_name": {"$exists": True, "$ne": "", "$ne": None}})
+        logger.info(f"[WEEKLY REPORT] Total user_activity documents: {total_user_activity}, with team_name: {users_with_team}")
+        
+        # Build date filter (start_date/end_date must be naive UTC for correct match)
         date_filter = {
             "created_at": {
                 "$gte": start_date,
                 "$lte": end_date
             }
         }
+        logger.info(f"[WEEKLY REPORT] Querying message_events with created_at between {start_date} and {end_date} (UTC)")
+        
+        # DIAGNOSTIC: Check total message_events count and matching count
+        total_events = await message_events_collection.count_documents({})
+        matching_events = await message_events_collection.count_documents(date_filter)
+        logger.info(f"[WEEKLY REPORT] Total message_events in collection: {total_events}")
+        logger.info(f"[WEEKLY REPORT] Message_events matching date filter ({start_date} to {end_date}): {matching_events}")
+        
+        # DIAGNOSTIC: Show sample created_at values from message_events to check date format
+        if total_events > 0:
+            sample_events = await message_events_collection.find({}).sort("created_at", -1).limit(5).to_list(length=5)
+            sample_dates = [evt.get("created_at") for evt in sample_events if evt.get("created_at")]
+            if sample_dates:
+                logger.info(f"[WEEKLY REPORT] Sample created_at values (most recent 5): {sample_dates}")
+        
+        # If no events in the specified range, check last 30 days for diagnostics
+        if matching_events == 0 and total_events > 0:
+            last_30_days = datetime.utcnow() - timedelta(days=30)
+            recent_filter = {"created_at": {"$gte": last_30_days}}
+            recent_count = await message_events_collection.count_documents(recent_filter)
+            logger.warning(f"[WEEKLY REPORT] No events in target range, but found {recent_count} events in last 30 days")
+            
+            # FALLBACK: Use last 7 days if the specified range is empty
+            if recent_count > 0:
+                logger.warning(f"[WEEKLY REPORT] FALLBACK: Using last 7 days instead of specified range")
+                fallback_start = datetime.utcnow() - timedelta(days=7)
+                fallback_end = datetime.utcnow()
+                date_filter = {
+                    "created_at": {
+                        "$gte": fallback_start.replace(hour=0, minute=0, second=0, microsecond=0),
+                        "$lte": fallback_end
+                    }
+                }
+                start_date = fallback_start.replace(hour=0, minute=0, second=0, microsecond=0)
+                end_date = fallback_end
+                logger.info(f"[WEEKLY REPORT] Fallback range: {start_date} to {end_date}")
         
         # Aggregate messages by user_id
         pipeline = [
@@ -129,8 +304,38 @@ async def generate_team_report_data(
         user_messages = await message_events_collection.aggregate(pipeline).to_list(length=None)
         logger.info(f"[WEEKLY REPORT] Found {len(user_messages)} users with messages in date range")
         
+        # DIAGNOSTIC: Show first few users if any
+        if user_messages:
+            logger.info(f"[WEEKLY REPORT] Sample users: {user_messages[:3]}")
+        
+        # FALLBACK: If no users found in message_events for date range, use user_activity (all-time)
+        use_all_time_fallback = False
+        if len(user_messages) == 0:
+            logger.warning(f"[WEEKLY REPORT] No users found in message_events for date range")
+            logger.warning(f"[WEEKLY REPORT] FALLBACK: Using all-time data from user_activity instead")
+            use_all_time_fallback = True
+            
+            # Get all user_activity documents (same logic as UI /admin/teams/summary without dates)
+            all_users = await user_activity_collection.find({}).to_list(length=None)
+            logger.info(f"[WEEKLY REPORT] Found {len(all_users)} users in user_activity (all-time)")
+            
+            # Convert user_activity format to match message_events format
+            user_messages = []
+            for user_doc in all_users:
+                total_messages = user_doc.get("total_messages", 0)
+                if total_messages > 0:  # Only include users with messages
+                    user_messages.append({
+                        "user_id": user_doc.get("user_id"),
+                        "user_email": user_doc.get("user_email", ""),
+                        "total_messages": total_messages
+                    })
+            logger.info(f"[WEEKLY REPORT] Using {len(user_messages)} users from user_activity (all-time) with messages")
+        
         # Group by team
         teams_data = {}
+        skipped_no_team = 0
+        skipped_excluded = 0
+        
         for user_msg in user_messages:
             user_id = user_msg.get("user_id")
             user_email = (user_msg.get("user_email") or "").lower()
@@ -167,9 +372,13 @@ async def generate_team_report_data(
             
             # Skip users without team assignment or excluded teams
             if not team_name or team_name.strip() == "":
+                skipped_no_team += 1
+                logger.debug(f"[WEEKLY REPORT] Skipping user {user_email or user_id} - no team assignment")
                 continue
             
             if exclude_teams_list and team_name in exclude_teams_list:
+                skipped_excluded += 1
+                logger.debug(f"[WEEKLY REPORT] Skipping user {user_email or user_id} - team '{team_name}' is excluded")
                 continue
             
             # Initialize team if not exists
@@ -222,14 +431,18 @@ async def generate_team_report_data(
         teams_list.sort(key=lambda x: x["total_messages"], reverse=True)
         
         logger.info(f"[WEEKLY REPORT] Fetched data for {len(teams_list)} teams")
+        logger.info(f"[WEEKLY REPORT] Skipped {skipped_no_team} users (no team), {skipped_excluded} users (excluded teams)")
+        if teams_list:
+            logger.info(f"[WEEKLY REPORT] Top team: {teams_list[0]['team_name']} with {teams_list[0]['total_messages']} messages")
         
         return {
             "status": "success",
             "total_teams": len(TEAMS_STRUCTURE),
             "teams": teams_list,
             "generated_at": datetime.utcnow().isoformat(),
-            "data_source": "message_events",
-            "time_range": f"{from_date.strftime('%Y-%m-%d')} to {to_date.strftime('%Y-%m-%d')}",
+            "data_source": "user_activity (all-time)" if use_all_time_fallback else "message_events",
+            "time_range": f"{from_date.strftime('%Y-%m-%d')} to {to_date.strftime('%Y-%m-%d')}" if not use_all_time_fallback else "all-time",
+            "fallback_used": use_all_time_fallback,
             "filters_applied": {
                 "from_date": from_date.strftime("%Y-%m-%d"),
                 "to_date": to_date.strftime("%Y-%m-%d"),
@@ -1088,7 +1301,7 @@ def generate_pdf_report(
             summary_lines.append(f"Overall, teams generated a total of {total_messages:,} messages with {total_active_members} active members participating during this period.")
             summary_lines.append(f"The average team activity was {avg_messages_per_team:.1f} messages per team, indicating {'strong' if avg_messages_per_team > 10 else 'moderate' if avg_messages_per_team > 5 else 'developing'} engagement levels.")
             if exclude_note:
-                summary_lines.append(f"Note: This analysis excludes Neutara Labs teams as specified in the report filters.")
+                summary_lines.append(f"Note: {exclude_note}.")
         else:
             summary_lines.append(f"This weekly report covers team activity from {date_range}.")
             summary_lines.append(f"No team data was available for the specified period.")
