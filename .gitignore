@@ -51,6 +51,8 @@ Thumbs.db
 .env.development.local
 .env.test.local
 .env.production.local
+.env.ai
+.env.prod
 
 # Temporary files
 *.tmp
@@ -60,12 +62,28 @@ Thumbs.db
 data/
 data.zip
 *.zip
+weaviate/
 weaviate_backup/
 weaviate_data_backup.zip
 chatbot-code.tar.gz
 frontend/slack2teams-frontend-ai.tar
 slack2teams-backend-ai.tar
 node_modules
+
+# Old langchain/chromadb data (migrated to weaviate)
+chroma/
+chromadb/
+vectorstore/
+jira_chroma_db/
+jira_chroma_db_backup*/
+graph_relations.db
+*.sqlite3
+*.db
+
+# Backup folders
+project_backups/
+data_backup_*/
+langchain_backup_*/
 
 # Root package-lock.json (only for promptfoo testing - regenerate when needed)
 # Frontend has its own package-lock.json which is tracked

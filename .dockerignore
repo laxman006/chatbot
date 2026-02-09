@@ -98,3 +98,27 @@ coverage.xml
 # Data folder (mounted as volume, don't copy into image)
 data/
 data_backup_*.tar.gz
+
+# Backup folders (don't copy backups into Docker image)
+project_backups/
+data_backup_*/
+langchain_backup_*/
+weaviate_backup/
+
+# Old langchain/chromadb data (migrated to weaviate)
+chroma/
+chromadb/
+vectorstore/
+jira_chroma_db/
+jira_chroma_db_backup*/
+graph_relations.db
+*.sqlite3
+
+# Weaviate data (mounted as volume)
+weaviate/
+
+# Large files
+*.tar.gz
+*.zip
+*.db
+*.sqlite3
