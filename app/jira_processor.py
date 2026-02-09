@@ -195,10 +195,160 @@ class JiraProcessor:
             return self._clean_html(value)
         return self._clean_html(str(value))
 
+    def _fetch_issue_keys_page(self, jql: str, start_at: int = 0, max_results: int = 100) -> List[str]:
+        """
+        Fetch up to max_results issue keys for one request using /rest/api/3/search/jql.
+        Jira caps at 100 results per search when fields/expand are used, so we use this
+        per date-window (each window returns up to 100 keys). Returns list of issue keys.
+        """
+        url = f"{self.server}/rest/api/3/search/jql"
+        headers = {'Accept': 'application/json', 'Content-Type': 'application/json'}
+        params = {
+            'jql': jql,
+            'startAt': start_at,
+            'maxResults': max_results,
+            'fields': 'key',
+        }
+        for attempt in range(3):
+            try:
+                response = requests.get(
+                    url, headers=headers, params=params,
+                    auth=(self.email, self.api_token), timeout=60
+                )
+                if response.status_code == 429:
+                    retry_after = int(response.headers.get('Retry-After', 2 * (2 ** attempt)))
+                    print(f"[WARNING] Rate limited. Waiting {retry_after}s...")
+                    time.sleep(retry_after)
+                    continue
+                if response.status_code != 200:
+                    if attempt < 2:
+                        time.sleep(2 * (2 ** attempt))
+                        continue
+                    response.raise_for_status()
+                data = response.json()
+                raw = data.get('issues') or data.get('values') or []
+                keys = [i.get('key') for i in raw if i.get('key')]
+                time.sleep(0.3)
+                return keys
+            except requests.exceptions.RequestException as e:
+                if attempt < 2:
+                    time.sleep(2 * (2 ** attempt))
+                    continue
+                print(f"[ERROR] Failed to fetch issue keys: {e}")
+                return []
+        return []
+
+    def _collect_issue_keys_via_date_windows(
+        self, base_jql: str, max_keys: int, window_start_date: str = None
+    ) -> List[str]:
+        """
+        Collect issue keys by querying in date windows (each window returns up to 100 keys).
+        /rest/api/3/search is 410 Gone; search/jql caps at 100 per query, so we split by
+        created date to get 100 keys per window and aggregate.
+        window_start_date: optional YYYY-MM-DD to start windows (default: 5 years ago).
+        """
+        if " ORDER BY " in base_jql:
+            base_without_order = base_jql.split(" ORDER BY ")[0].strip()
+            order_part = " ORDER BY " + base_jql.split(" ORDER BY ", 1)[1]
+        else:
+            base_without_order = base_jql
+            order_part = " ORDER BY created ASC"
+        all_keys = []
+        window_months = 6
+        now = datetime.now()
+        if window_start_date:
+            try:
+                start_dt = datetime.strptime(window_start_date[:10], "%Y-%m-%d")
+            except ValueError:
+                start_dt = now - timedelta(days=365 * 5)
+        else:
+            start_dt = now - timedelta(days=365 * 5)  # 5 years back
+        page_size = 100
+        while len(all_keys) < max_keys:
+            start_at_str = start_dt.strftime("%Y-%m-%d")
+            end_dt = start_dt + timedelta(days=30 * window_months)
+            if end_dt > now:
+                end_dt = now
+            end_at_str = end_dt.strftime("%Y-%m-%d")
+            window_jql = f"{base_without_order} AND created >= '{start_at_str}' AND created < '{end_at_str}'{order_part}"
+            keys = self._fetch_issue_keys_page(window_jql, 0, page_size)
+            if keys:
+                all_keys.extend(keys)
+                print(f"   Keys collected: {len(all_keys)}... (window {start_at_str} to {end_at_str}: {len(keys)} keys)")
+            start_dt = end_dt
+            if start_dt >= now:
+                break
+            if len(all_keys) >= max_keys:
+                break
+            time.sleep(0.5)
+        return all_keys[:max_keys]
+
+    def _fetch_full_issue_by_key(self, key: str):
+        """
+        Fetch a single full issue by key (GET /rest/api/3/issue/{key}) with comments.
+        Returns an issue-like object compatible with _extract_ticket_data.
+        """
+        url = f"{self.server}/rest/api/3/issue/{key}"
+        headers = {'Accept': 'application/json', 'Content-Type': 'application/json'}
+        params = {'expand': 'renderedFields', 'fields': '*all'}
+        for attempt in range(2):
+            try:
+                response = requests.get(
+                    url, headers=headers, params=params,
+                    auth=(self.email, self.api_token), timeout=45
+                )
+                if response.status_code == 429:
+                    time.sleep(int(response.headers.get('Retry-After', 2)))
+                    continue
+                if response.status_code != 200:
+                    if attempt < 1:
+                        time.sleep(1)
+                        continue
+                    return None
+                data = response.json()
+                # Comments are not in expand by default; fetch separately
+                comments_url = f"{self.server}/rest/api/3/issue/{key}/comment"
+                comment_obj = type('obj', (object,), {'comments': []})()
+                try:
+                    cr = requests.get(
+                        comments_url, headers=headers,
+                        auth=(self.email, self.api_token), timeout=20
+                    )
+                    if cr.status_code == 200:
+                        for c in cr.json().get('comments', []):
+                            comment_obj.comments.append(type('obj', (object,), c)())
+                except Exception:
+                    pass
+                # Build issue object
+                fields = data.get('fields', {})
+                fields['comment'] = comment_obj
+                issue = type('obj', (object,), {
+                    'key': data.get('key'),
+                    'id': data.get('id'),
+                    'fields': type('obj', (object,), fields)()
+                })()
+                for k, v in fields.items():
+                    setattr(issue.fields, k, v)
+                if isinstance(issue.fields.project, dict):
+                    pd = issue.fields.project
+                    issue.fields.project = type('obj', (object,), pd)()
+                    for k, v in pd.items():
+                        setattr(issue.fields.project, k, v)
+                return issue
+            except requests.exceptions.RequestException as e:
+                if attempt < 1:
+                    time.sleep(1)
+                    continue
+                print(f"[WARNING] Could not fetch issue {key}: {e}")
+                return None
+        return None
+
     def _fetch_issues_rest_api(self, jql: str, start_at: int = 0, max_results: int = 100) -> List:
         """
         Fetch issues using REST API directly (bypasses jira-python library).
         Uses the new /rest/api/3/search/jql endpoint.
+        NOTE: When fields/expand are used, Jira caps total results at 100 per search.
+        For 3000+ tickets use fetch_tickets() which uses two-phase: keys then full issue.
         Includes rate limiting protection with retry logic.
         """
         url = f"{self.server}/rest/api/3/search/jql"
@@ -361,6 +511,9 @@ class JiraProcessor:
         elif filter_type == "last_3_months":
             date = (now - timedelta(days=90)).strftime("%Y-%m-%d")
             return f"updated >= '{date}'"
+        elif filter_type == "last_5_months":
+            date = (now - timedelta(days=150)).strftime("%Y-%m-%d")
+            return f"updated >= '{date}'"
         elif filter_type == "last_6_months":
             date = (now - timedelta(days=180)).strftime("%Y-%m-%d")
             return f"updated >= '{date}'"
@@ -400,8 +553,8 @@ class JiraProcessor:
             if date_filter:
                 jql_parts.append(date_filter)
         
-        # Order by most recently updated
-        jql = " AND ".join(jql_parts) + " ORDER BY updated DESC"
+        # Stable ordering for correct pagination (updated DESC causes page drift in Jira Search API)
+        jql = " AND ".join(jql_parts) + " ORDER BY created ASC"
         
         return jql
     
@@ -435,8 +588,8 @@ class JiraProcessor:
         if end_date:
             jql_parts.append(f"updated <= '{end_date}'")
         
-        # Order by most recently updated
-        jql = " AND ".join(jql_parts) + " ORDER BY updated DESC"
+        # Stable ordering for correct pagination (updated DESC causes page drift in Jira Search API)
+        jql = " AND ".join(jql_parts) + " ORDER BY created ASC"
         
         return jql
     
@@ -458,31 +611,24 @@ class JiraProcessor:
         
         max_fetch = max_issues if max_issues else self.max_issues
         all_tickets = []
-        start_at = 0
-        max_results_per_page = 100
         
         try:
-            while len(all_tickets) < max_fetch:
-                page_size = min(max_results_per_page, max_fetch - len(all_tickets))
-                issues = self._fetch_issues_rest_api(jql, start_at, page_size)
-                
-                if not issues:
+            # Phase 1: Collect issue keys via date windows (search/jql caps at 100 per query)
+            window_start = since_date[:10] if since_date else None
+            all_keys = self._collect_issue_keys_via_date_windows(jql, max_fetch, window_start_date=window_start)
+            keys_to_fetch = all_keys[:max_fetch]
+            # Phase 2: Fetch full issue per key
+            for idx, key in enumerate(keys_to_fetch):
+                if len(all_tickets) >= max_fetch:
                     break
-                
-                for issue in issues:
+                issue = self._fetch_full_issue_by_key(key)
+                if issue:
                     ticket_data = self._extract_ticket_data(issue)
                     if ticket_data:
                         all_tickets.append(ticket_data)
-                        if len(all_tickets) >= max_fetch:
-                            break
-                
-                print(f"   Fetched {len(all_tickets)}/{max_fetch} tickets...")
-                
-                if len(issues) < max_results_per_page:
-                    break
-                
-                start_at += len(issues)
-            
+                if (idx + 1) % 100 == 0 or idx + 1 == len(keys_to_fetch):
+                    print(f"   Fetched {len(all_tickets)}/{max_fetch} tickets...")
+                time.sleep(0.15)
             print(f"[OK] Total fetched: {len(all_tickets)} tickets since {since_date}")
             return all_tickets
             
@@ -493,50 +639,36 @@ class JiraProcessor:
             return []
     
     def fetch_tickets(self) -> List[Dict[str, Any]]:
-        """Fetch tickets from Jira."""
-        print(f"[*] Fetching tickets from Jira...")
+        """Fetch tickets from Jira.
+        Uses two-phase fetch: (1) paginate keys via search/jql without fields/expand
+        so Jira returns more than 100 results; (2) fetch full issue per key.
+        """
+        print(f"[*] Fetching tickets from Jira (two-phase: keys then full issues)...")
         
         jql = self._build_jql_query()
         print(f"[*] JQL Query: {jql}")
         
         all_tickets = []
-        start_at = 0
-        max_results_per_page = 100
         
         try:
-            # Use REST API directly (Jira v3 /search/jql endpoint)
-            # This bypasses jira-python library which hasn't updated to new endpoint
-            checked_count = 0
+            # Phase 1: Collect issue keys via date windows (search/jql caps at 100 per query;
+            # /rest/api/3/search is 410 Gone, so we use search/jql per 6-month window)
+            all_keys = self._collect_issue_keys_via_date_windows(jql, self.max_issues)
+            keys_to_fetch = all_keys[:self.max_issues]
+            print(f"[*] Fetching full details for {len(keys_to_fetch)} issues...")
             
-            while len(all_tickets) < self.max_issues:
-                page_size = min(100, self.max_issues - len(all_tickets))
-                issues = self._fetch_issues_rest_api(jql, start_at, page_size)
-                
-                if not issues:
+            # Phase 2: Fetch full issue for each key and extract ticket data
+            for idx, key in enumerate(keys_to_fetch):
+                if len(all_tickets) >= self.max_issues:
                     break
-                
-                checked_count += len(issues)
-                for issue in issues:
+                issue = self._fetch_full_issue_by_key(key)
+                if issue:
                     ticket_data = self._extract_ticket_data(issue)
                     if ticket_data:
                         all_tickets.append(ticket_data)
-                        if len(all_tickets) >= self.max_issues:
-                            break
-                
-                print(f"   Fetched {len(all_tickets)}/{self.max_issues} tickets (checked {checked_count} total)...")
-                
-                # Break if we got fewer than page size (last page)
-                if len(issues) < page_size:
-                    break
-                
-                start_at += len(issues)
-                
-                # Add delay between pages to avoid rate limits
-                if len(all_tickets) < self.max_issues:
-                    time.sleep(1)  # 1 second delay between pages
-                
-                if len(all_tickets) >= self.max_issues:
-                    break
+                if (idx + 1) % 100 == 0 or idx + 1 == len(keys_to_fetch):
+                    print(f"   Fetched {len(all_tickets)}/{self.max_issues} tickets (processed {idx + 1} issues)...")
+                time.sleep(0.15)  # Rate limit: ~6–7 issues/sec
             
             # If no tickets found, try fallback query (any tickets, filter by comments in Python)
             if len(all_tickets) == 0:
@@ -555,7 +687,7 @@ class JiraProcessor:
                     if date_filter:
                         fallback_jql_parts.append(date_filter)
                 
-                fallback_jql = " AND ".join(fallback_jql_parts) + " ORDER BY updated DESC"
+                fallback_jql = " AND ".join(fallback_jql_parts) + " ORDER BY created ASC"
                 print(f"[*] Fallback JQL Query: {fallback_jql}")
                 
                 issues = self._fetch_issues_rest_api(

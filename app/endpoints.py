@@ -32,7 +32,8 @@ from app.mongodb_memory import (
     update_user_profile, get_user_profile, get_user_statistics, get_rankers_by_date,
     save_message, get_last_messages
 )
-from app.helpers import strip_markdown, preserve_markdown
+from app.helpers import strip_markdown, preserve_markdown, load_blog_metadata, get_blog_tracking_count
+from app.blog_ingestion import run_blog_ingestion
 from app.langfuse_integration import langfuse_tracker
 from app.auth import verify_user_access, require_admin, require_restricted_admin
 from app.user_data import get_user_job_title
@@ -55,6 +56,13 @@ from config import (
     ROUTING_MIN_CONFIDENCE, ROUTING_ENABLE_DEDUPLICATION,
     # Context Synthesis Configuration
     USE_CONTEXT_SYNTHESIS, SYNTHESIS_MAX_CONTEXT_LENGTH, SYNTHESIS_MAX_OUTPUT_LENGTH, SYNTHESIS_TEMPERATURE
+)
+from config import (
+    BLOG_POLLING_ENABLED,
+    BLOG_POLLING_INTERVAL,
+    BLOG_LAST_POLL_FILE,
+    WEB_SOURCE_URL,
+    ENABLE_WEB_SOURCE,
 )
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
@@ -1633,6 +1641,136 @@ async def get_most_asked_questions(
         "questions": questions,
         "errors": errors
     }
+
+
+# ---------------- Admin Blog: Status, Stats, Poll (Weaviate Blogs) ----------------
+
+try:
+    from weaviate.classes.aggregate import GroupByAggregate
+except Exception:
+    GroupByAggregate = None
+
+
+def _blogs_collection_count() -> int:
+    """Return total chunk count in Weaviate Blogs collection, or 0 if unavailable."""
+    try:
+        client = get_weaviate_client()
+        if client is None:
+            return 0
+        if not client.collections.exists("Blogs"):
+            return 0
+        coll = client.collections.get("Blogs")
+        agg = coll.aggregate.over_all(total_count=True)
+        return int(agg.total_count) if getattr(agg, "total_count", None) is not None else 0
+    except Exception:
+        return 0
+
+
+def _blogs_unique_post_count() -> int:
+    """Return count of unique blog posts (distinct doc_id) in Weaviate Blogs collection, or 0 if unavailable."""
+    if GroupByAggregate is None:
+        return 0
+    try:
+        client = get_weaviate_client()
+        if client is None:
+            return 0
+        if not client.collections.exists("Blogs"):
+            return 0
+        coll = client.collections.get("Blogs")
+        response = coll.aggregate.over_all(group_by=GroupByAggregate(prop="doc_id"))
+        groups = getattr(response, "groups", None)
+        return len(groups) if groups is not None else 0
+    except Exception:
+        return 0
+
+
+def _vectorstore_exists() -> bool:
+    """Return True if Weaviate is healthy and Blogs collection exists."""
+    try:
+        if not get_weaviate_client():
+            return False
+        return get_weaviate_client().collections.exists("Blogs")
+    except Exception:
+        return False
+
+
+@router.get("/admin/blog/status")
+async def get_admin_blog_status(current_user: dict = Depends(require_admin)):
+    """
+    Get blog polling status and last run metadata for the admin blog UI.
+    blog_post_count = max(Weaviate unique posts, ingestion-tracking count) so UI reflects full tracked set.
+    """
+    meta = load_blog_metadata()
+    last_run = meta.get("last_run_at")
+    weaviate_count = _blogs_unique_post_count()
+    tracking_count = get_blog_tracking_count()
+    post_count = max(weaviate_count, tracking_count)
+    return {
+        "polling_enabled": BLOG_POLLING_ENABLED,
+        "polling_interval_seconds": BLOG_POLLING_INTERVAL,
+        "polling_interval_minutes": BLOG_POLLING_INTERVAL // 60,
+        "last_poll_file": BLOG_LAST_POLL_FILE,
+        "last_poll_time": last_run,
+        "last_blog_poll": last_run,
+        "blog_post_count": post_count,
+        "last_blog_post_date": meta.get("last_blog_post_date"),
+        "vectorstore_exists": _vectorstore_exists(),
+    }
+
+
+@router.get("/admin/blog/stats")
+async def get_admin_blog_stats(current_user: dict = Depends(require_admin)):
+    """
+    Get blog source and Weaviate Blogs collection stats for the admin blog UI.
+    blog_post_count / unique_blog_posts = max(Weaviate distinct doc_id, ingestion-tracking count).
+    total_blog_chunks = total chunk count in Weaviate.
+    """
+    meta = load_blog_metadata()
+    total_chunks = _blogs_collection_count()
+    weaviate_unique = _blogs_unique_post_count()
+    tracking_count = get_blog_tracking_count()
+    unique_posts = max(weaviate_unique, tracking_count)
+    return {
+        "source_url": WEB_SOURCE_URL,
+        "web_source_enabled": ENABLE_WEB_SOURCE,
+        "vectorstore_exists": _vectorstore_exists(),
+        "blog_post_count": unique_posts,
+        "unique_blog_posts": unique_posts,
+        "total_blog_chunks": total_chunks,
+        "last_blog_poll": meta.get("last_run_at"),
+        "last_blog_post_date": meta.get("last_blog_post_date"),
+        "last_blog_post_url": meta.get("last_blog_post_url"),
+        "last_blog_post_title": meta.get("last_blog_post_title"),
+        "oldest_post_date": meta.get("oldest_blog_post_date"),
+        "newest_post_date": meta.get("last_blog_post_date"),
+        "vectorstore_build_date": meta.get("last_run_at"),
+    }
+
+
+@router.post("/admin/blog/poll")
+async def post_admin_blog_poll(current_user: dict = Depends(require_admin)):
+    """
+    Trigger blog ingestion: fetch new posts from the web and store them in Weaviate Blogs collection.
+    Runs in a thread so the request does not time out.
+    """
+    try:
+        result = await asyncio.to_thread(run_blog_ingestion, False)
+        if result.get("error"):
+            raise HTTPException(
+                status_code=500,
+                detail=result["error"] or "Blog ingestion failed",
+            )
+        return {
+            "success": result.get("success", False),
+            "chunks_inserted": result.get("chunks_inserted", 0),
+            "chunks_processed": result.get("chunks_processed", 0),
+            "message": "Blog poll completed. New posts have been added to the vectorstore.",
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Blog poll failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ---------------- Admin Dashboard: User Statistics ----------------

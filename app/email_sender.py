@@ -114,64 +114,42 @@ def send_email_via_graph_api(
         return False
 
 
-def send_weekly_report_emails(
-    report_data_with_exclusion: dict,
-    report_data_without_exclusion: dict,
+def send_weekly_report_email(
+    report_data: dict,
     date_range: str,
-    html_body_with_exclusion: str,
-    html_body_without_exclusion: str,
-    pdf_path_with_exclusion: str,
-    pdf_path_without_exclusion: str
+    html_body: str,
+    pdf_path: str,
+    exclude_note: str = ""
 ) -> bool:
     """
-    Send weekly report emails to admin users.
-    Sends two emails: one with Neutara Labs excluded, one without.
-    
+    Send a single weekly report email to admin users.
+    Report excludes Neutara Labs and Marketing team by default.
+
     Args:
-        report_data_with_exclusion: Team data with Neutara Labs excluded
-        report_data_without_exclusion: Team data without exclusions
+        report_data: Team report data (for reference; not sent in body)
         date_range: Date range string for the report
-        html_body_with_exclusion: HTML email body for excluded version
-        html_body_without_exclusion: HTML email body for non-excluded version
-        pdf_path_with_exclusion: Path to PDF for excluded version
-        pdf_path_without_exclusion: Path to PDF for non-excluded version
-    
+        html_body: HTML email body
+        pdf_path: Path to PDF attachment
+        exclude_note: Optional note about exclusions (e.g. "Excluding Neutara Labs and Marketing")
+
     Returns:
-        True if all emails sent successfully, False otherwise
+        True if email sent successfully, False otherwise
     """
     admin_email_list = list(ADMIN_EMAILS)
-    
+
     if not admin_email_list:
         logger.error("[EMAIL] No admin emails configured")
         return False
-    
-    # Generate PDF attachment names
-    pdf_name_with_exclusion = f"Team_Leaderboard_Report_{date_range.replace(' ', '_')}_Without_NeutaraLabs.pdf"
-    pdf_name_without_exclusion = f"Team_Leaderboard_Report_{date_range.replace(' ', '_')}_All_Teams.pdf"
-    
-    # Send email with exclusion
-    subject_with_exclusion = f"Weekly Team Leaderboard Report - {date_range} (Excluding Neutara Labs)"
-    success1 = send_email_via_graph_api(
+
+    pdf_name = f"Team_Leaderboard_Report_{date_range.replace(' ', '_')}.pdf"
+    subject = f"Weekly Team Leaderboard Report - {date_range}"
+    if exclude_note:
+        subject = f"{subject} ({exclude_note})"
+
+    return send_email_via_graph_api(
         to_emails=admin_email_list,
-        subject=subject_with_exclusion,
-        html_body=html_body_with_exclusion,
-        pdf_attachment_path=pdf_path_with_exclusion,
-        pdf_attachment_name=pdf_name_with_exclusion
+        subject=subject,
+        html_body=html_body,
+        pdf_attachment_path=pdf_path,
+        pdf_attachment_name=pdf_name
     )
-    
-    # Send email without exclusion
-    subject_without_exclusion = f"Weekly Team Leaderboard Report - {date_range} (All Teams)"
-    success2 = send_email_via_graph_api(
-        to_emails=admin_email_list,
-        subject=subject_without_exclusion,
-        html_body=html_body_without_exclusion,
-        pdf_attachment_path=pdf_path_without_exclusion,
-        pdf_attachment_name=pdf_name_without_exclusion
-    )
-    
-    if success1 and success2:
-        logger.info("[EMAIL] ✅ All weekly report emails sent successfully")
-        return True
-    else:
-        logger.warning(f"[EMAIL] ⚠️  Some emails failed to send (exclusion: {success1}, all teams: {success2})")
-        return False

@@ -57,6 +57,23 @@ def slug_from_cloudfuze_url(url: str) -> Optional[str]:
     segments = [s for s in path.split("/") if s]
     return segments[-1] if segments else None
 
+
+# Jira ticket key: PROJECTKEY-NUMBER (e.g. PRI-10521, PROJ-123, CFITS-456)
+_JIRA_TICKET_KEY_RE = re.compile(r"\b([A-Z][A-Z0-9]{1,10}-\d+)\b", re.IGNORECASE)
+
+
+def extract_jira_ticket_key_from_query(query: str) -> Optional[str]:
+    """
+    If the user's message contains a Jira ticket key (e.g. PRI-10521, PROJ-123),
+    return it in canonical form (uppercase). Used to restrict retrieval to that ticket's chunks.
+    """
+    if not query or not isinstance(query, str):
+        return None
+    m = _JIRA_TICKET_KEY_RE.search(query)
+    if not m:
+        return None
+    return (m.group(1) or "").strip().upper()
+
 # Layer-aware retrieval: prefer higher semantic chunks (never answer from raw_content first)
 CHUNK_TYPE_PRIORITY = {
     "feature_capability": 100,

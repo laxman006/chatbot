@@ -295,35 +295,35 @@ export default function AdminBlogPage() {
         </div>
         <button
           onClick={handleTriggerPoll}
-          disabled={polling || !status?.polling_enabled}
+          disabled={polling}
           style={{
             padding: '14px 28px',
             borderRadius: '10px',
             border: 'none',
-            background: polling || !status?.polling_enabled ? '#9ca3af' : '#0129ac',
+            background: polling ? '#9ca3af' : '#0129ac',
             color: 'white',
-            cursor: polling || !status?.polling_enabled ? 'not-allowed' : 'pointer',
+            cursor: polling ? 'not-allowed' : 'pointer',
             fontWeight: 700,
             fontSize: '16px',
             minWidth: '200px',
             transition: 'all 0.2s',
           }}
           onMouseEnter={(e) => {
-            if (!polling && status?.polling_enabled) {
+            if (!polling) {
               e.currentTarget.style.background = '#011a8a';
             }
           }}
           onMouseLeave={(e) => {
-            if (!polling && status?.polling_enabled) {
+            if (!polling) {
               e.currentTarget.style.background = '#0129ac';
             }
           }}
         >
           {polling ? 'Polling...' : 'Trigger Blog Poll'}
         </button>
-        {!status?.polling_enabled && (
-          <p style={{ color: '#dc2626', fontSize: '13px', marginTop: '8px' }}>
-            Blog polling is disabled. Enable it in your configuration.
+        {status && !status.polling_enabled && (
+          <p style={{ color: '#6b7280', fontSize: '13px', marginTop: '8px' }}>
+            Scheduled polling is disabled. You can still trigger a poll manually above.
           </p>
         )}
       </div>
@@ -386,33 +386,37 @@ export default function AdminBlogPage() {
               <div style={{ marginBottom: '8px' }}>
                 <strong>Total Posts:</strong>{' '}
                 <span style={{ color: '#111827', fontWeight: 600, fontSize: '18px' }}>
-                  {status.blog_post_count.toLocaleString()}
+                  {(status.blog_post_count ?? 0).toLocaleString()}
                 </span>
               </div>
               <div style={{ marginBottom: '8px' }}>
                 <strong>Last Post Date:</strong> {formatDate(status.last_blog_post_date)}
               </div>
-              {stats?.last_blog_post_url && (
+              {(stats?.last_blog_post_url || stats?.last_blog_post_title) && (
                 <div>
                   <strong>Last Post:</strong>{' '}
-                  <a
-                    href={stats.last_blog_post_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{
-                      color: '#0129ac',
-                      textDecoration: 'none',
-                      wordBreak: 'break-all',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.textDecoration = 'underline';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.textDecoration = 'none';
-                    }}
-                  >
-                    {stats.last_blog_post_title || stats.last_blog_post_url}
-                  </a>
+                  {stats.last_blog_post_url ? (
+                    <a
+                      href={stats.last_blog_post_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        color: '#0129ac',
+                        textDecoration: 'none',
+                        wordBreak: 'break-all',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.textDecoration = 'underline';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.textDecoration = 'none';
+                      }}
+                    >
+                      {stats.last_blog_post_title || stats.last_blog_post_url}
+                    </a>
+                  ) : (
+                    <span style={{ color: '#111827' }}>{stats.last_blog_post_title}</span>
+                  )}
                 </div>
               )}
             </div>
@@ -437,11 +441,9 @@ export default function AdminBlogPage() {
                   {status.vectorstore_exists ? 'Available' : 'Not Found'}
                 </span>
               </div>
-              {stats?.vectorstore_build_date && (
-                <div>
-                  <strong>Build Date:</strong> {formatDate(stats.vectorstore_build_date)}
-                </div>
-              )}
+              <div>
+                <strong>Build Date:</strong> {formatDate(stats?.vectorstore_build_date ?? null)}
+              </div>
             </div>
           </div>
         </div>
@@ -486,34 +488,26 @@ export default function AdminBlogPage() {
                   )}
                 </div>
               </div>
-              {stats.unique_blog_posts !== undefined && (
-                <div>
-                  <div style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>Unique Posts</div>
-                  <div style={{ fontSize: '14px', color: '#111827', fontWeight: 600 }}>
-                    {stats.unique_blog_posts.toLocaleString()}
-                  </div>
+              <div>
+                <div style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>Unique Posts</div>
+                <div style={{ fontSize: '14px', color: '#111827', fontWeight: 600 }}>
+                  {(stats.unique_blog_posts ?? 0).toLocaleString()}
                 </div>
-              )}
-              {stats.total_blog_chunks !== undefined && (
-                <div>
-                  <div style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>Total Chunks</div>
-                  <div style={{ fontSize: '14px', color: '#111827', fontWeight: 600 }}>
-                    {stats.total_blog_chunks.toLocaleString()}
-                  </div>
+              </div>
+              <div>
+                <div style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>Total Chunks</div>
+                <div style={{ fontSize: '14px', color: '#111827', fontWeight: 600 }}>
+                  {(stats.total_blog_chunks ?? 0).toLocaleString()}
                 </div>
-              )}
-              {stats.oldest_post_date && (
-                <div>
-                  <div style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>Oldest Post</div>
-                  <div style={{ fontSize: '14px', color: '#111827' }}>{formatDate(stats.oldest_post_date)}</div>
-                </div>
-              )}
-              {stats.newest_post_date && (
-                <div>
-                  <div style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>Newest Post</div>
-                  <div style={{ fontSize: '14px', color: '#111827' }}>{formatDate(stats.newest_post_date)}</div>
-                </div>
-              )}
+              </div>
+              <div title="Earliest blog post in the index (set after a full backfill). Shows Never until then.">
+                <div style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>Oldest Post</div>
+                <div style={{ fontSize: '14px', color: '#111827' }}>{formatDate(stats.oldest_post_date ?? null)}</div>
+              </div>
+              <div title="Most recent blog post ingested (last run).">
+                <div style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>Newest Post</div>
+                <div style={{ fontSize: '14px', color: '#111827' }}>{formatDate(stats.newest_post_date ?? null)}</div>
+              </div>
             </div>
           </div>
         </div>

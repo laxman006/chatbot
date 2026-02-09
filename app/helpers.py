@@ -286,6 +286,61 @@ def get_last_blog_post_date() -> Optional[str]:
     """Get the date of the most recent blog post from file-based blog metadata."""
     return load_blog_metadata().get("last_blog_post_date")
 
+
+def get_blog_tracking_count() -> int:
+    """Return number of unique blog posts in ingestion tracking (doc_hashes). Used so UI shows tracked count when higher than Weaviate."""
+    try:
+        path = os.path.join("data", "ingestion_tracking", "blog_tracking.json")
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            hashes = data.get("doc_hashes") or {}
+            return len(hashes)
+    except Exception:
+        pass
+    return 0
+
+
+def latest_blog_post_date_from_documents(documents: list) -> Optional[str]:
+    """Extract the latest post_date/created_at from blog chunk metadata (ISO string)."""
+    latest = None
+    for d in documents or []:
+        meta = getattr(d, "metadata", None) or {}
+        dt = meta.get("post_date") or meta.get("created_at")
+        if dt and isinstance(dt, str) and dt.strip():
+            if latest is None or (dt.strip() > latest):
+                latest = dt.strip()
+    return latest
+
+
+def oldest_blog_post_date_from_documents(documents: list) -> Optional[str]:
+    """Extract the oldest post_date/created_at from blog chunk metadata (ISO string)."""
+    oldest = None
+    for d in documents or []:
+        meta = getattr(d, "metadata", None) or {}
+        dt = meta.get("post_date") or meta.get("created_at")
+        if dt and isinstance(dt, str) and dt.strip():
+            if oldest is None or (dt.strip() < oldest):
+                oldest = dt.strip()
+    return oldest
+
+
+def latest_blog_post_info_from_documents(documents: list) -> dict:
+    """Get url, title, and date of the newest post in the batch. Returns dict with post_url, post_title, post_date."""
+    out = {"post_url": None, "post_title": None, "post_date": None}
+    latest_date = None
+    for d in documents or []:
+        meta = getattr(d, "metadata", None) or {}
+        dt = meta.get("post_date") or meta.get("created_at")
+        if dt and isinstance(dt, str) and dt.strip():
+            if latest_date is None or (dt.strip() > latest_date):
+                latest_date = dt.strip()
+                out["post_date"] = latest_date
+                out["post_url"] = meta.get("post_url") or meta.get("link")
+                out["post_title"] = meta.get("post_title")
+    return out
+
+
 def fetch_web_content(url: str):
     """Fetch and chunk web content into LangChain Documents with blog post URLs and metadata.
 

@@ -201,6 +201,7 @@ def retrieve_documents(state: RAGState) -> RAGState:
         retrieve_from_weaviate,
         extract_blog_url_from_query,
         slug_from_cloudfuze_url,
+        extract_jira_ticket_key_from_query,
     )
     from app.weaviate_client import get_weaviate_client
     from app.migration_resolver import detect_migration
@@ -214,14 +215,19 @@ def retrieve_documents(state: RAGState) -> RAGState:
     filter_url = extract_blog_url_from_query(raw_query)
     filter_doc_id = slug_from_cloudfuze_url(filter_url) if filter_url else None
 
+    # If user asks about a specific Jira ticket (e.g. "What is ticket PRI-10521 about?"), restrict to that ticket's chunks.
+    jira_ticket_key = extract_jira_ticket_key_from_query(raw_query)
+    filter_exact_doc_id = jira_ticket_key if jira_ticket_key else None
+
     # If user mentions a migration direction (e.g. "Slack to Teams"), restrict SharePointDocs to that migration_type.
     migration_info = detect_migration(raw_query)
     filter_migration_type = migration_info.get("migration_type") if migration_info.get("direction_detected") else None
 
-    logger.info("[RAG] retrieve_start | num_queries=%d | top_k=%d | filter_doc_id=%s | filter_url=%s | filter_migration_type=%s | queries_preview=%s",
+    logger.info("[RAG] retrieve_start | num_queries=%d | top_k=%d | filter_doc_id=%s | filter_url=%s | filter_exact_doc_id=%s | filter_migration_type=%s | queries_preview=%s",
                 len(queries), top_k,
                 filter_doc_id[:60] + "..." if filter_doc_id and len(filter_doc_id) > 60 else filter_doc_id,
                 filter_url[:60] + "..." if filter_url and len(filter_url) > 60 else filter_url,
+                filter_exact_doc_id,
                 filter_migration_type,
                 [str(q)[:60] for q in (queries[:3] if isinstance(queries, list) else [queries])])
 
