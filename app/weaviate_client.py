@@ -64,15 +64,17 @@ def get_weaviate_client() -> Optional[weaviate.WeaviateClient]:
             url_clean = WEAVIATE_URL.replace("http://", "").replace("https://", "")
             url_parts = url_clean.split(":")
             host = url_parts[0]
-            port = int(url_parts[1]) if len(url_parts) > 1 else (443 if is_https else 8080)
+            http_port = int(url_parts[1]) if len(url_parts) > 1 else (443 if is_https else 8080)
+            # Weaviate default gRPC port is 50051 (must be different from HTTP port)
+            grpc_port = 50051
             
             connection_params = {
                 "http_host": host,
-                "http_port": port,
+                "http_port": http_port,
                 "http_secure": is_https,
-                # Use same host/port for gRPC (can be overridden if needed)
+                # gRPC uses different port (50051 is Weaviate default)
                 "grpc_host": host,
-                "grpc_port": port,
+                "grpc_port": grpc_port,
                 "grpc_secure": is_https,
             }
             
