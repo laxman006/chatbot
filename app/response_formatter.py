@@ -47,6 +47,13 @@ def format_cloud_research_markdown(research_data: Dict, cloud_name: str) -> str:
     sections.append(f"# Cloud API Integration Assessment: {cloud_name}")
     sections.append("")
 
+    # Official Documentation Links (top of response)
+    authoritative_docs = research_data.get("authoritative_docs") or []
+    sections.append("## Authoritative Documentation (Informational)")
+    sections.append("")
+    sections.extend(_render_authoritative_documentation(authoritative_docs, cloud_name))
+    sections.append("")
+
     # 1. Overview
     sections.append("## Overview")
     sections.append("")
@@ -111,13 +118,6 @@ def format_cloud_research_markdown(research_data: Dict, cloud_name: str) -> str:
         sections.append(_render_recommendation_summary(integration_mode))
     else:
         sections.extend(_render_recommendation(integration_mode, capabilities))
-    sections.append("")
-
-    # 9. Authoritative Documentation (Informational)
-    sections.append("## Authoritative Documentation (Informational)")
-    sections.append("")
-    authoritative_docs = research_data.get("authoritative_docs") or []
-    sections.extend(_render_authoritative_documentation(authoritative_docs, cloud_name))
     sections.append("")
 
     markdown = "\n".join(sections).strip() + "\n"

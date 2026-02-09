@@ -371,6 +371,29 @@ JSON (URLs only, no explanation):"""
             authoritative_docs.extend([doc.get("url") for doc in known_docs if doc.get("url")])
         # Deduplicate
         authoritative_docs = list(dict.fromkeys(authoritative_docs))  # Preserves order, removes duplicates
+        # Optional doc crawl: only when authoritative_docs is empty (UX improvement; does not affect integration_mode or confidence)
+        if not authoritative_docs:
+            try:
+                from app.domain_detector import UniversalDomainDetector
+                from app.web_tools import crawl_documentation_urls_only
+                detector = UniversalDomainDetector()
+                official_domain = detector.detect_official_domain(cloud_name)
+                if official_domain:
+                    seed_urls = detector.find_api_documentation_urls(official_domain, cloud_name)
+                    if seed_urls:
+                        logger.info("[DOC CRAWL] authoritative_docs empty; running URL-only documentation crawl")
+                        crawled = crawl_documentation_urls_only(seed_urls, official_domain, max_depth=2)
+                        if crawled:
+                            authoritative_docs = list(dict.fromkeys(crawled))
+                            logger.info(f"[DOC CRAWL] Populated authoritative_docs with {len(authoritative_docs)} URLs")
+                    else:
+                        logger.info("[DOC CRAWL] authoritative_docs empty; no seed URLs, crawl skipped")
+                else:
+                    logger.info("[DOC CRAWL] authoritative_docs empty; no official domain, crawl skipped")
+            except Exception as e:
+                logger.warning(f"[DOC CRAWL] Crawl skipped (non-fatal): {e}")
+        else:
+            logger.info("[DOC CRAWL] authoritative_docs non-empty; crawl skipped")
         final_data = self._verification_phase(cloud_name, normalized_data, scraped_data, classification, authoritative_docs)
         
         # Add metadata

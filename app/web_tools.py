@@ -1074,6 +1074,116 @@ class DocumentationScraper:
         return code_blocks[:10]  # Limit to 10 code examples
 
 
+# --- Documentation crawl (URL collection only, authoritative links) ---
+
+# Path prefixes under which documentation crawl is allowed (segment-based match).
+# Used only when authoritative_docs is empty; results are informational only.
+DOC_CRAWL_PATH_PREFIXES = (
+    "/developers", "/developer", "/docs", "/documentation", "/admin",
+    "/api-docs", "/reference", "/api",
+)
+
+
+def _url_on_official_domain(url: str, official_domain: str) -> bool:
+    """True if URL's host matches official_domain (www normalized)."""
+    try:
+        netloc = (urlparse(url).netloc or "").lower().replace("www.", "")
+        domain = (official_domain or "").lower().replace("www.", "")
+        return domain and (netloc == domain or netloc.endswith("." + domain))
+    except Exception:
+        return False
+
+
+def _url_under_doc_roots(url: str) -> bool:
+    """True if URL path is under DOC_CRAWL_PATH_PREFIXES (segment-based)."""
+    try:
+        path = (urlparse(url).path or "").lower()
+        return any(seg in path for seg in DOC_CRAWL_PATH_PREFIXES)
+    except Exception:
+        return False
+
+
+def crawl_documentation_urls_only(
+    seed_urls: List[str],
+    official_domain: str,
+    max_depth: int = 2,
+    max_fetches: int = 80,
+    max_links_per_page: int = 25,
+    timeout: int = 6,
+    delay_seconds: float = 0.4,
+) -> List[str]:
+    """
+    Crawl vendor doc site for URLs only (no content parsing).
+    Used only when authoritative_docs is empty; results are informational only.
+    Does not affect integration_mode or confidence.
+    - Domain: only official_domain (www normalized).
+    - Path: only under DOC_CRAWL_PATH_PREFIXES.
+    - Max depth 2; fetch with requests.get; parse <a href> only; urljoin.
+    - Hard limits: max_fetches, per-page link cap, timeout. Errors skipped.
+    """
+    if not official_domain or not seed_urls:
+        return []
+    collected: List[str] = []
+    seen_urls: set = set()
+    # BFS: (url, depth)
+    queue: List[Tuple[str, int]] = []
+    for u in seed_urls:
+        u = (u or "").strip()
+        if not u or u in seen_urls:
+            continue
+        if not _url_on_official_domain(u, official_domain) or not _url_under_doc_roots(u):
+            continue
+        seen_urls.add(u)
+        collected.append(u)
+        queue.append((u, 0))
+    fetches = 0
+    try:
+        session = requests.Session()
+        session.headers.update({"User-Agent": "CloudFuze API Research Bot/1.0 (+https://cloudfuze.com)"})
+        while queue and fetches < max_fetches:
+            url, depth = queue.pop(0)
+            if depth > max_depth:
+                continue
+            fetches += 1
+            time.sleep(delay_seconds)
+            try:
+                resp = session.get(url, timeout=timeout)
+                resp.raise_for_status()
+                soup = BeautifulSoup(resp.text, "html.parser")
+            except Exception:
+                continue
+            links_added = 0
+            for tag in soup.find_all("a", href=True):
+                if links_added >= max_links_per_page:
+                    break
+                href = (tag.get("href") or "").strip()
+                if not href or href.startswith("#") or href.startswith("mailto:"):
+                    continue
+                try:
+                    absolute = urljoin(url, href)
+                    parsed = urlparse(absolute)
+                    if not parsed.scheme or parsed.scheme not in ("http", "https"):
+                        continue
+                    absolute = absolute.split("#")[0].rstrip("/") or absolute
+                except Exception:
+                    continue
+                if absolute in seen_urls:
+                    continue
+                if not _url_on_official_domain(absolute, official_domain) or not _url_under_doc_roots(absolute):
+                    continue
+                seen_urls.add(absolute)
+                collected.append(absolute)
+                links_added += 1
+                if depth + 1 <= max_depth:
+                    queue.append((absolute, depth + 1))
+        result = list(dict.fromkeys(collected))
+        logger.info(f"[DOC CRAWL] Collected {len(result)} URLs (fetches={fetches})")
+        return result
+    except Exception as e:
+        logger.warning(f"[DOC CRAWL] Crawl error (non-fatal): {e}")
+        return list(dict.fromkeys(collected))
+
+
 # --- Enterprise Admin Doc Resolution (capability-first, no inference) ---
 
 # URL is VALID for admin/enterprise docs ONLY if path contains at least one of these.
