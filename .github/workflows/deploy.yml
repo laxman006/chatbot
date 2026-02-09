@@ -1,0 +1,197 @@
+# Deploy to production server on push to langgraph-rag branch
+# Uses same authentication method as before-agentic-rag branch
+name: Deploy to Production
+
+on:
+  push:
+    branches: [langgraph-rag]
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to deploy'
+        required: true
+        default: 'langgraph-rag'
+
+jobs:
+  deploy:
+    name: Deploy to ai.cloudfuze.com
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch || 'langgraph-rag' }}
+      
+      - name: Set deployment branch
+        id: set-branch
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "branch=${{ github.event.inputs.branch }}" >> $GITHUB_OUTPUT
+          else
+            echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Deploy to server via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          # Use password authentication (same as before-agentic-rag branch)
+          # If you prefer SSH key, set SSH_PRIVATE_KEY secret and remove SERVER_PASSWORD
+          password: ${{ secrets.SERVER_PASSWORD }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            echo "========================================="
+            echo "Starting deployment to ai.cloudfuze.com"
+            echo "Branch: ${{ steps.set-branch.outputs.branch }}"
+            echo "========================================="
+            
+            # Navigate to project directory
+            cd /opt/chatbot
+            
+            # Create backup before deployment
+            echo "========================================="
+            echo "Creating backup before deployment..."
+            echo "========================================="
+            if [ -f "scripts/backup_full_project.sh" ]; then
+                chmod +x scripts/backup_full_project.sh || true
+                ./scripts/backup_full_project.sh "pre_deploy_backup_$(date +%Y%m%d_%H%M%S)" || {
+                    echo "⚠️  Backup failed, but continuing deployment..."
+                }
+            else
+                echo "⚠️  Backup script not found, creating manual backup..."
+                mkdir -p project_backups/manual_$(date +%Y%m%d_%H%M%S)
+                cp -r weaviate project_backups/manual_*/ 2>/dev/null || true
+                cp .env.ai project_backups/manual_*/ 2>/dev/null || true
+                cp docker-compose.ai.yml project_backups/manual_*/ 2>/dev/null || true
+                cp nginx-ai.conf project_backups/manual_*/ 2>/dev/null || true
+            fi
+            echo ""
+            
+            # Fix git permissions if needed
+            sudo chown -R $USER:$USER .git || true
+            
+            # Pull latest code
+            echo "Pulling latest code from branch: ${{ steps.set-branch.outputs.branch }}"
+            git fetch origin
+            git checkout ${{ steps.set-branch.outputs.branch }} || {
+              echo "Branch not found locally, creating..."
+              git checkout -b ${{ steps.set-branch.outputs.branch }} origin/${{ steps.set-branch.outputs.branch }}
+            }
+            git pull origin ${{ steps.set-branch.outputs.branch }}
+            
+            # Detect docker compose command
+            if docker compose version &> /dev/null; then
+                COMPOSE_CMD='docker compose'
+            else
+                COMPOSE_CMD='docker-compose'
+            fi
+            
+            # Smart disk space management
+            echo "========================================="
+            echo "Checking disk space..."
+            echo "========================================="
+            
+            # Check disk usage percentage
+            DISK_USAGE=$(df / | tail -1 | awk '{print $5}' | sed 's/%//')
+            echo "Current disk usage: ${DISK_USAGE}%"
+            df -h / || true
+            
+            # Only clean up if disk usage > 80%
+            if [ "$DISK_USAGE" -gt 80 ]; then
+                echo "Disk usage high (${DISK_USAGE}%), cleaning up..."
+                
+                # Remove old backup directories (keep only last 2)
+                echo "Cleaning old backup directories..."
+                ls -dt data_backup_* 2>/dev/null | tail -n +3 | xargs rm -rf 2>/dev/null || true
+                
+                # Remove only dangling/unused images (keep build cache!)
+                echo "Removing dangling images..."
+                docker image prune -af || true
+                
+                # Only prune build cache if still > 85%
+                if [ "$DISK_USAGE" -gt 85 ]; then
+                    echo "Disk usage very high, pruning build cache..."
+                    docker builder prune -af || true
+                fi
+            else
+                echo "Disk usage OK (${DISK_USAGE}%), skipping cleanup to preserve build cache"
+            fi
+            
+            # Weaviate data preservation
+            echo "========================================="
+            echo "Preserving Weaviate data..."
+            echo "========================================="
+            
+            # Check if weaviate folder exists
+            if [ -d "weaviate" ] && [ "$(ls -A weaviate 2>/dev/null)" ]; then
+                echo "✅ Weaviate data folder exists and contains data"
+                echo "   Size: $(du -sh weaviate | cut -f1)"
+                echo "   Preserving existing Weaviate data during deployment..."
+            else
+                echo "⚠️  Weaviate data folder is empty or missing"
+                echo "   This is expected for first deployment"
+                echo "   After deployment, run: python scripts/init_weaviate_schema.py"
+                echo "   Then ingest data: python scripts/ingest_to_weaviate.py --source <source>"
+            fi
+            
+            # Stop services (Weaviate data persists in ./weaviate volume)
+            echo "Stopping services..."
+            $COMPOSE_CMD -f docker-compose.ai.yml down || true
+            
+            # Ensure weaviate directory exists and has correct permissions
+            mkdir -p weaviate
+            chmod 755 weaviate || true
+            
+            # Use --build flag which only rebuilds changed layers (Docker layer caching!)
+            echo "Building and starting services (with smart rebuild)..."
+            $COMPOSE_CMD -f docker-compose.ai.yml --env-file .env.ai up -d --build
+            
+            # Wait for services to start
+            echo "Waiting for services to start..."
+            sleep 30
+            
+            # Check service status
+            echo "========================================="
+            echo "Service Status"
+            echo "========================================="
+            $COMPOSE_CMD -f docker-compose.ai.yml ps
+            
+            # Health checks
+            echo ""
+            echo "========================================="
+            echo "Health Checks"
+            echo "========================================="
+            
+            # Check backend health
+            echo "Backend Health:"
+            docker exec slack2teams-backend-ai curl -s http://localhost:8002/health || echo "Backend not ready yet"
+            
+            # Check nginx
+            echo ""
+            echo "Nginx Config:"
+            docker exec slack2teams-nginx-ai nginx -t || echo "Nginx check skipped"
+            
+            echo ""
+            echo "========================================="
+            echo "Deployment Complete!"
+            echo "========================================="
+      
+      - name: Notify on success
+        if: success()
+        run: |
+          echo "✅ Deployment successful to ai.cloudfuze.com"
+          echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** ${{ steps.set-branch.outputs.branch }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Server:** ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Path:** /opt/chatbot" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ✅ Deployed successfully" >> $GITHUB_STEP_SUMMARY
+      
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "❌ Deployment failed to ai.cloudfuze.com"

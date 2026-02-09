@@ -80,7 +80,7 @@ def main():
                 pass
             return False
         source_hint = {"Blogs": "blog", "SharePointDocs": "sharepoint", "JiraTickets": "jira", "Transcripts": "transcript", "Spreadsheets": "excel", "EmailThreads": "email"}.get(name, "<source>")
-        print(f"\n[OK] ✓ {name} recreated successfully. Re-ingest with: python scripts/ingest_to_weaviate.py --source {source_hint}")
+        print(f"\n[OK] {name} recreated successfully. Re-ingest with: python scripts/ingest_to_weaviate.py --source {source_hint}")
         try:
             client.close()
         except Exception:
@@ -100,7 +100,7 @@ def main():
     success = create_all_collections(recreate=args.recreate)
     
     if success:
-        print("\n[OK] ✓ All collections created successfully!")
+        print("\n[OK] All collections created successfully!")
         print("\nCollections created:")
         from app.weaviate_schema import list_collections
         collections = list_collections()
