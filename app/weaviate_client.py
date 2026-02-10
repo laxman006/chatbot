@@ -58,9 +58,24 @@ def get_weaviate_client() -> Optional[weaviate.WeaviateClient]:
             
             _weaviate_client = weaviate.connect_to_local(**connection_params)
         else:
-            # Custom/cloud connection
+            # Custom/cloud connection (parse URL to http_host and http_port)
+            # Parse URL like http://weaviate:8080 or https://cloud.weaviate.io
+            is_https = WEAVIATE_URL.startswith("https://")
+            url_clean = WEAVIATE_URL.replace("http://", "").replace("https://", "")
+            url_parts = url_clean.split(":")
+            host = url_parts[0]
+            http_port = int(url_parts[1]) if len(url_parts) > 1 else (443 if is_https else 8080)
+            # Weaviate default gRPC port is 50051 (must be different from HTTP port)
+            grpc_port = 50051
+            
             connection_params = {
-                "url": WEAVIATE_URL,
+                "http_host": host,
+                "http_port": http_port,
+                "http_secure": is_https,
+                # gRPC uses different port (50051 is Weaviate default)
+                "grpc_host": host,
+                "grpc_port": grpc_port,
+                "grpc_secure": is_https,
             }
             
             # Add auth if API key provided
