@@ -29,8 +29,9 @@ class RAGState(TypedDict, total=False):
     user_context: Any  # app.rbac.UserContext for RBAC filter
 
     # Intent
-    intent: str  # "factual" | "complex" | "procedural"
+    intent: str  # "factual" | "complex" | "procedural" | "email_draft"
     intent_confidence: float
+    ui_mode: str  # optional: "email" when user enables Email Drafting toggle (forces email_draft)
 
     # Query shaping
     enhanced_query: str

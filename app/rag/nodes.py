@@ -155,13 +155,57 @@ def _diversify_pairs(
     return selected[:k]
 
 
+# Email drafting: triggers for intent-based detection (Copilot-style). Toggle override uses ui_mode instead.
+EMAIL_DRAFT_TRIGGERS = [
+    "write a professional email",
+    "draft a professional email",
+    "draft the email",
+    "draft this email",
+    "please draft the email",
+    "can you draft the email",
+    "polish this email",
+    "rewrite this email",
+    "make this email professional",
+    "help me write an email",
+    "rephrase this email",
+    "email draft",
+    # Refinement phrases (so follow-up messages take the email path; Copilot-style)
+    "make the tone more formal",
+    "shorten the email",
+    "shorten the email content",
+    "add a thank-you closing",
+    "add a thank-you closing line",
+    "make it more concise",
+    "add a deadline for response",
+    "include a request for confirmation",
+    "include a contact for support",
+]
+
+
 def classify_intent(state: RAGState) -> RAGState:
-    """Classify query intent: factual, complex, or procedural."""
+    """Classify query intent: email_draft (toggle or triggers), factual, complex, or procedural."""
     query = (state.get("query") or "").strip()
+    state["enhanced_query"] = state.get("enhanced_query") or query
+
+    # 1) Toggle override: user explicitly enabled Email Drafting mode
+    if state.get("ui_mode") == "email":
+        state["intent"] = "email_draft"
+        state["intent_confidence"] = 1.0
+        logger.info("[RAG] classify_intent | intent=email_draft | ui_mode=email")
+        return state
+
+    # 2) Intent-based: trigger phrases (Copilot-style)
+    q_lower = (query or "").strip().lower()
+    for trigger in EMAIL_DRAFT_TRIGGERS:
+        if trigger in q_lower:
+            state["intent"] = "email_draft"
+            state["intent_confidence"] = 0.9
+            logger.info("[RAG] classify_intent | intent=email_draft | trigger=%s", trigger[:40])
+            return state
+
+    # 3) RAG path: factual, complex, or procedural
     intent = "factual"
     confidence = 0.8
-    # Heuristic: procedural often has "how to", "steps"; complex has multiple sub-questions
-    q_lower = query.lower()
     if any(w in q_lower for w in ("how do i", "how to", "steps", "procedure", "walk me")):
         intent = "procedural"
         confidence = 0.7
@@ -170,7 +214,6 @@ def classify_intent(state: RAGState) -> RAGState:
         confidence = 0.7
     state["intent"] = intent
     state["intent_confidence"] = confidence
-    state["enhanced_query"] = state.get("enhanced_query") or query
     next_node = "expand_query" if intent == "complex" else "decompose_query" if intent == "procedural" else "retrieve_documents"
     logger.info("[RAG] classify_intent | intent=%s | confidence=%.2f | next=%s", intent, confidence, next_node)
     return state
@@ -440,6 +483,25 @@ CITE_ONLY_FROM_CONTEXT_RULE = (
     "Do not invent or reference any document names, ticket IDs, URLs, transcript references, "
     "or other sources that were not retrieved."
 )
+
+
+def generate_email_response(state: RAGState) -> RAGState:
+    """Generate polished email from user draft. No RAG: no context, no citations."""
+    from app.llm_factory import get_llm
+    from langchain_core.messages import SystemMessage, HumanMessage
+
+    from config import EMAIL_DRAFT_SYSTEM_PROMPT
+
+    query = state.get("enhanced_query") or state.get("query") or ""
+    logger.info("[RAG] generate_email_response | query_len=%d", len(query or ""))
+    llm = get_llm(temperature=0.2, max_tokens=1500)
+    resp = llm.invoke([SystemMessage(content=EMAIL_DRAFT_SYSTEM_PROMPT), HumanMessage(content=query)])
+    state["final_response"] = resp.content if hasattr(resp, "content") else str(resp)
+    # Ensure no docs so extract_citations yields empty list
+    state.setdefault("retrieved_docs", [])
+    state.setdefault("reranked_docs", [])
+    logger.info("[RAG] generate_email_response | response_len=%d", len(state["final_response"]))
+    return state
 
 
 def generate_response(state: RAGState) -> RAGState:

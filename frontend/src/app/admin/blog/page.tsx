@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { getCurrentUser } from '@/lib/session-utils';
 import { apiFetch } from '@/lib/api';
@@ -45,6 +45,7 @@ export default function AdminBlogPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const [status, setStatus] = useState<BlogStatus | null>(null);
   const [stats, setStats] = useState<BlogStats | null>(null);
+  const previousLastPollTimeRef = useRef<string | null>(null);
 
   // Verify admin access on mount
   useEffect(() => {
@@ -64,45 +65,73 @@ export default function AdminBlogPage() {
     setLoading(false);
   }, [router]);
 
-  // Fetch status and stats
-  const fetchData = useCallback(async () => {
+  // Fetch status and stats.
+  // preserveSuccess: keep existing success message (e.g. after manual trigger).
+  // silent: no loading state (background refresh); page updates quietly.
+  const fetchData = useCallback(async (options?: { preserveSuccess?: boolean; silent?: boolean }) => {
     if (!authUser) return;
 
-    setFetching(true);
-    setError(null);
-    setSuccess(null);
+    if (!options?.silent) setFetching(true);
+    if (!options?.preserveSuccess) {
+      setError(null);
+      setSuccess(null);
+    }
 
     try {
-      // Fetch status
-      const statusResponse = await apiFetch('/admin/blog/status', {
-        method: 'GET',
-      });
-
+      const statusResponse = await apiFetch('/admin/blog/status', { method: 'GET' });
       if (!statusResponse.ok) {
-        const statusData = await statusResponse.json();
-        throw new Error(statusData.detail || 'Failed to fetch blog status');
+        let detail = 'Failed to fetch blog status';
+        try {
+          const statusData = await statusResponse.json();
+          detail = typeof statusData.detail === 'string' ? statusData.detail : detail;
+        } catch {
+          // Response may not be JSON (e.g. 502/504)
+        }
+        throw new Error(detail);
+      }
+      let statusData: BlogStatus;
+      try {
+        statusData = await statusResponse.json();
+      } catch {
+        throw new Error('Invalid response from server');
       }
 
-      const statusData: BlogStatus = await statusResponse.json();
-      setStatus(statusData);
-
-      // Fetch stats
-      const statsResponse = await apiFetch('/admin/blog/stats', {
-        method: 'GET',
-      });
-
+      const statsResponse = await apiFetch('/admin/blog/stats', { method: 'GET' });
       if (!statsResponse.ok) {
-        const statsData = await statsResponse.json();
-        throw new Error(statsData.detail || 'Failed to fetch blog stats');
+        let detail = 'Failed to fetch blog stats';
+        try {
+          const statsData = await statsResponse.json();
+          detail = typeof statsData.detail === 'string' ? statsData.detail : detail;
+        } catch {
+          // Response may not be JSON
+        }
+        throw new Error(detail);
+      }
+      let statsData: BlogStats;
+      try {
+        statsData = await statsResponse.json();
+      } catch {
+        throw new Error('Invalid response from server');
       }
 
-      const statsData: BlogStats = await statsResponse.json();
+      setStatus(statusData);
       setStats(statsData);
+
+      // When this is a background refresh (not after manual trigger), show message if scheduler ran
+      const newLastPoll = statusData.last_poll_time ?? null;
+      if (!options?.preserveSuccess && previousLastPollTimeRef.current !== null && newLastPoll !== null && previousLastPollTimeRef.current !== newLastPoll) {
+        setSuccess('Automatic blog poll completed. Data updated.');
+      }
+      previousLastPollTimeRef.current = newLastPoll;
     } catch (err) {
-      setError((err as Error).message);
+      const message = (err as Error).message;
+      // Silent refresh: don't show error so user isn't surprised (e.g. session expired in background)
+      if (!options?.silent) {
+        setError(message);
+      }
       console.error('Error fetching blog data:', err);
     } finally {
-      setFetching(false);
+      if (!options?.silent) setFetching(false);
     }
   }, [authUser]);
 
@@ -111,6 +140,14 @@ export default function AdminBlogPage() {
     if (!authUser) return;
     fetchData();
   }, [authUser, fetchData]);
+
+  // Silent background refresh so scheduled poll results appear without user action
+  const AUTO_REFRESH_INTERVAL_MS = 2 * 60 * 1000;
+  useEffect(() => {
+    if (!authUser || !status) return;
+    const id = setInterval(() => fetchData({ silent: true }), AUTO_REFRESH_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [authUser, status, fetchData]);
 
   // Trigger blog poll
   const handleTriggerPoll = useCallback(async () => {
@@ -133,9 +170,9 @@ export default function AdminBlogPage() {
 
       setSuccess('Blog poll completed successfully! New posts have been added to the vectorstore.');
       
-      // Auto-refresh status after a short delay
+      // Auto-refresh status after a short delay (preserve success message)
       setTimeout(() => {
-        fetchData();
+        fetchData({ preserveSuccess: true });
       }, 2000);
     } catch (err) {
       setError((err as Error).message);
@@ -208,7 +245,7 @@ export default function AdminBlogPage() {
             Back to chats
           </button>
           <button
-            onClick={fetchData}
+            onClick={() => fetchData()}
             disabled={fetching}
             style={{
               padding: '10px 14px',

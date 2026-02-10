@@ -21,8 +21,10 @@ from app.rag import nodes
 logger = logging.getLogger(__name__)
 
 
-def _route_intent(state: RAGState) -> Literal["retrieve_documents", "expand_query", "decompose_query"]:
+def _route_intent(state: RAGState) -> Literal["retrieve_documents", "expand_query", "decompose_query", "generate_email_response"]:
     intent = state.get("intent") or "factual"
+    if intent == "email_draft":
+        return "generate_email_response"
     if intent == "complex":
         return "expand_query"
     if intent == "procedural":
@@ -60,10 +62,17 @@ def build_rag_graph(checkpointer=None):
     g.add_node("apply_corrective_action", nodes.apply_corrective_action)
     g.add_node("compress_context", nodes.compress_context)
     g.add_node("generate_response", nodes.generate_response)
+    g.add_node("generate_email_response", nodes.generate_email_response)
     g.add_node("extract_citations", nodes.extract_citations)
 
     g.set_entry_point("classify_intent")
-    g.add_conditional_edges("classify_intent", _route_intent)
+    g.add_conditional_edges("classify_intent", _route_intent, {
+        "generate_email_response": "generate_email_response",
+        "expand_query": "expand_query",
+        "decompose_query": "decompose_query",
+        "retrieve_documents": "retrieve_documents",
+    })
+    g.add_edge("generate_email_response", "extract_citations")
     g.add_edge("expand_query", "retrieve_documents")
     g.add_edge("decompose_query", "retrieve_documents")
     g.add_edge("retrieve_documents", "rerank_results")

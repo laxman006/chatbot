@@ -1,3 +1,6 @@
+/** Force dynamic to prevent caching of streaming responses. */
+export const dynamic = 'force-dynamic';
+
 /**
  * Next.js API Proxy Route
  * 
@@ -60,8 +63,8 @@ async function proxyRequest(
     
     console.log(`[PROXY] ${method} ${url}`);
     
-    // ✅ STREAMING DETECTION: Check if this is a streaming endpoint
-    const isStreamingEndpoint = path.includes('/chat/stream') || path.includes('/stream');
+    // ✅ STREAMING DETECTION: Check if this is a streaming endpoint (path has no leading slash)
+    const isStreamingEndpoint = path === 'chat/stream' || path === 'chat/retry/stream' || path.endsWith('/stream');
     
     // Get request body if present
     let body: string | undefined;
@@ -116,14 +119,15 @@ async function proxyRequest(
           }
         });
         
-        // Create response with streaming body
+        // Create response with streaming body (no buffering)
         const proxiedResponse = new NextResponse(stream, {
           status: backendResponse.status,
           statusText: backendResponse.statusText || '',
           headers: {
             'Content-Type': backendResponse.headers.get('content-type') || 'text/event-stream',
-            'Cache-Control': 'no-cache',
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
             'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no',
           },
         });
         

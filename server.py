@@ -87,7 +87,10 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"[STARTUP] Failed to log vectorstore counts: {e}")
 
-    # Start scheduler for weekly reports (and future jobs)
+    # Start scheduler for weekly reports and blog polling
+    scheduler_started = False
+    
+    # Weekly Reports Scheduler
     try:
         from config import WEEKLY_REPORT_ENABLED, WEEKLY_REPORT_SEND_HOUR, WEEKLY_REPORT_SEND_MINUTE
         
@@ -103,12 +106,56 @@ async def lifespan(app: FastAPI):
                 name='Weekly Team Leaderboard Report',
                 replace_existing=True
             )
-            scheduler.start()
-            logger.info(f"[STARTUP] ✅ Weekly report scheduler started (runs every Monday at {WEEKLY_REPORT_SEND_HOUR:02d}:{WEEKLY_REPORT_SEND_MINUTE:02d} {timezone_str})")
+            scheduler_started = True
+            logger.info(f"[STARTUP] ✅ Weekly report scheduler added (runs every Monday at {WEEKLY_REPORT_SEND_HOUR:02d}:{WEEKLY_REPORT_SEND_MINUTE:02d} {timezone_str})")
         else:
             logger.info("[STARTUP] Weekly report scheduler is disabled (WEEKLY_REPORT_ENABLED=false)")
     except Exception as e:
-        logger.error(f"[STARTUP] ❌ Failed to start weekly report scheduler: {e}", exc_info=True)
+        logger.error(f"[STARTUP] ❌ Failed to add weekly report scheduler: {e}", exc_info=True)
+    
+    # Blog Polling Scheduler
+    try:
+        from config import BLOG_POLLING_ENABLED, BLOG_POLLING_INTERVAL
+        
+        if BLOG_POLLING_ENABLED:
+            from app.blog_polling_scheduler import scheduled_blog_poll
+            from apscheduler.triggers.interval import IntervalTrigger
+            
+            # Convert interval to hours and minutes for display
+            interval_hours = BLOG_POLLING_INTERVAL // 3600
+            interval_minutes = (BLOG_POLLING_INTERVAL % 3600) // 60
+            interval_seconds = BLOG_POLLING_INTERVAL % 60
+            
+            if interval_hours > 0:
+                interval_str = f"{interval_hours}h"
+                if interval_minutes > 0:
+                    interval_str += f" {interval_minutes}m"
+            elif interval_minutes > 0:
+                interval_str = f"{interval_minutes}m"
+            else:
+                interval_str = f"{interval_seconds}s"
+            
+            scheduler.add_job(
+                func=scheduled_blog_poll,
+                trigger=IntervalTrigger(seconds=BLOG_POLLING_INTERVAL, timezone=scheduler_timezone),
+                id='blog_polling_job',
+                name='Automatic Blog Ingestion',
+                replace_existing=True
+            )
+            scheduler_started = True
+            logger.info(f"[STARTUP] ✅ Blog polling scheduler added (runs every {interval_str})")
+        else:
+            logger.info("[STARTUP] Blog polling scheduler is disabled (BLOG_POLLING_ENABLED=false)")
+    except Exception as e:
+        logger.error(f"[STARTUP] ❌ Failed to add blog polling scheduler: {e}", exc_info=True)
+    
+    # Start the scheduler if any jobs were added
+    if scheduler_started:
+        try:
+            scheduler.start()
+            logger.info("[STARTUP] ✅ Scheduler started successfully")
+        except Exception as e:
+            logger.error(f"[STARTUP] ❌ Failed to start scheduler: {e}", exc_info=True)
     
     yield
 

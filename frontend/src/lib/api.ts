@@ -45,6 +45,10 @@ export async function apiFetch(
   // Ensure path starts with /
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
   
+  // Streaming endpoints: use text/event-stream so response is not buffered as JSON
+  const isStreamPath = cleanPath.includes('/chat/stream') || cleanPath.includes('/retry/stream');
+  const accept = isStreamPath ? 'text/event-stream' : 'application/json';
+  
   // Get base URL (proxy path or direct backend URL)
   const base = getApiBase();
   const url = `${base}${cleanPath}`;
@@ -54,7 +58,7 @@ export async function apiFetch(
     credentials: 'include', // ⭐ CRITICAL: Always include cookies
     headers: {
       'Content-Type': 'application/json',
-      'Accept': 'application/json', // ⭐ Ensure nginx routes API requests to backend
+      'Accept': accept, // ⭐ text/event-stream for streaming to avoid buffering
       ...options.headers,
     },
   });

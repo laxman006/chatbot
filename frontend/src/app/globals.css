@@ -750,6 +750,72 @@ header img {
   margin-bottom: 8px;
 }
 
+/* Email draft (polished version) - Copilot-style: email as hero, minimal chrome */
+.email-draft-heading {
+  margin: 0 0 8px 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: #9ca3af;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.email-draft-body {
+  background: #ffffff;
+  border: none;
+  border-radius: 6px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  padding: 20px 22px;
+  margin: 0 0 16px 0;
+  font-size: 14px;
+  line-height: 1.65;
+  color: #1f2937;
+  text-align: left;
+  max-width: 100%;
+}
+
+/* Paragraph spacing in email draft so UI matches pasted email (blank lines between paragraphs) */
+.email-draft-body .message-content p {
+  margin: 0 0 1em 0;
+}
+.email-draft-body .message-content p:last-child {
+  margin-bottom: 0;
+}
+
+.email-draft-helper {
+  margin: 0 0 12px 0;
+  font-size: 13px;
+  color: #6b7280;
+  font-style: italic;
+}
+
+.email-refinement-buttons {
+  margin-top: 0;
+  padding-top: 12px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.email-refinement-btn {
+  font-size: 13px;
+  padding: 8px 14px;
+  border-radius: 6px;
+  border: 1px solid #e5e7eb;
+  background: #fafafa;
+  cursor: pointer;
+  color: #374151;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.email-refinement-btn:hover {
+  background: #f3f4f6;
+  border-color: #d1d5db;
+}
+
+/* Keep feedback row below email block so email stays clean */
+.message.bot .email-draft-meta {
+  margin-top: 12px;
+}
+
 /* Feedback buttons - ChatGPT style */
 .feedback-buttons {
   display: flex;
@@ -3057,6 +3123,43 @@ header img {
 .chatgpt-textarea::placeholder {
   color: #9ca3af !important;
   font-weight: 400 !important;
+}
+
+/* Email drafting toggle in input bar (like ChatGPT dictate icon) */
+.email-draft-toggle-btn {
+  width: 36px !important;
+  height: 36px !important;
+  min-width: 36px !important;
+  min-height: 36px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border: none !important;
+  border-radius: 50% !important;
+  background: transparent !important;
+  color: #6b7280 !important;
+  cursor: pointer !important;
+  flex-shrink: 0 !important;
+  transition: background 0.2s ease, color 0.2s ease !important;
+}
+.email-draft-toggle-btn:hover {
+  background: #f3f4f6 !important;
+  color: #374151 !important;
+}
+.email-draft-toggle-btn.active {
+  background: #e0e7ff !important;
+  color: #2563eb !important;
+}
+.email-draft-toggle-btn.active:hover {
+  background: #c7d2fe !important;
+  color: #1d4ed8 !important;
+}
+.email-draft-toggle-btn svg {
+  width: 20px !important;
+  height: 20px !important;
+  flex-shrink: 0 !important;
 }
 
 .chatgpt-send-btn {

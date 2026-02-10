@@ -311,7 +311,8 @@ async def chat(request: Request, auth_user: dict = Depends(require_auth)):
     data = await request.json()
     question = data.get("question", "")
     session_id = data.get("session_id", str(uuid.uuid4()))
-    
+    ui_mode = data.get("ui_mode")  # optional: "email" when Email Drafting toggle is ON
+
     # SECURITY: Check if trying to modify a read-only (others') session
     if session_id and isinstance(session_id, str) and session_id.startswith('user_chat_'):
         print(f"[SECURITY] Attempted to send message to read-only session: {session_id}")
@@ -336,6 +337,7 @@ async def chat(request: Request, auth_user: dict = Depends(require_auth)):
         user_name=user_name,
         user_email=user_email,
         conversation_id=conversation_id,
+        ui_mode=ui_mode,
     )
     try:
         await mongodb_memory.insert_message_event(user_id, session_id, user_email)
@@ -359,7 +361,8 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
     data = await request.json()
     question = data.get("question", "")
     session_id = data.get("session_id", str(uuid.uuid4()))
-    
+    ui_mode = data.get("ui_mode")  # optional: "email" when Email Drafting toggle is ON
+
     # Use VERIFIED user info from auth token, NOT from request body
     user_id = auth_user["user_id"]
     user_name = auth_user["name"]
@@ -384,12 +387,14 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
             user_name=user_name,
             user_email=user_email,
             conversation_id=conversation_id,
+            ui_mode=ui_mode,
         ),
         media_type="text/event-stream",
         headers={
-            "Cache-Control": "no-cache",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
             "Connection": "keep-alive",
             "Content-Type": "text/event-stream",
+            "X-Accel-Buffering": "no",
         }
     )
 
@@ -416,7 +421,8 @@ async def chat_retry_stream(request: Request, auth_user: dict = Depends(require_
     session_id = data.get("session_id", str(uuid.uuid4()))
     previous_trace_id = data.get("previous_trace_id", "")
     retry_attempt = data.get("retry_attempt", 1)
-    
+    ui_mode = data.get("ui_mode")  # optional: "email" when Email Drafting toggle is ON
+
     # Use VERIFIED user info from auth token
     user_id = auth_user["user_id"]
     user_name = auth_user["name"]
@@ -441,12 +447,14 @@ async def chat_retry_stream(request: Request, auth_user: dict = Depends(require_
             user_name=user_name,
             user_email=user_email,
             conversation_id=conversation_id,
+            ui_mode=ui_mode,
         ),
         media_type="text/event-stream",
         headers={
-            "Cache-Control": "no-cache",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
             "Connection": "keep-alive",
             "Content-Type": "text/event-stream",
+            "X-Accel-Buffering": "no",
         }
     )
 
@@ -775,13 +783,22 @@ async def get_user_chat_messages(
         first_message = next((msg for msg in messages if msg.get("role") == "user"), None)
         title = first_message["content"][:50] + "..." if first_message else "Chat conversation"
         
-        # Format messages for frontend
+        # Format messages for frontend (pass through intent, emailContent, traceId, recommendedQuestions for email-draft UI restore)
         formatted_messages = []
         for msg in messages:
-            formatted_messages.append({
+            m = {
                 "role": msg.get("role", "user"),
                 "content": msg.get("content", "")
-            })
+            }
+            if msg.get("traceId") is not None:
+                m["traceId"] = msg["traceId"]
+            if msg.get("intent") is not None:
+                m["intent"] = msg["intent"]
+            if msg.get("emailContent") is not None:
+                m["emailContent"] = msg["emailContent"]
+            if msg.get("recommendedQuestions") is not None:
+                m["recommendedQuestions"] = msg["recommendedQuestions"]
+            formatted_messages.append(m)
         
         return {
             "messages": formatted_messages,
@@ -833,13 +850,22 @@ async def get_user_by_conversation_id(
         first_message = next((msg for msg in messages if msg.get("role") == "user"), None)
         title = first_message["content"][:50] + "..." if first_message else "Chat conversation"
         
-        # Format messages for frontend
+        # Format messages for frontend (pass through intent, emailContent, traceId, recommendedQuestions for email-draft UI restore)
         formatted_messages = []
         for msg in messages:
-            formatted_messages.append({
+            m = {
                 "role": msg.get("role", "user"),
                 "content": msg.get("content", "")
-            })
+            }
+            if msg.get("traceId") is not None:
+                m["traceId"] = msg["traceId"]
+            if msg.get("intent") is not None:
+                m["intent"] = msg["intent"]
+            if msg.get("emailContent") is not None:
+                m["emailContent"] = msg["emailContent"]
+            if msg.get("recommendedQuestions") is not None:
+                m["recommendedQuestions"] = msg["recommendedQuestions"]
+            formatted_messages.append(m)
         
         print(f"[CONVERSATION] Successfully loaded conversation: {conversation_id}, user: {user_id}, messages: {len(formatted_messages)}")
         
