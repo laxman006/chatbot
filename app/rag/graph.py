@@ -30,11 +30,17 @@ def _route_intent(state: RAGState) -> Literal["retrieve_documents", "expand_quer
     return "retrieve_documents"
 
 
-def _route_after_validate(state: RAGState) -> Literal["compress_context", "apply_corrective_action"]:
+def _route_after_validate(state: RAGState) -> Literal["refuse_response", "compress_context", "apply_corrective_action"]:
+    """Route after validate: refuse when insufficient (RAG-wide), else proceed or retry."""
     retry = state.get("retry_count") or 0
+    docs = state.get("reranked_docs") or state.get("retrieved_docs") or []
+    no_sufficient = state.get("no_sufficient_context", False)
     val = state.get("validation_result") or {}
     quality = val.get("quality_score", 0.0)
     action = state.get("corrective_action") or "none"
+    # Refuse path: insufficient retrieval and (max retries or no docs)
+    if no_sufficient and (retry >= 2 or len(docs) == 0):
+        return "refuse_response"
     if action == "none" or quality >= 0.5 or retry >= 2:
         return "compress_context"
     return "apply_corrective_action"
@@ -50,6 +56,7 @@ def build_rag_graph(checkpointer=None):
     g.add_node("retrieve_documents", nodes.retrieve_documents)
     g.add_node("rerank_results", nodes.rerank_results)
     g.add_node("validate_context", nodes.validate_context)
+    g.add_node("refuse_response", nodes.refuse_response)
     g.add_node("apply_corrective_action", nodes.apply_corrective_action)
     g.add_node("compress_context", nodes.compress_context)
     g.add_node("generate_response", nodes.generate_response)
@@ -61,7 +68,12 @@ def build_rag_graph(checkpointer=None):
     g.add_edge("decompose_query", "retrieve_documents")
     g.add_edge("retrieve_documents", "rerank_results")
     g.add_edge("rerank_results", "validate_context")
-    g.add_conditional_edges("validate_context", _route_after_validate)
+    g.add_conditional_edges("validate_context", _route_after_validate, {
+        "refuse_response": "refuse_response",
+        "compress_context": "compress_context",
+        "apply_corrective_action": "apply_corrective_action",
+    })
+    g.add_edge("refuse_response", "extract_citations")
     g.add_edge("apply_corrective_action", "retrieve_documents")
     g.add_edge("compress_context", "generate_response")
     g.add_edge("generate_response", "extract_citations")

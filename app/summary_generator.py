@@ -1,7 +1,8 @@
 """
 Summary generator for creating document summaries as separate chunks.
 
-Conditional generation: only for documents with chunks > 5 OR token_count > 2000.
+- Blogs: always generate a doc_summary chunk (lightweight prompt for short posts).
+- Other collections: only if chunks > 5 OR token_count > 2000.
 Non-blocking: doesn't fail ingestion if summary generation fails.
 """
 
@@ -23,9 +24,14 @@ from app.llm_factory import get_llm
 
 logger = logging.getLogger(__name__)
 
-# Thresholds for conditional summary generation
+# Thresholds for conditional summary generation (non-Blog collections)
 MIN_CHUNKS_FOR_SUMMARY = 5
 MIN_TOKENS_FOR_SUMMARY = 2000
+# Short blog: use lightweight intent/scope prompt (below these)
+BLOG_SHORT_CHUNK_THRESHOLD = 5
+BLOG_SHORT_TOKEN_THRESHOLD = 2000
+# Cap input length for short-blog summary (keep LLM call cheap)
+BLOG_SHORT_CONTENT_CAP = 1500
 
 # Chunk role mapping by collection
 COLLECTION_TO_SUMMARY_ROLE = {
@@ -64,18 +70,20 @@ class SummaryGenerator:
     def should_generate_summary(
         self,
         chunks: List[WeaviateChunk],
-        total_tokens: Optional[int] = None
+        total_tokens: Optional[int] = None,
+        collection_name: Optional[str] = None
     ) -> bool:
         """
         Determine if summary should be generated.
         
-        Conditions:
-        - chunks > MIN_CHUNKS_FOR_SUMMARY (5), OR
-        - total_tokens > MIN_TOKENS_FOR_SUMMARY (2000)
+        Every document gets a summary chunk (at least one chunk required).
+        Applies to all collections: Blogs, SharePointDocs, JiraTickets,
+        Transcripts, EmailThreads, Spreadsheets.
         
         Args:
             chunks: List of chunks for the document
             total_tokens: Total token count (if None, calculated from chunks)
+            collection_name: Used in _generate_summary_text for collection-specific prompts
         
         Returns:
             True if summary should be generated
@@ -86,18 +94,8 @@ class SummaryGenerator:
         if not chunks:
             return False
         
-        # Check chunk count
-        if len(chunks) > MIN_CHUNKS_FOR_SUMMARY:
-            return True
-        
-        # Check token count
-        if total_tokens is None:
-            total_tokens = sum(c.token_count or 0 for c in chunks)
-        
-        if total_tokens > MIN_TOKENS_FOR_SUMMARY:
-            return True
-        
-        return False
+        # Every document gets a summary chunk (all collections)
+        return True
     
     def generate_summary_chunk(
         self,
@@ -122,7 +120,7 @@ class SummaryGenerator:
         Returns:
             WeaviateChunk with summary (chunk_id=-1) or None if generation fails
         """
-        if not self.should_generate_summary(chunks):
+        if not self.should_generate_summary(chunks, collection_name=collection_name):
             logger.debug(
                 f"[SUMMARY] Skipping summary for doc_id={doc_id} "
                 f"(chunks={len(chunks)}, below threshold)"
@@ -143,11 +141,14 @@ class SummaryGenerator:
             # Combine chunk content for summary
             combined_content = "\n\n".join([c.content for c in chunks])
             
-            # Generate summary using LLM
+            # Generate summary using LLM (for Blogs, pass size so we can use short vs long prompt)
+            total_tokens = sum(c.token_count or 0 for c in chunks)
             summary_text = self._generate_summary_text(
                 content=combined_content,
                 doc_metadata=doc_metadata,
-                collection_name=collection_name
+                collection_name=collection_name,
+                chunk_count=len(chunks),
+                total_tokens=total_tokens
             )
             
             if not summary_text:
@@ -201,7 +202,9 @@ class SummaryGenerator:
         self,
         content: str,
         doc_metadata: Dict[str, Any],
-        collection_name: str
+        collection_name: str,
+        chunk_count: Optional[int] = None,
+        total_tokens: Optional[int] = None
     ) -> Optional[str]:
         """
         Generate summary text using LLM.
@@ -210,6 +213,8 @@ class SummaryGenerator:
             content: Combined content from all chunks
             doc_metadata: Document metadata
             collection_name: Collection name
+            chunk_count: Number of chunks (used for Blogs short vs long prompt)
+            total_tokens: Total tokens (used for Blogs short vs long prompt)
         
         Returns:
             Summary text or None if generation fails
@@ -217,13 +222,39 @@ class SummaryGenerator:
         # Build prompt based on collection type
         title = doc_metadata.get("title", "Document")
         
-        if collection_name == "JiraTickets":
+        if collection_name == "Blogs":
+            # Short blog: lightweight intent/scope (1-2 sentences). Long blog: 2-3 sentences.
+            is_short = (chunk_count or 0) <= BLOG_SHORT_CHUNK_THRESHOLD and (
+                total_tokens or 0
+            ) <= BLOG_SHORT_TOKEN_THRESHOLD
+            content_cap = BLOG_SHORT_CONTENT_CAP if is_short else 5000
+            capped = content[:content_cap]
+            if is_short:
+                prompt = f"""In 1-2 sentences, describe what this blog post is about and what type of information it provides. Do not add interpretation, recommendations, or details not explicitly stated.
+
+Title: {title}
+
+Content:
+{capped}
+
+Summary:"""
+            else:
+                prompt = f"""Summarize the following blog post in 2-3 sentences. Focus on the main topic and key information.
+
+Title: {title}
+
+Content:
+{capped}
+
+Summary:"""
+        
+        elif collection_name == "JiraTickets":
             prompt = f"""Summarize the following Jira ticket in 2-3 sentences. Focus on the problem, solution, and key outcomes.
 
 Title: {title}
 
 Content:
-{content[:5000]}  # Limit content to avoid token limits
+{content[:5000]}
 
 Summary:"""
         
@@ -248,7 +279,7 @@ Content:
 Summary:"""
         
         else:
-            # Default summary for documents
+            # Default summary for documents (SharePointDocs, etc.)
             prompt = f"""Summarize the following document in 2-3 sentences. Focus on the main topic and key information.
 
 Title: {title}

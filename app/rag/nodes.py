@@ -326,8 +326,24 @@ def rerank_results(state: RAGState) -> RAGState:
     return state
 
 
+# Minimum retrieval sufficiency (RAG-wide): refuse to answer when below these.
+MIN_DOCS_FOR_SUFFICIENCY = 2
+MIN_CONTEXT_TOKENS_FOR_SUFFICIENCY = 250
+
+
+def _retrieval_is_sufficient(docs: List[Tuple[Document, float]]) -> bool:
+    """Return True if retrieval has enough docs and context tokens to attempt generation (RAG-wide)."""
+    if not docs or len(docs) < MIN_DOCS_FOR_SUFFICIENCY:
+        return False
+    total_tokens = 0
+    for d, _ in docs:
+        total_tokens += len((d.page_content or "").split())
+    return total_tokens >= MIN_CONTEXT_TOKENS_FOR_SUFFICIENCY
+
+
 def validate_context(state: RAGState) -> RAGState:
-    """CRAG validator: relevance, coverage, diversity, quality_score, corrective_action."""
+    """CRAG validator: relevance, coverage, diversity, quality_score, corrective_action.
+    Sets no_sufficient_context for RAG-wide refuse path when retrieval is insufficient."""
     docs = state.get("reranked_docs") or state.get("retrieved_docs") or []
     query = state.get("enhanced_query") or state.get("query") or ""
 
@@ -338,6 +354,7 @@ def validate_context(state: RAGState) -> RAGState:
         diversity = 0.0
         corrective = "expand_topk"
         issues.append("no_documents")
+        state["no_sufficient_context"] = True
     else:
         scores = [s for _, s in docs]
         avg_score = sum(scores) / len(scores) if scores else 0.0
@@ -345,6 +362,10 @@ def validate_context(state: RAGState) -> RAGState:
         coverage = len(docs) >= 3
         diversity = 0.8 if len(set(d.metadata.get("source_type", "") for d, _ in docs)) > 1 else 0.5
         corrective = "none" if (quality >= 0.5 and coverage) else "expand_topk"
+        sufficient = _retrieval_is_sufficient(docs)
+        state["no_sufficient_context"] = not sufficient
+        if not sufficient:
+            issues.append("insufficient_context")
 
     state["validation_result"] = ValidationResult(
         quality_score=quality,
@@ -355,8 +376,8 @@ def validate_context(state: RAGState) -> RAGState:
         corrective_action=corrective,
     )
     state["corrective_action"] = corrective
-    logger.info("[RAG] validate | quality_score=%.2f | coverage=%s | diversity=%.2f | corrective=%s | retry_count=%s",
-                quality, coverage, diversity, corrective, state.get("retry_count"))
+    logger.info("[RAG] validate | quality_score=%.2f | coverage=%s | diversity=%.2f | corrective=%s | retry_count=%s | no_sufficient_context=%s",
+                quality, coverage, diversity, corrective, state.get("retry_count"), state.get("no_sufficient_context"))
     return state
 
 
@@ -367,6 +388,20 @@ def apply_corrective_action(state: RAGState) -> RAGState:
     top_k = state.get("top_k") or 50
     state["top_k"] = min(150, top_k + 30)
     logger.info("[RAG] corrective_action | retry_count=%d | new_top_k=%d", state["retry_count"], state["top_k"])
+    return state
+
+
+# Fixed disclaimer when retrieval is insufficient (RAG-wide; no LLM call).
+REFUSE_RESPONSE_MESSAGE = (
+    "I don't have sufficient information in our internal knowledge base to answer this accurately. "
+    "Please rephrase or specify the document/source you're interested in."
+)
+
+
+def refuse_response(state: RAGState) -> RAGState:
+    """Set final_response to disclaimer when retrieval is insufficient (RAG-wide). No LLM call."""
+    state["final_response"] = REFUSE_RESPONSE_MESSAGE
+    logger.info("[RAG] refuse_response | insufficient retrieval, returning disclaimer")
     return state
 
 
@@ -399,8 +434,17 @@ def compress_context(state: RAGState) -> RAGState:
     return state
 
 
+# Global rule appended to system message (RAG-wide): only cite retrieved sources.
+CITE_ONLY_FROM_CONTEXT_RULE = (
+    "IMPORTANT: Only cite sources that appear in the provided context. "
+    "Do not invent or reference any document names, ticket IDs, URLs, transcript references, "
+    "or other sources that were not retrieved."
+)
+
+
 def generate_response(state: RAGState) -> RAGState:
-    """LLM generation with system prompt + context + query."""
+    """LLM generation with system prompt + context + query.
+    Appends cite-only-from-context rule (RAG-wide) and optional source-specific notes."""
     from app.llm_factory import get_llm
     from langchain_core.messages import SystemMessage, HumanMessage
 
@@ -408,9 +452,14 @@ def generate_response(state: RAGState) -> RAGState:
     query = state.get("enhanced_query") or state.get("query") or ""
     from config import SYSTEM_PROMPT
 
-    # User requested to use ONLY the config.py SYSTEM_PROMPT.
-    # The config.py prompt already handles fallback behavior (Section 9).
     sys = SYSTEM_PROMPT or "Answer based on the context."
+    # RAG-wide: always append cite-only-from-context rule
+    sys = (sys.rstrip() + "\n\n" + CITE_ONLY_FROM_CONTEXT_RULE).strip()
+    # Optional: source-specific notes when a source type is absent (reduces temptation)
+    docs = state.get("reranked_docs") or state.get("retrieved_docs") or []
+    source_types = {((getattr(d, "metadata", None) or {}).get("source_type") or "") for d, _ in docs}
+    if "jira" not in source_types:
+        sys = sys + "\n\nNo Jira tickets were retrieved; do not reference any Jira ticket IDs."
     msg = f"Context:\n{ctx}\n\nQuestion: {query}"
     logger.info("[RAG] generate_start | context_len=%d | query_len=%d", len(ctx), len(query))
     llm = get_llm(temperature=0.1, max_tokens=1500)

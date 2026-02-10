@@ -46,6 +46,7 @@ class RAGState(TypedDict, total=False):
     validation_result: ValidationResult
     corrective_action: str
     retry_count: int
+    no_sufficient_context: bool  # True when retrieval is insufficient (RAG-wide refuse path)
 
     # Context and generation
     compressed_context: str

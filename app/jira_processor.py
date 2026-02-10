@@ -884,6 +884,7 @@ Assignee: {ticket_data['assignee']}"""
                 "section": "summary",
                 "section_priority": "high",
                 "ticket_chunk_type": "summary",
+                "chunk_role": "ticket_summary",  # Enables retriever summary-chunk fetch for JiraTickets
             }
         )
         documents.append(summary_doc)
