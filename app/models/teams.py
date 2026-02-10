@@ -65,6 +65,7 @@ TEAMS_STRUCTURE = {
             {"name": "Phani R", "email": "Phani.Ryali@cloudfuze.com"},
             {"name": "Prakash S", "email": "Prakash.Singampalli@cloudfuze.com"},
             {"name": "Giridhar Kolavasi", "email": "giridhar.kolavasi@cloudfuze.com"},
+            {"name": "Raviteja Dudipalli", "email": "Raviteja.Dudipalli@cloudfuze.com"},
         ],
         "color": "#F59E0B",  # Amber
         "description": "CloudFuze Manage"
