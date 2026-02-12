@@ -21,14 +21,21 @@ from app.rag import nodes
 logger = logging.getLogger(__name__)
 
 
-def _route_intent(state: RAGState) -> Literal["retrieve_documents", "expand_query", "decompose_query", "generate_email_response"]:
+def _route_intent(state: RAGState) -> Literal["generate_email_response", "classify_query_type"]:
+    """After classify_intent: email goes to email response; all RAG paths go to semantic query_type classifier."""
     intent = state.get("intent") or "factual"
     if intent == "email_draft":
         return "generate_email_response"
-    if intent == "complex":
-        return "expand_query"
-    if intent == "procedural":
+    return "classify_query_type"
+
+
+def _route_query_type(state: RAGState) -> Literal["retrieve_documents", "expand_query", "decompose_query"]:
+    """After classify_query_type: route by query_type to decompose, expand, or direct retrieve."""
+    qt = state.get("query_type") or "generic"
+    if qt in ("migration_steps", "advisory"):
         return "decompose_query"
+    if qt == "scenario":
+        return "expand_query"
     return "retrieve_documents"
 
 
@@ -53,10 +60,12 @@ def build_rag_graph(checkpointer=None):
     g = StateGraph(RAGState)
 
     g.add_node("classify_intent", nodes.classify_intent)
+    g.add_node("classify_query_type", nodes.classify_query_type)
     g.add_node("expand_query", nodes.expand_query)
     g.add_node("decompose_query", nodes.decompose_query)
     g.add_node("retrieve_documents", nodes.retrieve_documents)
     g.add_node("rerank_results", nodes.rerank_results)
+    g.add_node("expand_sections", nodes.expand_sections)
     g.add_node("validate_context", nodes.validate_context)
     g.add_node("refuse_response", nodes.refuse_response)
     g.add_node("apply_corrective_action", nodes.apply_corrective_action)
@@ -68,15 +77,19 @@ def build_rag_graph(checkpointer=None):
     g.set_entry_point("classify_intent")
     g.add_conditional_edges("classify_intent", _route_intent, {
         "generate_email_response": "generate_email_response",
-        "expand_query": "expand_query",
-        "decompose_query": "decompose_query",
-        "retrieve_documents": "retrieve_documents",
+        "classify_query_type": "classify_query_type",
     })
     g.add_edge("generate_email_response", "extract_citations")
+    g.add_conditional_edges("classify_query_type", _route_query_type, {
+        "decompose_query": "decompose_query",
+        "expand_query": "expand_query",
+        "retrieve_documents": "retrieve_documents",
+    })
     g.add_edge("expand_query", "retrieve_documents")
     g.add_edge("decompose_query", "retrieve_documents")
     g.add_edge("retrieve_documents", "rerank_results")
-    g.add_edge("rerank_results", "validate_context")
+    g.add_edge("rerank_results", "expand_sections")
+    g.add_edge("expand_sections", "validate_context")
     g.add_conditional_edges("validate_context", _route_after_validate, {
         "refuse_response": "refuse_response",
         "compress_context": "compress_context",

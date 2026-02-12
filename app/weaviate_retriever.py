@@ -283,9 +283,7 @@ def retrieve_from_weaviate(
             elif filter_exact_doc_id:
                 # Generic doc_id filter across non-blog collections (e.g. SharePointDocs, JiraTickets, etc.)
                 doc_filter = Filter.by_property("doc_id").equal(filter_exact_doc_id)
-            elif col_name == "SharePointDocs" and filter_migration_type:
-                doc_filter = Filter.by_property("migration_type").equal(filter_migration_type)
-                logger.info("[RETRIEVAL] filter_migration_type=%s → restricting SharePointDocs", filter_migration_type)
+            # filter_migration_type is NOT used as hard filter; caller applies soft boost after retrieval.
             # RBAC: restrict to chunks the user is allowed to see
             rbac_filter = None
             if user_context is not None and hasattr(user_context, "group_ids"):
@@ -340,6 +338,7 @@ def retrieve_from_weaviate(
             for o in resp.objects:
                 d = _score_to_distance(getattr(o, "metadata", None))
                 doc, d = _weaviate_object_to_document(o, d)
+                doc.metadata["collection"] = col_name
                 all_results_with_src.append((doc, d, col_name))
                 collection_doc_identities.append(_doc_identity_for_log(col_name, doc.metadata))
                 n += 1
@@ -368,6 +367,7 @@ def retrieve_from_weaviate(
                 for o in getattr(hresp, "objects", []) or []:
                     d2 = _score_to_distance(getattr(o, "metadata", None))
                     doc2, d2 = _weaviate_object_to_document(o, d2)
+                    doc2.metadata["collection"] = col_name
                     all_results_with_src.append((doc2, d2, col_name))
             except Exception as e:
                 logger.debug("[RETRIEVAL] hybrid query failed for %s: %s", col_name, e)
@@ -409,6 +409,7 @@ def retrieve_from_weaviate(
                     for o in sum_resp.objects:
                         dist = o.metadata.distance if o.metadata and hasattr(o.metadata, "distance") else 0.0
                         doc, d = _weaviate_object_to_document(o, dist)
+                        doc.metadata["collection"] = col_name
                         all_results_with_src.append((doc, d, col_name))
                 except Exception as e:
                     logger.debug("[RETRIEVAL] summary chunk query failed for %s: %s", col_name, e)
@@ -416,8 +417,8 @@ def retrieve_from_weaviate(
             logger.warning(f"[WEAVIATE_RETRIEVER] Error querying {col_name}: {e}")
             continue
 
-    # Sort by chunk_type priority (higher first), then by distance (lower first)
-    all_results_with_src.sort(key=lambda x: (-_chunk_type_priority(x[0]), x[1]))
+    # Sort by distance only (no hard chunk-type priority)
+    all_results_with_src.sort(key=lambda x: x[1])
     # Dedupe by chunk_key (keep first = best distance)
     seen_keys = set()
     deduped = []
@@ -462,6 +463,56 @@ def retrieve_from_weaviate(
     # #endregion
 
     return out_pairs
+
+
+def fetch_chunks_by_parent_key(
+    collection_name: str,
+    parent_key: str,
+    section_title: Optional[str] = None,
+    max_chunks: int = 20,
+) -> List[Document]:
+    """
+    Fetch all chunks from the same document/section (by parent_key, optionally section_title).
+    Used for section expansion: when a top chunk is from a doc, pull its siblings so the LLM
+    sees coherent sections (e.g. full Migration Steps, not just Step 1).
+
+    Args:
+        collection_name: Weaviate collection (e.g. SharePointDocs, Blogs, JiraTickets, Transcripts).
+        parent_key: parent_key of the document (all chunks with this parent_key).
+        section_title: If set, restrict to chunks with this section_title (when collection has it).
+        max_chunks: Max chunks to return (cap to avoid huge sections).
+
+    Returns:
+        List of Document objects, sorted by chunk_id ascending (content chunks only; chunk_id >= 0).
+    """
+    client = get_weaviate_client()
+    if client is None or not parent_key:
+        return []
+    if not client.collections.exists(collection_name):
+        return []
+    try:
+        coll = client.collections.get(collection_name)
+        f = Filter.by_property("parent_key").equal(parent_key)
+        # Exclude summary chunks (chunk_id = -1) so we expand content only
+        f = f & Filter.by_property("chunk_id").greater_or_equal(0)
+        st = str(section_title or "").strip()
+        if st:
+            try:
+                f = f & Filter.by_property("section_title").equal(st)
+            except Exception:
+                pass
+        resp = coll.query.fetch_objects(filters=f, limit=max_chunks)
+        docs: List[Document] = []
+        for obj in resp.objects:
+            doc, _ = _weaviate_object_to_document(obj, 0.0)
+            doc.metadata["collection"] = collection_name
+            docs.append(doc)
+        # Sort by chunk_id for coherent section order
+        docs.sort(key=lambda d: (d.metadata.get("chunk_id") if isinstance(d.metadata.get("chunk_id"), (int, float)) else 0))
+        return docs
+    except Exception as e:
+        logger.warning("[RETRIEVAL] fetch_chunks_by_parent_key failed: collection=%s parent_key=%s: %s", collection_name, parent_key[:50] if parent_key else "", e)
+        return []
 
 
 def retrieve_from_weaviate_collection(

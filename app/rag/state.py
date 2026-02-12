@@ -31,6 +31,7 @@ class RAGState(TypedDict, total=False):
     # Intent
     intent: str  # "factual" | "complex" | "procedural" | "email_draft"
     intent_confidence: float
+    query_type: Optional[str]  # LLM-classified: capability, migration_steps, troubleshooting, scenario, advisory, generic, sales
     ui_mode: str  # optional: "email" when user enables Email Drafting toggle (forces email_draft)
 
     # Query shaping

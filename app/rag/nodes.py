@@ -6,13 +6,74 @@ LangGraph nodes for the Weaviate Retrieval Core Flow.
 from __future__ import annotations
 
 import logging
-from typing import List, Tuple, Any
+from typing import List, Tuple, Any, Optional
 
 from langchain_core.documents import Document
 
 from app.rag.state import RAGState, ValidationResult
 
 logger = logging.getLogger(__name__)
+
+
+def _authority_weighted_scores(
+    pairs: List[Tuple[Document, float]],
+    intent: str,
+    filter_migration_type: Optional[str],
+    query_type: Optional[str] = None,
+    bucket_profile: Optional[str] = None,
+) -> List[Tuple[Document, float]]:
+    """
+    Apply soft migration boost and authority-weighted scoring.
+    similarity_score = 1 / (1 + distance); final_score = similarity * authority_weight * migration_boost * chunk_type_mult.
+    When query_type is set, use AUTHORITY_WEIGHT_BY_QUERY_TYPE and bucket_profile for chunk weights; else use intent.
+    """
+    try:
+        from config import (
+            AUTHORITY_WEIGHT_BY_INTENT,
+            AUTHORITY_WEIGHT_BY_QUERY_TYPE,
+            MIGRATION_TYPE_BOOST,
+            _DEFAULT_AUTHORITY_WEIGHT,
+            CHUNK_TYPE_WEIGHT_BY_INTENT,
+        )
+    except Exception:
+        return pairs
+    if query_type is not None:
+        weights = AUTHORITY_WEIGHT_BY_QUERY_TYPE.get(query_type) or {}
+        chunk_weights = CHUNK_TYPE_WEIGHT_BY_INTENT.get(bucket_profile or "complex") or {}
+        profile_label = f"query_type={query_type}"
+    else:
+        weights = AUTHORITY_WEIGHT_BY_INTENT.get(intent) or {}
+        chunk_weights = CHUNK_TYPE_WEIGHT_BY_INTENT.get(intent) or {}
+        profile_label = f"intent={intent}"
+    out: List[Tuple[Document, float]] = []
+    for doc, dist in pairs:
+        # similarity: lower distance -> higher score; avoid (1 - distance) edge cases
+        distance = float(dist) if isinstance(dist, (int, float)) else 0.0
+        similarity_score = 1.0 / (1.0 + distance)
+        # soft migration boost (cap at MIGRATION_TYPE_BOOST, already <= 1.3 in config)
+        migration_boost = 1.0
+        if filter_migration_type and doc.metadata.get("migration_type") == filter_migration_type:
+            migration_boost = MIGRATION_TYPE_BOOST
+        collection = (doc.metadata.get("collection") or "").strip()
+        authority_weight = weights.get(collection, _DEFAULT_AUTHORITY_WEIGHT)
+        final_score = similarity_score * authority_weight * migration_boost
+        # Chunk-type multiplier: procedural -> boost raw_content/definition, damp feature_capability; factual -> boost feature_capability
+        ct = (doc.metadata.get("chunk_type") or "").strip() or (doc.metadata.get("ticket_chunk_type") or "").strip()
+        chunk_type_mult = chunk_weights.get(ct, 1.0)
+        final_score = final_score * chunk_type_mult
+        out.append((doc, final_score))
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "[RAG] authority_score | collection=%s dist=%.4f sim=%.4f auth=%.2f boost=%.2f final=%.4f",
+                collection or "(none)", distance, similarity_score, authority_weight, migration_boost, final_score,
+            )
+    # Summary at INFO for validation (profile, migration_boost in use, count)
+    migration_used = "yes" if filter_migration_type else "no"
+    logger.info(
+        "[RAG] authority_scoring | %s | migration_boost_used=%s | pairs=%d",
+        profile_label, migration_used, len(out),
+    )
+    return out
 
 # Default token budget for context compression
 DEFAULT_CONTEXT_TOKEN_BUDGET = 6000
@@ -42,6 +103,71 @@ def _chunk_type_priority(doc: Document) -> int:
 def _chunk_key(doc: Document) -> str:
     meta = getattr(doc, "metadata", {}) or {}
     return meta.get("chunk_key") or (f"{meta.get('parent_key', '')}#{meta.get('chunk_id', '')}")
+
+
+def _chunk_role_bucket(doc: Document) -> str:
+    """
+    Map chunk to role bucket for intent-based ranking.
+    procedural = steps, guides, definitions, resolution; feature = feature_capability, table_row; other = rest.
+    """
+    meta = getattr(doc, "metadata", {}) or {}
+    ct = (meta.get("chunk_type") or "").strip()
+    ticket_ct = (meta.get("ticket_chunk_type") or "").strip()
+    if ct in ("feature_capability", "table_row"):
+        return "feature"
+    if ct in ("raw_content", "definition") or ticket_ct in ("resolution", "steps"):
+        return "procedural"
+    return "other"
+
+
+def _intent_gate_and_bucketed_rank(
+    pairs: List[Tuple[Document, float]],
+    intent: str,
+    max_feature_when_procedural: int,
+    slots_by_intent: dict,
+) -> List[Tuple[Document, float]]:
+    """
+    Intent-controlled candidate shaping: (1) cap feature chunks when procedural;
+    (2) bucket by role, rank within bucket by distance, merge with intent-based slot allocation.
+    """
+    if not pairs:
+        return pairs
+    # Step 1 — Gate: when procedural, keep at most max_feature_when_procedural feature chunks (best by distance)
+    if intent == "procedural" and max_feature_when_procedural >= 0:
+        feature_pairs = [(d, dist) for d, dist in pairs if _chunk_role_bucket(d) == "feature"]
+        non_feature_pairs = [(d, dist) for d, dist in pairs if _chunk_role_bucket(d) != "feature"]
+        # Keep best max_feature_when_procedural feature chunks by distance (lower first)
+        feature_pairs.sort(key=lambda x: x[1])
+        capped_feature = feature_pairs[:max_feature_when_procedural]
+        pairs = non_feature_pairs + capped_feature
+    # Step 2 — Bucket by role, sort within bucket by distance (lower = better)
+    by_bucket: dict = {"procedural": [], "feature": [], "other": []}
+    for d, dist in pairs:
+        bucket = _chunk_role_bucket(d)
+        if bucket not in by_bucket:
+            by_bucket[bucket] = []
+        by_bucket[bucket].append((d, dist))
+    for bucket in by_bucket:
+        by_bucket[bucket].sort(key=lambda x: x[1])  # ascending distance
+    # Step 3 — Merge with slot allocation (order from slots_by_intent)
+    slots = slots_by_intent.get(intent) or slots_by_intent.get("complex") or {"procedural": 12, "feature": 12, "other": 6}
+    order = list(slots.keys())
+    merged: List[Tuple[Document, float]] = []
+    seen_keys: set = set()
+    for bucket_name in order:
+        cap = slots.get(bucket_name, 0)
+        for d, dist in (by_bucket.get(bucket_name) or [])[:cap]:
+            key = _chunk_key(d)
+            if key and key not in seen_keys:
+                seen_keys.add(key)
+                merged.append((d, dist))
+    # Append any remaining (not yet in merged) to preserve recall
+    for d, dist in pairs:
+        key = _chunk_key(d)
+        if key and key not in seen_keys:
+            seen_keys.add(key)
+            merged.append((d, dist))
+    return merged
 
 
 def _safe_lower(s: Any) -> str:
@@ -181,6 +307,64 @@ EMAIL_DRAFT_TRIGGERS = [
     "include a contact for support",
 ]
 
+# Semantic query type (LLM-classified) for RAG path. Maps to bucket profile for slots/chunk weights.
+QUERY_TYPE_LABELS = [
+    "capability",
+    "migration_steps",
+    "troubleshooting",
+    "scenario",
+    "advisory",
+    "generic",
+    "sales",
+]
+
+QUERY_TYPE_PROMPT = """
+Classify the user query into exactly one of these labels:
+
+capability – asking about support, feature availability, yes/no feature questions
+migration_steps – asking how to migrate, steps, procedure, fastest/best way to migrate
+troubleshooting – bug, issue, error, fix, not working
+scenario – architectural guidance, what happens if, edge cases
+advisory – best approach, recommended strategy, optimal way
+generic – general informational CloudFuze question
+sales – positioning, comparison, why choose CloudFuze
+
+Return only the label.
+"""
+
+# Map query_type -> bucket profile (factual | procedural | complex) for BUCKETED_SLOTS_BY_INTENT and CHUNK_TYPE_WEIGHT_BY_INTENT.
+QUERY_TYPE_BUCKET_MAP = {
+    "capability": "factual",
+    "migration_steps": "procedural",
+    "advisory": "procedural",
+    "troubleshooting": "procedural",
+    "scenario": "complex",
+    "generic": "complex",
+    "sales": "factual",
+}
+
+
+def classify_query_type(state: RAGState) -> RAGState:
+    """LLM-based semantic query type for RAG path. Sets state['query_type']."""
+    query = (state.get("query") or "").strip()
+    if not query:
+        state["query_type"] = "generic"
+        return state
+    try:
+        from app.llm_factory import get_llm
+        from langchain_core.messages import HumanMessage
+        llm = get_llm(temperature=0.0, max_tokens=20)
+        prompt = QUERY_TYPE_PROMPT + f"\n\nQuery: {query}"
+        response = llm.invoke([HumanMessage(content=prompt)]).content.strip().lower()
+        if response not in QUERY_TYPE_LABELS:
+            response = "generic"
+        state["query_type"] = response
+    except Exception as e:
+        logger.warning("[RAG] classify_query_type failed: %s; using generic", e)
+        state["query_type"] = "generic"
+    logger.info("[RAG] classify_query_type | query_type=%s", state.get("query_type"))
+    return state
+
 
 def classify_intent(state: RAGState) -> RAGState:
     """Classify query intent: email_draft (toggle or triggers), factual, complex, or procedural."""
@@ -289,16 +473,15 @@ def retrieve_documents(state: RAGState) -> RAGState:
             k=top_k,
             filter_url=filter_url,
             filter_doc_id=filter_doc_id,
+            filter_exact_doc_id=filter_exact_doc_id,
             filter_migration_type=filter_migration_type,
             collection_names=["SharePointDocs", "Blogs", "Transcripts", "JiraTickets"],
         )
         all_pairs.extend(pairs)
 
-    # Merge results across queries while preserving layer-aware ordering:
-    # 1) Prefer higher-value chunk layers (feature_capability/limitation) over raw_content
-    # 2) Within the same layer, prefer lower vector distance
-    # 3) Dedupe by chunk_key (keep best ranked)
-    all_pairs.sort(key=lambda x: (-_chunk_type_priority(x[0]), x[1]))
+    # Merge results across queries; rank by vector distance only (no hard chunk-type priority).
+    # Dedupe by chunk_key (keep best ranked).
+    all_pairs.sort(key=lambda x: x[1])
     seen = set()
     deduped: List[Tuple[Document, float]] = []
     for d, dist in all_pairs:
@@ -327,7 +510,7 @@ def retrieve_documents(state: RAGState) -> RAGState:
                 )
                 if extra:
                     enriched = deduped + extra
-                    enriched.sort(key=lambda x: (-_chunk_type_priority(x[0]), x[1]))
+                    enriched.sort(key=lambda x: x[1])
                     # Dedup again
                     seen2 = set()
                     ded2 = []
@@ -340,7 +523,42 @@ def retrieve_documents(state: RAGState) -> RAGState:
             except Exception:
                 pass
 
-    diversified = _diversify_pairs(enriched, top_k, raw_query)
+    # Query-type–driven shaping: bucket_profile from LLM query_type (or fallback intent)
+    query_type = state.get("query_type") or "generic"
+    bucket_profile = QUERY_TYPE_BUCKET_MAP.get(query_type, "complex")
+    try:
+        from config import MAX_FEATURE_CHUNKS_WHEN_PROCEDURAL, BUCKETED_SLOTS_BY_INTENT
+        shaped = _intent_gate_and_bucketed_rank(
+            enriched,
+            bucket_profile,
+            max_feature_when_procedural=MAX_FEATURE_CHUNKS_WHEN_PROCEDURAL,
+            slots_by_intent=BUCKETED_SLOTS_BY_INTENT,
+        )
+        enriched = shaped
+        logger.info("[RAG] intent_shaping | query_type=%s bucket_profile=%s | after_gate_and_bucketed=%d", query_type, bucket_profile, len(enriched))
+    except Exception as e:
+        logger.warning("[RAG] intent_shaping skip: %s", e)
+
+    # Authority-weighted scoring: use query_type for authority weights, bucket_profile for chunk-type multipliers
+    scored_pairs = _authority_weighted_scores(
+        enriched, bucket_profile, filter_migration_type,
+        query_type=query_type, bucket_profile=bucket_profile,
+    )
+    # Rank by final_score only (no hard chunk-type priority; multipliers already in score)
+    scored_pairs.sort(key=lambda x: -x[1])
+
+    # Debug: top N after authority sort (collection, final_score) for validation
+    _top_n = 8
+    for i, (d, sc) in enumerate(scored_pairs[:_top_n], 1):
+        coll = (getattr(d, "metadata", None) or {}).get("collection") or "(none)"
+        doc_id = (getattr(d, "metadata", None) or {}).get("doc_id") or (getattr(d, "metadata", None) or {}).get("parent_key") or ""
+        doc_id_preview = (doc_id[:40] + "…") if len(doc_id) > 40 else doc_id
+        logger.info(
+            "[RAG] retrieve_top | rank=%d collection=%s final_score=%.4f doc_id=%s",
+            i, coll, sc, doc_id_preview or "(none)",
+        )
+
+    diversified = _diversify_pairs(scored_pairs, top_k, raw_query)
     state["retrieved_docs"] = diversified
     pairs = diversified
     scores = [s for _, s in pairs]
@@ -352,20 +570,126 @@ def retrieve_documents(state: RAGState) -> RAGState:
     return state
 
 
+def _apply_diversity_cap(
+    pairs: List[Tuple[Document, float]],
+    k: int,
+    max_per_collection: int,
+) -> List[Tuple[Document, float]]:
+    """
+    Take top k (doc, score) pairs with at most max_per_collection per collection,
+    so the top slice is not all one collection (e.g. SharePointDocs).
+    """
+    if not pairs or k <= 0 or max_per_collection <= 0:
+        return pairs[:k] if pairs else []
+    counts: dict = {}
+    out: List[Tuple[Document, float]] = []
+    for doc, score in pairs:
+        if len(out) >= k:
+            break
+        coll = (getattr(doc, "metadata", None) or {}).get("collection") or ""
+        if counts.get(coll, 0) >= max_per_collection:
+            continue
+        counts[coll] = counts.get(coll, 0) + 1
+        out.append((doc, score))
+    return out
+
+
 def rerank_results(state: RAGState) -> RAGState:
-    """Rerank with cross-encoder (e.g. ms-marco-MiniLM); optional MMR."""
+    """Rerank: take top rerank_k by score (already authority-weighted), with max-per-collection diversity."""
     docs = state.get("retrieved_docs") or []
-    rerank_k = state.get("rerank_top_k") or 15
-    logger.info("[RAG] rerank_start | input_count=%d | rerank_top_k=%d", len(docs), rerank_k)
+    try:
+        from config import RERANK_TOP_K, RERANK_MAX_PER_COLLECTION
+    except Exception:
+        RERANK_TOP_K = 15
+        RERANK_MAX_PER_COLLECTION = 6
+    rerank_k = state.get("rerank_top_k") or RERANK_TOP_K
+    max_per_coll = RERANK_MAX_PER_COLLECTION
+    logger.info("[RAG] rerank_start | input_count=%d | rerank_top_k=%d | max_per_collection=%d", len(docs), rerank_k, max_per_coll)
     if len(docs) <= rerank_k:
-        state["reranked_docs"] = docs
-        out = docs
+        # Still apply diversity so we don't have 15 from one collection when we have mixed input
+        out = _apply_diversity_cap(docs, rerank_k, max_per_coll) if docs else docs
+        state["reranked_docs"] = out
     else:
-        # Stub: take top rerank_k by score (already sorted by distance)
-        state["reranked_docs"] = docs[:rerank_k]
-        out = state["reranked_docs"]
+        out = _apply_diversity_cap(docs, rerank_k, max_per_coll)
+        state["reranked_docs"] = out
     top_scores = [round(s, 4) for _, s in out[:5]] if out else []
     logger.info("[RAG] rerank_done | output_count=%d | top_scores=%s", len(out), top_scores)
+    # Debug: top N reranked (collection, score) for validation
+    for i, (d, sc) in enumerate(out[:8], 1):
+        coll = (getattr(d, "metadata", None) or {}).get("collection") or "(none)"
+        doc_id = (getattr(d, "metadata", None) or {}).get("doc_id") or (getattr(d, "metadata", None) or {}).get("parent_key") or ""
+        doc_id_preview = (doc_id[:40] + "…") if len(doc_id) > 40 else doc_id
+        logger.info(
+            "[RAG] rerank_top | rank=%d collection=%s score=%.4f doc_id=%s",
+            i, coll, sc, doc_id_preview or "(none)",
+        )
+    return state
+
+
+def expand_sections(state: RAGState) -> RAGState:
+    """
+    Section expansion: for each top reranked chunk, pull all chunks from the same document/section
+    so the LLM sees coherent sections (e.g. full Migration Steps, not just Step 1).
+    Replaces flat top-k with expanded sections, then sorts by (collection, parent_key, chunk_id).
+    """
+    docs = state.get("reranked_docs") or []
+    if not docs:
+        return state
+    try:
+        from config import SECTION_EXPANSION_MAX_CHUNKS_PER_DOC, SECTION_EXPANSION_MAX_SECTIONS
+        from app.weaviate_retriever import fetch_chunks_by_parent_key
+    except Exception as e:
+        logger.warning("[RAG] expand_sections skip (import/config): %s", e)
+        return state
+
+    max_per_doc = SECTION_EXPANSION_MAX_CHUNKS_PER_DOC
+    max_sections = SECTION_EXPANSION_MAX_SECTIONS
+    expanded_sections: dict = {}  # (parent_key, section_title) -> (list of Document, seed_score)
+    section_order: List[Tuple[str, str]] = []  # preserve first-appearance order
+
+    for doc, score in docs:
+        pk = (getattr(doc, "metadata", None) or {}).get("parent_key") or (getattr(doc, "metadata", None) or {}).get("doc_id") or ""
+        if not pk:
+            continue
+        st = ((getattr(doc, "metadata", None) or {}).get("section_title") or "").strip()
+        key = (pk, st)
+        if key not in expanded_sections and len(expanded_sections) < max_sections:
+            coll = (getattr(doc, "metadata", None) or {}).get("collection") or "SharePointDocs"
+            siblings = fetch_chunks_by_parent_key(coll, pk, section_title=st or None, max_chunks=max_per_doc)
+            if siblings:
+                expanded_sections[key] = (siblings, score)
+                section_order.append(key)
+    # Build list: for each section in first-appearance order, emit all siblings (in chunk_id order) with section score; dedupe by chunk_key
+    expanded_list: List[Tuple[Document, float]] = []
+    seen: set = set()
+    for key in section_order:
+        if key not in expanded_sections:
+            continue
+        siblings, sec_score = expanded_sections[key]
+        for d in siblings:
+            ck = _chunk_key(d)
+            if ck and ck not in seen:
+                seen.add(ck)
+                expanded_list.append((d, sec_score))
+    # Add any reranked docs that were not part of an expanded section (e.g. no parent_key or section not expanded)
+    for doc, score in docs:
+        ck = _chunk_key(doc)
+        if ck and ck not in seen:
+            seen.add(ck)
+            expanded_list.append((doc, score))
+    # Sort by (collection, parent_key, chunk_id) so compress_context outputs coherent sections within each collection
+    def _section_sort_key(item: Tuple[Document, float]) -> tuple:
+        d, _ = item
+        meta = getattr(d, "metadata", None) or {}
+        coll = meta.get("collection") or ""
+        pk = meta.get("parent_key") or meta.get("doc_id") or ""
+        cid = meta.get("chunk_id")
+        cid_int = cid if isinstance(cid, (int, float)) else (int(cid) if cid is not None else 0)
+        return (coll, pk, cid_int)
+
+    expanded_list.sort(key=_section_sort_key)
+    state["reranked_docs"] = expanded_list
+    logger.info("[RAG] expand_sections | sections_expanded=%d | total_chunks=%d", len(expanded_sections), len(expanded_list))
     return state
 
 
@@ -401,7 +725,8 @@ def validate_context(state: RAGState) -> RAGState:
     else:
         scores = [s for _, s in docs]
         avg_score = sum(scores) / len(scores) if scores else 0.0
-        quality = min(1.0, 1.0 - avg_score) if isinstance(scores[0], (int, float)) else 0.7
+        # Higher avg_score = better retrieval; quality should increase with score (was inverted: 1.0 - avg_score)
+        quality = min(1.0, avg_score) if isinstance(scores[0], (int, float)) else 0.7
         coverage = len(docs) >= 3
         diversity = 0.8 if len(set(d.metadata.get("source_type", "") for d, _ in docs)) > 1 else 0.5
         corrective = "none" if (quality >= 0.5 and coverage) else "expand_topk"
@@ -448,8 +773,18 @@ def refuse_response(state: RAGState) -> RAGState:
     return state
 
 
+# Section order and headers for structured context (authority order: SharePoint first, then Jira, Blogs, Transcripts).
+_CONTEXT_COLLECTION_ORDER = ["SharePointDocs", "JiraTickets", "Blogs", "Transcripts"]
+_CONTEXT_SECTION_HEADERS = {
+    "SharePointDocs": "=== OFFICIAL DOCUMENTATION (SharePoint) ===",
+    "JiraTickets": "=== JIRA ===",
+    "Blogs": "=== BLOG GUIDANCE ===",
+    "Transcripts": "=== TRANSCRIPT INSIGHTS ===",
+}
+
+
 def compress_context(state: RAGState) -> RAGState:
-    """Compress context to token budget."""
+    """Compress context to token budget, grouped by collection with section headers (authority order)."""
     docs = state.get("reranked_docs") or state.get("retrieved_docs") or []
     budget = state.get("context_token_count") or DEFAULT_CONTEXT_TOKEN_BUDGET
 
@@ -459,17 +794,60 @@ def compress_context(state: RAGState) -> RAGState:
     except Exception:
         enc = None
 
+    def token_count(text: str) -> int:
+        if enc:
+            return len(enc.encode(text))
+        return len(text) // 4
+
+    # Group by collection (preserve order within each group as in docs)
+    by_collection: dict = {}
+    for d, score in docs:
+        coll = (getattr(d, "metadata", None) or {}).get("collection") or ""
+        if coll not in by_collection:
+            by_collection[coll] = []
+        by_collection[coll].append((d, score))
+
     parts: List[str] = []
     used = 0
-    for d, _ in docs:
-        if enc:
-            n = len(enc.encode(d.page_content))
-        else:
-            n = len(d.page_content) // 4
-        if used + n > budget:
+    for coll in _CONTEXT_COLLECTION_ORDER:
+        chunks = by_collection.get(coll) or []
+        if not chunks:
+            continue
+        header = _CONTEXT_SECTION_HEADERS.get(coll, f"=== {coll} ===")
+        header_tokens = token_count(header + "\n\n")
+        if used + header_tokens > budget:
             break
-        parts.append(d.page_content)
-        used += n
+        parts.append(header)
+        used += header_tokens
+        for d, _ in chunks:
+            content = d.page_content or ""
+            n = token_count(content)
+            if used + n > budget:
+                break
+            parts.append(content)
+            used += n
+        if used >= budget:
+            break
+
+    # Any docs from collections not in _CONTEXT_COLLECTION_ORDER (e.g. EmailThreads later)
+    for coll, chunks in by_collection.items():
+        if coll in _CONTEXT_COLLECTION_ORDER:
+            continue
+        if used >= budget:
+            break
+        header = f"=== {coll} ==="
+        header_tokens = token_count(header + "\n\n")
+        if used + header_tokens > budget:
+            break
+        parts.append(header)
+        used += header_tokens
+        for d, _ in chunks:
+            content = d.page_content or ""
+            n = token_count(content)
+            if used + n > budget:
+                break
+            parts.append(content)
+            used += n
 
     state["compressed_context"] = "\n\n".join(parts)
     state["context_token_count"] = used

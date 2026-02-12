@@ -337,7 +337,110 @@ WEAVIATE_API_KEY = os.getenv("WEAVIATE_API_KEY", "")  # Optional for production/
 # Weaviate Retrieval Configuration
 WEAVIATE_HYBRID_ALPHA = float(os.getenv("WEAVIATE_HYBRID_ALPHA", "0.7"))  # 0=BM25 only, 1=vector only, 0.7=balanced
 WEAVIATE_TOP_K = int(os.getenv("WEAVIATE_TOP_K", "50"))  # Number of documents to retrieve before reranking
-RERANK_TOP_K = int(os.getenv("RERANK_TOP_K", "10"))  # Number of documents after reranking
+RERANK_TOP_K = int(os.getenv("RERANK_TOP_K", "15"))  # Number of documents after reranking
+RERANK_MAX_PER_COLLECTION = int(os.getenv("RERANK_MAX_PER_COLLECTION", "6"))  # Max docs per collection in top slice (diversity)
+# Section expansion: when a top chunk is from a doc/section, pull all chunks from that doc/section for coherent context
+SECTION_EXPANSION_MAX_CHUNKS_PER_DOC = int(os.getenv("SECTION_EXPANSION_MAX_CHUNKS_PER_DOC", "15"))  # Max sibling chunks per parent_key
+SECTION_EXPANSION_MAX_SECTIONS = int(os.getenv("SECTION_EXPANSION_MAX_SECTIONS", "5"))  # Max distinct sections to expand (cap to avoid huge context)
+# Soft boost when chunk migration_type matches query; cap at 1.3 so it does not overpower authority
+MIGRATION_TYPE_BOOST = min(1.3, max(1.0, float(os.getenv("MIGRATION_TYPE_BOOST", "1.2"))))
+
+# Authority weights by intent (collection name -> weight). Used for authority-weighted scoring after retrieval.
+# factual = capability-like; procedural = migration-steps-like; complex = generic-like.
+AUTHORITY_WEIGHT_BY_INTENT = {
+    "factual": {
+        "SharePointDocs": 1.0,
+        "JiraTickets": 0.9,
+        "Transcripts": 0.7,
+        "Blogs": 0.65,
+    },
+    "procedural": {
+        "SharePointDocs": 1.0,
+        "Blogs": 0.8,
+        "Transcripts": 0.75,
+        "JiraTickets": 0.6,
+    },
+    "complex": {
+        "SharePointDocs": 1.0,
+        "Blogs": 0.7,
+        "Transcripts": 0.75,
+        "JiraTickets": 0.6,
+    },
+}
+# Authority weights by query_type (LLM-classified). Used when query_type is set (RAG path after classify_query_type).
+AUTHORITY_WEIGHT_BY_QUERY_TYPE = {
+    "capability": {
+        "SharePointDocs": 1.0,
+        "JiraTickets": 0.9,
+        "Blogs": 0.65,
+        "Transcripts": 0.7,
+    },
+    "migration_steps": {
+        "SharePointDocs": 1.0,
+        "Blogs": 0.85,
+        "Transcripts": 0.75,
+        "JiraTickets": 0.6,
+    },
+    "advisory": {
+        "SharePointDocs": 1.0,
+        "Blogs": 0.8,
+        "Transcripts": 0.75,
+        "JiraTickets": 0.6,
+    },
+    "troubleshooting": {
+        "JiraTickets": 1.0,
+        "SharePointDocs": 0.9,
+        "Transcripts": 0.75,
+        "Blogs": 0.6,
+    },
+    "scenario": {
+        "SharePointDocs": 1.0,
+        "Blogs": 0.8,
+        "Transcripts": 0.8,
+        "JiraTickets": 0.6,
+    },
+    "generic": {
+        "SharePointDocs": 1.0,
+        "Blogs": 0.75,
+        "Transcripts": 0.7,
+        "JiraTickets": 0.6,
+    },
+    "sales": {
+        "Blogs": 1.0,
+        "Transcripts": 0.85,
+        "SharePointDocs": 0.7,
+        "JiraTickets": 0.5,
+    },
+}
+_DEFAULT_AUTHORITY_WEIGHT = 0.6
+
+# Chunk-type weight multiplier by intent: multiply final_score by this (stops feature matrix dominating procedural answers).
+# Keys: chunk_type (SharePoint/Excel/Blogs) or ticket_chunk_type (Jira). Missing key => 1.0.
+CHUNK_TYPE_WEIGHT_BY_INTENT = {
+    "procedural": {
+        "raw_content": 1.2,
+        "definition": 1.15,
+        "feature_capability": 0.85,
+        "table_row": 0.9,
+        "resolution": 1.2,
+        "steps": 1.2,
+    },
+    "factual": {
+        "feature_capability": 1.2,
+        "raw_content": 0.9,
+    },
+    "complex": {},
+}
+
+# Intent-based candidate shaping: cap feature chunks when procedural so Excel rows cannot dominate.
+MAX_FEATURE_CHUNKS_WHEN_PROCEDURAL = int(os.getenv("MAX_FEATURE_CHUNKS_WHEN_PROCEDURAL", "5"))
+# Bucketed ranking: slot allocation per intent (procedural / feature / other). Order = merge order.
+# procedural intent: more procedural slots; factual: more feature slots; complex: balanced.
+BUCKETED_SLOTS_BY_INTENT = {
+    "procedural": {"procedural": 20, "feature": 10, "other": 5},
+    "factual": {"feature": 20, "procedural": 10, "other": 5},
+    "complex": {"procedural": 12, "feature": 12, "other": 6},
+}
 
 # Deduplication Configuration
 ENABLE_MD5_DEDUP = os.getenv("ENABLE_MD5_DEDUP", "true").lower() == "true"
