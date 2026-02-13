@@ -207,7 +207,7 @@ CRITICAL RULES - ACCURACY OVER CONFIDENCE:
      e) **Additional context**: Only add relevant background if it helps solve the problem
    
    - Example structure for issue queries:
-     "I found a similar issue documented in ticket [PRI-9285](ticket_url). Here's how to resolve it:
+     "I found a similar issue documented in ticket [PRI-9285](https://cf2020.atlassian.net/browse/PRI-9285). Here's how to resolve it:
      
      **Solution:**
      [Use Fix Description from ticket - provide clear, actionable steps]
@@ -221,6 +221,17 @@ CRITICAL RULES - ACCURACY OVER CONFIDENCE:
      ...
      
      If you've followed these steps and the issue persists, please contact support and reference ticket PRI-9285."
+   
+   - **CRITICAL: Jira Ticket URLs** - When generating links to Jira tickets:
+     * **MANDATORY: Extract URL ONLY from context** - Look for the line "Ticket URL: [URL]" in the Jira ticket context
+     * **NEVER invent or construct URLs** - If you don't see "Ticket URL:" in the context, DO NOT create a link - just mention the ticket ID
+     * **USE THE EXACT URL FROM THE CONTEXT** - The context provides the correct URL in the format "Ticket URL: https://cf2020.atlassian.net/browse/PRI-XXXX"
+     * **VALIDATION REQUIRED**: Jira URLs MUST contain "/browse/" and the ticket key (e.g., PRI-XXXX). If the URL doesn't match this pattern, DO NOT use it
+     * **DO NOT use other URLs** - Never use CloudFuze website URLs (cloudfuze.com), blog URLs, or any other URLs for Jira tickets
+     * **DO NOT use REST API URLs** - Never use URLs containing "/rest/api/" - these are for API calls, not user-facing links
+     * **If no valid URL in context**: Only mention the ticket ID without a link: "For more details, refer to ticket PRI-9619"
+     * Format links as markdown: [TICKET-KEY](EXACT_URL_FROM_CONTEXT)
+     * **Example**: If context shows "Ticket URL: https://cf2020.atlassian.net/browse/PRI-9619", use exactly that URL
    
    - When multiple similar tickets exist, mention them: "Similar issues were reported in tickets PRI-9285, PRI-XXXX..."
    - Always prioritize actionable solutions over general explanations
@@ -237,6 +248,8 @@ CRITICAL RULES - ACCURACY OVER CONFIDENCE:
 8. EMBED SPECIFIC LINKS WHEN RELEVANT:
    - Slack to Teams Migration: https://www.cloudfuze.com/slack-to-teams-migration/
    - Teams to Teams Migration: https://www.cloudfuze.com/teams-to-teams-migration/
+   - Teams to Chat Migration: https://www.cloudfuze.com/teams-to-chat-migration/ (Microsoft Teams to Google Chat)
+   - Chat to Teams Migration: https://www.cloudfuze.com/chat-to-teams-migration/ (Google Chat to Microsoft Teams)
    - Pricing: https://www.cloudfuze.com/pricing/
    - Enterprise Solutions: https://www.cloudfuze.com/enterprise/
    - Contact: https://www.cloudfuze.com/contact/
@@ -620,3 +633,33 @@ USE_CONTEXT_SYNTHESIS = os.getenv("USE_CONTEXT_SYNTHESIS", "false").lower() == "
 SYNTHESIS_MAX_CONTEXT_LENGTH = int(os.getenv("SYNTHESIS_MAX_CONTEXT_LENGTH", "50000"))  # Max chars for synthesis input
 SYNTHESIS_TEMPERATURE = float(os.getenv("SYNTHESIS_TEMPERATURE", "0.3"))  # Lower temp for more factual synthesis
 SYNTHESIS_MAX_OUTPUT_LENGTH = int(os.getenv("SYNTHESIS_MAX_OUTPUT_LENGTH", "10000"))  # Max chars for synthesized output
+
+# ============================================================================
+# CLOUD API RESEARCH CONFIGURATION
+# ============================================================================
+
+# Enable/Disable Cloud API Research Feature
+ENABLE_CLOUD_API_RESEARCH = os.getenv("ENABLE_CLOUD_API_RESEARCH", "true").lower() == "true"
+
+# Web Search Configuration
+CLOUD_RESEARCH_WEB_SEARCH_API = os.getenv("CLOUD_RESEARCH_WEB_SEARCH_API", "serper")  # "serper", "serpapi", "google", "bing", "duckduckgo"
+CLOUD_RESEARCH_SEARCH_API_KEY = os.getenv("CLOUD_RESEARCH_SEARCH_API_KEY", "")  # Serper API key (falls back to DuckDuckGo if not set or fails)
+
+# Scraping Configuration
+CLOUD_RESEARCH_MAX_URLS_PER_CLOUD = int(os.getenv("CLOUD_RESEARCH_MAX_URLS_PER_CLOUD", "5"))  # Max URLs to scrape per cloud (reduced for speed)
+CLOUD_RESEARCH_SCRAPING_DELAY = int(os.getenv("CLOUD_RESEARCH_SCRAPING_DELAY", "2"))  # Delay between requests (seconds)
+
+# Caching Configuration
+CLOUD_RESEARCH_CACHE_DAYS = int(os.getenv("CLOUD_RESEARCH_CACHE_DAYS", "30"))  # Days before cache expires
+CLOUD_RESEARCH_FORCE_REFRESH = os.getenv("CLOUD_RESEARCH_FORCE_REFRESH", "false").lower() == "true"  # Force fresh research
+
+# Verification Configuration
+CLOUD_RESEARCH_VERIFY_URLS = os.getenv("CLOUD_RESEARCH_VERIFY_URLS", "true").lower() == "true"  # Verify URLs are accessible
+
+# SCIM Configuration (HARD BLOCK - NON-NEGOTIABLE)
+ALLOW_SCIM = False  # SCIM is COMPLETELY DISABLED - do not extract, parse, map, validate, score, or mention SCIM
+CLOUD_RESEARCH_MIN_CONFIDENCE = float(os.getenv("CLOUD_RESEARCH_MIN_CONFIDENCE", "0.7"))  # Minimum confidence score
+
+# LLM Configuration for Research
+CLOUD_RESEARCH_LLM_TEMPERATURE = float(os.getenv("CLOUD_RESEARCH_LLM_TEMPERATURE", "0.3"))  # Lower temp for factual research
+CLOUD_RESEARCH_MAX_RETRIES = int(os.getenv("CLOUD_RESEARCH_MAX_RETRIES", "3"))  # Max retries for failed operations

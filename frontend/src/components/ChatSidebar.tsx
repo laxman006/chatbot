@@ -38,12 +38,64 @@ export default function ChatSidebar({
   const [adminSubmenuOpen, setAdminSubmenuOpen] = useState<boolean>(false);
   const hasRenderedHistoryRef = useRef(false);
   const adminSubmenuRef = useRef<HTMLDivElement>(null);
+  
+  // API Research feature state
+  const [apiResearchAccess, setApiResearchAccess] = useState({
+    can_access: false,
+    enabled: false
+  });
+  const [isTogglingApiResearch, setIsTogglingApiResearch] = useState(false);
 
   useEffect(() => {
     const currentUser = getCurrentUser();
     setUser(currentUser);
     setIsAdmin(isAdminEmail(currentUser?.email));
   }, []);
+  
+  // Check API Research access on mount
+  useEffect(() => {
+    async function checkAccess() {
+      try {
+        const response = await apiFetch('/api/user/api-research/access');
+        if (response.ok) {
+          const data = await response.json();
+          setApiResearchAccess({
+            can_access: data.can_access,
+            enabled: data.enabled
+          });
+        }
+      } catch (error) {
+        console.error('Failed to check API research access:', error);
+      }
+    }
+    
+    checkAccess();
+  }, []);
+  
+  // Toggle API Research handler
+  const handleToggleApiResearch = async () => {
+    setIsTogglingApiResearch(true);
+    
+    try {
+      const response = await apiFetch('/api/user/api-research/toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: !apiResearchAccess.enabled })
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setApiResearchAccess(prev => ({
+          ...prev,
+          enabled: data.enabled
+        }));
+      }
+    } catch (error) {
+      console.error('Failed to toggle API research:', error);
+    } finally {
+      setIsTogglingApiResearch(false);
+    }
+  };
 
   // Render session history
   const renderSessionHistory = useCallback(async (forceFullRender = false) => {
@@ -752,6 +804,60 @@ export default function ChatSidebar({
           </svg>
           <span className="btn-text">New chat</span>
         </button>
+        
+        {/* API Research Toggle - Only visible to CloudFuze Manage team and admins */}
+        {apiResearchAccess.can_access && (
+          <button
+            className="api-research-toggle-btn"
+            onClick={handleToggleApiResearch}
+            disabled={isTogglingApiResearch}
+            title={apiResearchAccess.enabled ? 'Disable Cloud API Research' : 'Enable Cloud API Research'}
+            style={{
+              padding: '10px 16px',
+              marginTop: '8px',
+              borderRadius: '8px',
+              border: 'none',
+              background: apiResearchAccess.enabled ? '#10B981' : '#6B7280',
+              color: 'white',
+              cursor: isTogglingApiResearch ? 'wait' : 'pointer',
+              fontSize: '14px',
+              fontWeight: '500',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              width: '100%',
+              transition: 'background 0.2s, transform 0.1s',
+              boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)',
+            }}
+            onMouseOver={(e) => {
+              if (!isTogglingApiResearch) {
+                e.currentTarget.style.transform = 'translateY(-1px)';
+                e.currentTarget.style.boxShadow = '0 2px 6px rgba(0, 0, 0, 0.15)';
+              }
+            }}
+            onMouseOut={(e) => {
+              e.currentTarget.style.transform = 'translateY(0)';
+              e.currentTarget.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.1)';
+            }}
+          >
+            <span style={{ fontSize: '18px' }}>
+              {apiResearchAccess.enabled ? '🔬' : '🔒'}
+            </span>
+            <span className="btn-text" style={{ flex: 1, textAlign: 'left' }}>
+              API Research: {apiResearchAccess.enabled ? 'ON' : 'OFF'}
+            </span>
+            {apiResearchAccess.enabled && (
+              <span style={{ 
+                fontSize: '12px', 
+                background: 'rgba(255,255,255,0.2)', 
+                padding: '2px 6px', 
+                borderRadius: '4px' 
+              }}>
+                ✓
+              </span>
+            )}
+          </button>
+        )}
       </div>
 
       <div className="sidebar-content-wrapper">

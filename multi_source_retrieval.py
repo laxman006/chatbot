@@ -489,7 +489,11 @@ def intelligent_multi_source_retrieve(
     jira_k = sources_plan.get("jira", {}).get("k", 0)
     if jira_k > 0:
         print(f"\n[RETRIEVAL] ━━━ Fetching {jira_k} docs from Jira ━━━")
-        jira_docs = retrieve_from_jira(jira_vectorstore, query, k=jira_k)
+        if not jira_vectorstore:
+            print(f"[RETRIEVAL] [WARN] Jira vectorstore is None - cannot retrieve tickets")
+            jira_docs = []
+        else:
+            jira_docs = retrieve_from_jira(jira_vectorstore, query, k=jira_k)
         results_by_source["jira"] = jira_docs
         retrieval_stats["jira"] = len(jira_docs)
         print(f"[RETRIEVAL] ✓ Retrieved {len(jira_docs)} Jira tickets")
@@ -510,14 +514,30 @@ def intelligent_multi_source_retrieve(
             sample_meta = transcript_docs[0][0].metadata
             print(f"[RETRIEVAL]   Sample metadata: kb_tier={sample_meta.get('kb_tier')}, source_type={sample_meta.get('source_type')}")
     
-    # 5. PDFs retrieval
+    # 5. PDFs retrieval (PDFs are stored as SharePoint documents)
     pdfs_k = sources_plan.get("pdfs", {}).get("k", 0)
     if pdfs_k > 0:
         print(f"\n[RETRIEVAL] ━━━ Fetching {pdfs_k} docs from PDFs ━━━")
-        pdf_docs = retrieve_from_source(vectorstore, query, source_type="pdf", k=pdfs_k)
+        # PDFs are stored as SharePoint documents, so search SharePoint and filter for PDF files
+        # Search more SharePoint docs to have enough candidates for filtering
+        sp_candidates = retrieve_from_source(vectorstore, query, source_type="sharepoint", k=pdfs_k * 3)
+        
+        # Filter to only include PDF files
+        pdf_docs = []
+        for doc, score in sp_candidates:
+            metadata = doc.metadata
+            file_name = metadata.get('file_name', '').lower()
+            tag = metadata.get('tag', '').lower()
+            
+            # Check if this is a PDF file
+            if '.pdf' in file_name or '.pdf' in tag:
+                pdf_docs.append((doc, score))
+                if len(pdf_docs) >= pdfs_k:
+                    break
+        
         results_by_source["pdfs"] = pdf_docs
         retrieval_stats["pdfs"] = len(pdf_docs)
-        print(f"[RETRIEVAL] ✓ Retrieved {len(pdf_docs)} PDF documents")
+        print(f"[RETRIEVAL] ✓ Retrieved {len(pdf_docs)} PDF documents (filtered from {len(sp_candidates)} SharePoint candidates)")
         if pdf_docs and len(pdf_docs) > 0:
             sample_meta = pdf_docs[0][0].metadata
             print(f"[RETRIEVAL]   Sample metadata: source_type={sample_meta.get('source_type')}, file_name={sample_meta.get('file_name', 'N/A')}")

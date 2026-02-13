@@ -7,9 +7,9 @@ python-dotenv==1.0.0
 # AI and Language Processing
 langchain==1.0.1
 langchain-openai==1.0.1
-langchain-google-genai>=0.1.0  # Google Gemini support
+langchain-google-genai>=3.1.0  # Google Gemini support - requires langchain-core>=1.0.5
 langchain-community==0.4
-langchain-core==1.0.0
+langchain-core>=1.0.0  # Updated to allow >=1.0.0 for langchain-google-genai>=3.1.0 compatibility
 langchain-chroma==1.0.0
 openai>=1.109.1
 google-generativeai>=0.3.0  # Google Generative AI API
@@ -26,21 +26,26 @@ chromadb>=1.0.20
 requests>=2.32.5
 httpx>=0.27.0
 beautifulsoup4==4.12.2
+lxml>=4.9.0
 
 # Data Processing and Validation
 pydantic>=2.7.4
 pandas==2.3.3
+validators>=0.22.0
+ddgs>=9.10.0
+pyyaml>=6.0.0
 
 # Document Processing
 PyPDF2==3.0.1
 pdfplumber==0.10.3
 pymupdf4llm==0.0.5
-python-docx==1.1.0
+python-docx>=1.1.2  # Updated for unstructured[all-docs]>=0.18.0 compatibility
 docx2txt==0.8
 
-# Browser Automation for SharePoint (Optional - only if Graph API fails)
+# Browser Automation and JavaScript Rendering
 selenium==4.36.0
 webdriver-manager==4.0.2
+playwright>=1.40.0  # For JavaScript-rendered API documentation
 
 # Excel Processing
 openpyxl==3.1.2
@@ -63,10 +68,16 @@ motor==3.3.2
 pymongo==4.5.0
 
 # Enhanced Document Processing (HEAVY - takes 10-15 min to build)
-unstructured[all-docs]==0.11.8
+# Updated to support numpy 2.0+ and Python 3.13 compatibility
+# Explicitly require newer numba/llvmlite for Python 3.13 support
+numba>=0.61.0  # Python 3.13 support
+llvmlite>=0.44.0  # Python 3.13 support
+unstructured[all-docs]>=0.18.0
 
 # Machine Learning
-numpy<2.0  # Required for onnxruntime compatibility (unstructured library dependency)
+# Python 3.13 requires numpy>=2.0, langchain-community requires numpy>=2.1.0
+# Explicit constraint helps pip resolver avoid backtracking through numpy 1.x versions
+numpy>=2.1.0
 scikit-learn>=1.4.0
 tiktoken>=0.7.0,<1.0.0
 
@@ -80,5 +91,3 @@ sentence-transformers>=2.7.0  # Compatible with huggingface-hub>=0.34.0 (cached_
 # python-magic==0.4.27             # File detection - not used
 # spacy==3.7.2                     # NLP - not imported anywhere
 # Pillow==10.2.0                   # Image processing - not used
-google-generativeai>=0.3.0
-langchain-google-genai>=0.1.0

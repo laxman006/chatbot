@@ -21,12 +21,13 @@ from app.llm_factory import get_llm
 from app.vectorstore import retriever, vectorstore, bm25_retriever
 # Optional Jira vectorstore import - allows backend to start without jira package
 try:
-    from app.jira_vectorstore import jira_retriever, jira_vectorstore
+    from app.jira_vectorstore import jira_retriever, jira_vectorstore, _get_jira_vectorstore_cached
     JIRA_VECTORSTORE_AVAILABLE = True
 except ImportError as e:
     JIRA_VECTORSTORE_AVAILABLE = False
     jira_retriever = None
     jira_vectorstore = None
+    _get_jira_vectorstore_cached = None
     print(f"[WARNING] Jira vectorstore not available: {e}")
     print("[INFO] Jira features will be disabled. Install jira package with: pip install jira")
 from app.mongodb_memory import (
@@ -43,7 +44,7 @@ from app.mongodb_memory import (
 )
 from app.helpers import strip_markdown, preserve_markdown
 from app.langfuse_integration import langfuse_tracker
-from app.auth import verify_user_access, require_admin, require_restricted_admin
+from app.auth import verify_user_access, require_admin, require_restricted_admin, get_current_user
 from app.user_data import get_user_job_title
 from app.models.teams import TEAMS_STRUCTURE, get_team_by_name
 from config import (
@@ -237,6 +238,22 @@ INTENT_BRANCHES = {
         "require_keywords": [["slack", "teams"], ["slack-to-teams"]],
         "query_expansion": ["channel migration", "workspace transfer", "conversation history"]
     },
+    "teams_chat_migration": {
+        "description": "Teams to Chat (Microsoft Teams to Google Chat) migration specific questions",
+        "keywords": ["teams", "chat", "teams to chat", "microsoft teams", "google chat", "teams to google chat"],
+        "include_tags": ["blog", "sharepoint"],
+        "require_keywords": [["teams", "chat"], ["teams-to-chat"], ["microsoft teams", "google chat"]],
+        "exclude_keywords": ["slack"],  # Exclude Slack to avoid confusion
+        "query_expansion": ["channel migration", "conversation history", "user mentions migration"]
+    },
+    "chat_teams_migration": {
+        "description": "Chat to Teams (Google Chat to Microsoft Teams) migration specific questions",
+        "keywords": ["chat", "teams", "chat to teams", "google chat", "microsoft teams", "google chat to teams"],
+        "include_tags": ["blog", "sharepoint"],
+        "require_keywords": [["chat", "teams"], ["chat-to-teams"], ["google chat", "microsoft teams"]],
+        "exclude_keywords": ["slack"],  # Exclude Slack to avoid confusion
+        "query_expansion": ["space migration", "conversation history", "user mentions migration"]
+    },
     "sharepoint_docs": {
         "description": "SharePoint documents, certificates, policies",
         "keywords": ["certificate", "download", "policy", "document", "soc", "compliance", "security"],
@@ -311,6 +328,22 @@ def classify_intent(query: str) -> dict:
         if any(word in query_lower for word in ["certificate", "compliance", "security", "policy"]):
             return {"intent": "sharepoint_docs", "confidence": 0.85, "method": "keyword"}
     
+    # CRITICAL FIX: Check for Teams to Chat and Chat to Teams BEFORE Slack to Teams
+    # to avoid misclassification
+    if ("teams" in query_lower and "chat" in query_lower) or ("microsoft teams" in query_lower and "google chat" in query_lower):
+        # Determine direction: Teams to Chat or Chat to Teams
+        if ("teams to chat" in query_lower or "teams-to-chat" in query_lower or 
+            ("microsoft teams" in query_lower and "google chat" in query_lower and 
+             query_lower.index("teams") < query_lower.index("chat"))):
+            return {"intent": "teams_chat_migration", "confidence": 0.90, "method": "keyword"}
+        elif ("chat to teams" in query_lower or "chat-to-teams" in query_lower or
+              ("google chat" in query_lower and "microsoft teams" in query_lower and
+               query_lower.index("chat") < query_lower.index("teams"))):
+            return {"intent": "chat_teams_migration", "confidence": 0.90, "method": "keyword"}
+        else:
+            # Ambiguous - default to Teams to Chat (more common)
+            return {"intent": "teams_chat_migration", "confidence": 0.75, "method": "keyword"}
+    
     if "slack" in query_lower and "teams" in query_lower:
         return {"intent": "slack_teams_migration", "confidence": 0.90, "method": "keyword"}
     
@@ -331,6 +364,8 @@ CRITICAL RULES:
 - If query asks about emails, conversations, threads, or discusses what was said in emails → "email_conversations"
 - If query asks about general business value, benefits, or "what is CloudFuze" WITHOUT mentioning specific platforms → "general_business"
 - If query mentions BOTH "Slack" AND "Teams" → "slack_teams_migration"
+- If query mentions "Teams to Chat" or "Microsoft Teams to Google Chat" → "teams_chat_migration"
+- If query mentions "Chat to Teams" or "Google Chat to Microsoft Teams" → "chat_teams_migration"
 - If query asks about general migration (without specific platforms) → "migration_general"
 - If query asks for certificates, documents, or policies → "sharepoint_docs"
 - If query asks about pricing or costs → "pricing"
@@ -420,6 +455,43 @@ def retrieve_with_branch_filter(query: str, intent: str, k: int = 50):
                 tag_match = False
             if "teams" not in doc_content and "teams" not in doc_title:
                 tag_match = False
+            # Exclude Teams to Chat documents
+            if "teams to chat" in doc_title or "teams-to-chat" in doc_title:
+                tag_match = False
+        
+        # For teams_chat_migration: prioritize Teams to Chat content
+        elif intent == "teams_chat_migration":
+            # Must have both teams and chat keywords
+            if "teams" not in doc_content and "teams" not in doc_title:
+                tag_match = False
+            if ("chat" not in doc_content and "chat" not in doc_title and 
+                "google chat" not in doc_content.lower() and "google chat" not in doc_title.lower()):
+                tag_match = False
+            # CRITICAL: Exclude Slack to Teams documents to prevent confusion
+            if "slack to teams" in doc_title or "slack-to-teams" in doc_title:
+                tag_match = False
+            if "slack" in doc_content.lower() and "teams" in doc_content.lower():
+                # If document mentions both Slack and Teams, it's likely Slack to Teams, not Teams to Chat
+                slack_teams_count = doc_content.lower().count("slack") + doc_content.lower().count("teams")
+                if slack_teams_count >= 3:  # Multiple mentions suggest Slack to Teams
+                    tag_match = False
+        
+        # For chat_teams_migration: prioritize Chat to Teams content
+        elif intent == "chat_teams_migration":
+            # Must have both chat and teams keywords
+            if ("chat" not in doc_content and "chat" not in doc_title and 
+                "google chat" not in doc_content.lower() and "google chat" not in doc_title.lower()):
+                tag_match = False
+            if "teams" not in doc_content and "teams" not in doc_title:
+                tag_match = False
+            # CRITICAL: Exclude Slack to Teams documents to prevent confusion
+            if "slack to teams" in doc_title or "slack-to-teams" in doc_title:
+                tag_match = False
+            if "slack" in doc_content.lower() and "teams" in doc_content.lower():
+                # If document mentions both Slack and Teams, it's likely Slack to Teams, not Chat to Teams
+                slack_teams_count = doc_content.lower().count("slack") + doc_content.lower().count("teams")
+                if slack_teams_count >= 3:  # Multiple mentions suggest Slack to Teams
+                    tag_match = False
         
         # For sharepoint_docs: prioritize SharePoint source
         elif intent == "sharepoint_docs":
@@ -478,6 +550,12 @@ def expand_query_with_intent(query: str, intent: str) -> str:
     Expand query with intent-specific keywords for better retrieval.
     Uses query expansion terms defined in intent branches.
     """
+    # Skip expansion for "who is" questions to avoid over-expansion and irrelevant results
+    query_lower = query.lower().strip()
+    if re.match(r'^who[\'s]?\s+is\s+\w+', query_lower):
+        print(f"[QUERY EXPANSION] Skipping expansion for 'who is' question: '{query}'")
+        return query
+    
     branch_config = INTENT_BRANCHES.get(intent, {})
     expansion_terms = branch_config.get("query_expansion", [])
     
@@ -1036,6 +1114,108 @@ def is_memory_only_question(question: str) -> bool:
     ]
     return any(t in q for t in triggers)
 
+
+def is_cloud_api_research_query(question: str) -> bool:
+    """
+    Determine if a query is asking for cloud API research.
+    CLOUD-AGNOSTIC: Works for ANY cloud name, not just predefined ones.
+    
+    Args:
+        question: User's question or just cloud name
+        
+    Returns:
+        True if this is a cloud API research query
+    """
+    question_lower = question.lower().strip()
+    
+    # STRATEGY 1: Single word or short phrase (likely a cloud name)
+    # Accept 1-3 words, each 2+ characters
+    words = question_lower.split()
+    if 1 <= len(words) <= 3 and all(len(w) >= 2 for w in words):
+        # Exclude common question words to avoid false positives
+        exclude_words = {'what', 'how', 'why', 'when', 'where', 'who', 'which', 'help', 'please', 'can', 'could', 'would', 'should'}
+        if not any(w in exclude_words for w in words):
+            return True
+    
+    # STRATEGY 2: Check explicit research patterns
+    research_patterns = [
+        r'research\s+(?:the\s+)?apis?\s+(?:for|of)',
+        r'research\s+\w+\s+apis?',
+        r'what\s+apis?\s+(?:does|do)\s+\w+\s+(?:have|provide|offer|support)',
+        r'discover\s+\w+\s+(?:apis?|team|user|group)\s+management',
+        r'api\s+documentation\s+(?:for|of)',
+        r'(?:find|show|get)\s+(?:me\s+)?(?:the\s+)?apis?\s+(?:for|of)',
+        r'\w+\s+api\s+(?:reference|documentation|docs)',
+        r'how\s+(?:to|do\s+i)\s+(?:manage|use)\s+\w+\s+api',
+        r'what\s+(?:user|group|team)\s+management\s+apis?',
+    ]
+    
+    return any(re.search(pattern, question_lower) for pattern in research_patterns)
+
+
+def extract_cloud_name_from_query(question: str) -> Optional[str]:
+    """
+    Extract cloud name from a research query.
+    CLOUD-AGNOSTIC: Works for ANY cloud name, not just predefined ones.
+    
+    Args:
+        question: User's question or just cloud name
+        
+    Returns:
+        Cloud name or None if not found
+    """
+    question_trimmed = question.strip()
+    question_lower = question_trimmed.lower()
+    
+    # Known cloud names for better capitalization (optional, not required)
+    known_clouds_capitalization = {
+        "slack": "Slack", "okta": "Okta", "box": "Box", "github": "GitHub", 
+        "gitlab": "GitLab", "dropbox": "Dropbox", "azure ad": "Azure AD",
+        "aws": "AWS", "google workspace": "Google Workspace", "canny": "Canny",
+        "notion": "Notion", "trello": "Trello", "jira": "Jira", "asana": "Asana",
+        "monday": "Monday", "salesforce": "Salesforce", "hubspot": "HubSpot",
+        "zendesk": "Zendesk", "zoom": "Zoom", "microsoft 365": "Microsoft 365",
+        "onedrive": "OneDrive", "sharepoint": "SharePoint", "atlassian": "Atlassian"
+    }
+    
+    # STRATEGY 1: Single word or short phrase (1-3 words, 3+ chars)
+    # This catches: "Box", "Slack", "My Custom Cloud", "GitLab"
+    words = question_trimmed.split()
+    if 1 <= len(words) <= 3 and all(len(w) >= 2 for w in words):
+        # Check if it's in known list for proper capitalization
+        if question_lower in known_clouds_capitalization:
+            return known_clouds_capitalization[question_lower]
+        # Otherwise, title-case it
+        return question_trimmed.title()
+    
+    # STRATEGY 2: Extract from "Research APIs for [CLOUD]" pattern
+    match = re.search(r'(?:for|of)\s+([A-Za-z][A-Za-z0-9\s\-\.]{1,30}?)(?:\s+api|\s*$)', question_lower)
+    if match:
+        cloud_name = match.group(1).strip()
+        # Check known list for capitalization
+        if cloud_name.lower() in known_clouds_capitalization:
+            return known_clouds_capitalization[cloud_name.lower()]
+        return cloud_name.title()
+    
+    # STRATEGY 3: Extract from "What APIs does [CLOUD] have" pattern
+    match = re.search(r'(?:does|do)\s+([A-Za-z][A-Za-z0-9\s\-\.]{1,30}?)\s+(?:have|provide|offer|support)', question_lower)
+    if match:
+        cloud_name = match.group(1).strip()
+        if cloud_name.lower() in known_clouds_capitalization:
+            return known_clouds_capitalization[cloud_name.lower()]
+        return cloud_name.title()
+    
+    # STRATEGY 4: Extract from "[CLOUD] API" pattern
+    match = re.search(r'^([A-Za-z][A-Za-z0-9\s\-\.]{1,30}?)\s+api', question_lower)
+    if match:
+        cloud_name = match.group(1).strip()
+        if cloud_name.lower() in known_clouds_capitalization:
+            return known_clouds_capitalization[cloud_name.lower()]
+        return cloud_name.title()
+    
+    return None
+
+
 async def rewrite_query_with_context(question: str, conversation_history: list, llm) -> str:
     """
     Rewrite user question into a standalone query using conversation history.
@@ -1205,6 +1385,42 @@ def extract_migration_direction(text: str) -> dict:
         "sharefile": [r"\bsharefile\b", r"\bcitrix\s+sharefile\b"],
     }
     
+    # CRITICAL FIX: Handle ambiguous "chat" patterns BEFORE general direction matching
+    # Check for explicit "Teams to Chat" or "Chat to Teams" patterns first
+    teams_to_chat_patterns = [
+        r"teams\s+to\s+chat",
+        r"teams\s+to\s+google\s+chat",
+        r"microsoft\s+teams\s+to\s+chat",
+        r"microsoft\s+teams\s+to\s+google\s+chat",
+    ]
+    
+    chat_to_teams_patterns = [
+        r"chat\s+to\s+teams",
+        r"google\s+chat\s+to\s+teams",
+        r"chat\s+to\s+microsoft\s+teams",
+        r"google\s+chat\s+to\s+microsoft\s+teams",
+    ]
+    
+    # Check for explicit Teams to Chat pattern
+    for pattern in teams_to_chat_patterns:
+        if re.search(pattern, text_lower, re.IGNORECASE):
+            return {
+                "source_platform": "teams",
+                "target_platform": "google_chat",
+                "direction_detected": True,
+                "mentioned_platforms": ["teams", "google_chat"]
+            }
+    
+    # Check for explicit Chat to Teams pattern
+    for pattern in chat_to_teams_patterns:
+        if re.search(pattern, text_lower, re.IGNORECASE):
+            return {
+                "source_platform": "google_chat",
+                "target_platform": "teams",
+                "direction_detected": True,
+                "mentioned_platforms": ["google_chat", "teams"]
+            }
+    
     # Compile patterns
     platform_regex = {}
     for platform, patterns in platform_patterns.items():
@@ -1284,6 +1500,14 @@ def extract_migration_direction(text: str) -> dict:
                     if platform_regex[platform].search(target_text):
                         target_normalized = platform
                         break
+            
+            # CRITICAL FIX: Handle ambiguous "chat" in target position
+            # If target is "chat" and source is "teams", assume Google Chat
+            if target_text.strip().lower() == "chat" and source_normalized == "teams":
+                target_normalized = "google_chat"
+            # If source is "chat" and target is "teams", assume Google Chat as source
+            elif source_text.strip().lower() == "chat" and target_normalized == "teams":
+                source_normalized = "google_chat"
             
             if source_normalized and target_normalized:
                 source_platform = source_normalized
@@ -1378,6 +1602,29 @@ def filter_by_direction(
         doc_source = doc_direction.get("source_platform")
         doc_target = doc_direction.get("target_platform")
         
+        # CRITICAL FIX: Prevent cross-contamination between similar combinations
+        # If query is "Teams to Chat", strongly penalize "Slack to Teams" docs
+        # If query is "Slack to Teams", strongly penalize "Teams to Chat" docs
+        is_similar_but_wrong = False
+        if query_source == "teams" and query_target == "google_chat":
+            # Query is Teams to Chat - penalize Slack to Teams docs
+            if doc_source == "slack" and doc_target == "teams":
+                is_similar_but_wrong = True
+                if strict_mode:
+                    continue  # Remove Slack to Teams docs when query is Teams to Chat
+                else:
+                    # Heavily penalize: reduce score by 80%
+                    score = score * 0.2
+        elif query_source == "slack" and query_target == "teams":
+            # Query is Slack to Teams - penalize Teams to Chat docs
+            if doc_source == "teams" and doc_target == "google_chat":
+                is_similar_but_wrong = True
+                if strict_mode:
+                    continue  # Remove Teams to Chat docs when query is Slack to Teams
+                else:
+                    # Heavily penalize: reduce score by 80%
+                    score = score * 0.2
+        
         # Determine match status
         if doc_source and doc_target:
             # Document has explicit direction
@@ -1397,8 +1644,8 @@ def filter_by_direction(
                 if strict_mode:
                     continue  # Remove different direction docs
                 else:
-                    # Penalize: reduce score by 50%
-                    penalized_score = score * 0.5
+                    # Penalize: reduce score by 50% (or use already penalized score if similar_but_wrong)
+                    penalized_score = score * 0.5 if not is_similar_but_wrong else score
                     mismatched_docs.append((doc, penalized_score, "different"))
         else:
             # Unknown direction - keep but don't boost
@@ -2738,19 +2985,23 @@ def perplexity_style_retrieve(
     
     # ---- 5. Add Jira candidates separately, properly normalized ----
     jira_pool = []
-    if k_jira > 0 and jira_vectorstore:
-        print(f"[RETRIEVAL] Retrieving Jira tickets for rerank pool (weight={jira_weight:.2f})...")
-        try:
-            # Get Jira tickets using similarity search (returns distance scores)
-            jira_docs_with_scores = jira_vectorstore.similarity_search_with_score(query, k=15)
-            # Jira vectorstore uses cosine distance (confirmed in jira_vectorstore.py:42)
-            jira_metric = "cosine"
-            for doc, dist in jira_docs_with_scores:
-                sim = normalize_distance_to_similarity(dist, metric=jira_metric)
-                jira_pool.append((doc, sim))
-            print(f"[RETRIEVAL] Retrieved {len(jira_pool)} Jira tickets for rerank pool")
-        except Exception as e:
-            print(f"[WARN] Jira retrieval failed: {e}")
+    if k_jira > 0:
+        # Load Jira vectorstore lazily if needed
+        if _get_jira_vectorstore_cached:
+            jira_vectorstore = _get_jira_vectorstore_cached()
+        if jira_vectorstore:
+            print(f"[RETRIEVAL] Retrieving Jira tickets for rerank pool (weight={jira_weight:.2f})...")
+            try:
+                # Get Jira tickets using similarity search (returns distance scores)
+                jira_docs_with_scores = jira_vectorstore.similarity_search_with_score(query, k=15)
+                # Jira vectorstore uses cosine distance (confirmed in jira_vectorstore.py:42)
+                jira_metric = "cosine"
+                for doc, dist in jira_docs_with_scores:
+                    sim = normalize_distance_to_similarity(dist, metric=jira_metric)
+                    jira_pool.append((doc, sim))
+                print(f"[RETRIEVAL] Retrieved {len(jira_pool)} Jira tickets for rerank pool")
+            except Exception as e:
+                print(f"[WARN] Jira retrieval failed: {e}")
     
     pool_candidates.extend(jira_pool)
     
@@ -2981,10 +3232,10 @@ def intelligent_route_and_retrieve(
                 "query_type": "general",
                 "query_intent": "General query",
                 "sources": {
-                    "blog": {"k": 20, "relevance": 0.6},
-                    "jira": {"k": 15, "relevance": 0.5},
-                    "sharepoint": {"k": 8, "relevance": 0.3},
-                    "pdfs": {"k": 5, "relevance": 0.3},
+                    "sharepoint": {"k": 20, "relevance": 0.7},
+                    "jira": {"k": 15, "relevance": 0.6},
+                    "pdfs": {"k": 10, "relevance": 0.5},
+                    "blog": {"k": 2, "relevance": 0.2},
                     "transcripts": {"k": 2, "relevance": 0.2},
                     "excel": {"k": 0, "relevance": 0.0}
                 },
@@ -2994,9 +3245,14 @@ def intelligent_route_and_retrieve(
     # ============ STEP 2: MULTI-SOURCE RETRIEVAL ============
     print(f"\n[RETRIEVAL] Retrieving from sources based on routing plan...")
     
+    # Load Jira vectorstore lazily if needed
+    jira_vs = jira_vectorstore
+    if _get_jira_vectorstore_cached:
+        jira_vs = _get_jira_vectorstore_cached()
+    
     all_candidates = intelligent_multi_source_retrieve(
         vectorstore=vectorstore,
-        jira_vectorstore=jira_vectorstore,
+        jira_vectorstore=jira_vs,
         query=query,
         routing_plan=routing_plan,
         enable_deduplication=ROUTING_ENABLE_DEDUPLICATION,
@@ -3097,9 +3353,66 @@ Answer clearly and correctly based on the provided context and knowledge base.""
     # FIRST: Check if we have a corrected response for this question
     corrected_answer = find_similar_corrected_response(question)
     
+    # Check if user has API research enabled FIRST, then check if query is about APIs
+    should_do_api_research = False
+    from app.auth import can_access_api_research
+    from app.mongodb_memory import get_api_research_preference
+    from config import ENABLE_CLOUD_API_RESEARCH
+    
+    logger.info(f"[CLOUD RESEARCH CHECK] Checking for query: '{question}'")
+    logger.info(f"[CLOUD RESEARCH CHECK] Global flag: {ENABLE_CLOUD_API_RESEARCH}")
+    
+    # Check if user has feature enabled
+    if ENABLE_CLOUD_API_RESEARCH:
+        has_access = can_access_api_research(user_email)
+        logger.info(f"[CLOUD RESEARCH CHECK] User {user_email} has access: {has_access}")
+        
+        if has_access:
+            is_enabled = await get_api_research_preference(user_email)
+            logger.info(f"[CLOUD RESEARCH CHECK] User {user_email} has toggle enabled: {is_enabled}")
+            
+            if is_enabled:
+                # User has it enabled - ALWAYS do API research (no pattern check needed)
+                should_do_api_research = True
+                logger.info(f"[CLOUD RESEARCH] ✅ API research ENABLED for {user_email} (toggle is ON)")
+            else:
+                logger.info(f"[CLOUD RESEARCH] User has access but toggle is OFF")
+        else:
+            logger.info(f"[CLOUD RESEARCH] User doesn't have access")
+    else:
+        logger.info(f"[CLOUD RESEARCH] Feature disabled globally")
+    
     if corrected_answer:
         # Use the corrected response
         answer = corrected_answer
+    # Perform cloud API research if all conditions met
+    elif should_do_api_research:
+        from app.cloud_api_researcher import research_cloud_api
+        
+        cloud_name = extract_cloud_name_from_query(question)
+        
+        if cloud_name:
+            logger.info(f"[CLOUD RESEARCH] User {user_email} researching: {cloud_name}")
+            
+            try:
+                # Perform research
+                llm = get_llm()
+                results = research_cloud_api(
+                    cloud_name=cloud_name,
+                    user_email=user_email,
+                    force_refresh=False,
+                    llm=llm
+                )
+                
+                # Format results as markdown
+                from app.response_formatter import format_cloud_research_markdown
+                answer = format_cloud_research_markdown(results, cloud_name)
+                
+            except Exception as e:
+                logger.error(f"[ERROR] Cloud research failed: {e}")
+                answer = f"I encountered an error while researching {cloud_name}'s APIs. Please try again or contact support.\n\nError: {str(e)}"
+        else:
+            answer = "I couldn't identify which cloud you want to research. Please specify the cloud name clearly (e.g., 'Research APIs for Slack' or 'What APIs does Okta have?')."
     # Check if this is a conversational query
     elif is_conversational_query(question):
         # Handle conversational queries directly without document retrieval
@@ -3493,6 +3806,34 @@ Answer clearly and correctly based on the provided context and knowledge base.""
             # FIRST: Check if we have a corrected response for this question
             corrected_answer = find_similar_corrected_response(question)
             
+            # Check if user has API research enabled FIRST
+            should_do_api_research = False
+            from app.auth import can_access_api_research
+            from app.mongodb_memory import get_api_research_preference
+            from config import ENABLE_CLOUD_API_RESEARCH
+            
+            logger.info(f"[CLOUD RESEARCH CHECK] Checking for query: '{question}'")
+            logger.info(f"[CLOUD RESEARCH CHECK] Global flag: {ENABLE_CLOUD_API_RESEARCH}")
+            
+            if ENABLE_CLOUD_API_RESEARCH:
+                has_access = can_access_api_research(user_email)
+                logger.info(f"[CLOUD RESEARCH CHECK] User {user_email} has access: {has_access}")
+                
+                if has_access:
+                    is_enabled = await get_api_research_preference(user_email)
+                    logger.info(f"[CLOUD RESEARCH CHECK] User {user_email} has toggle enabled: {is_enabled}")
+                    
+                    if is_enabled:
+                        # User has it enabled - ALWAYS do API research (no pattern check needed)
+                        should_do_api_research = True
+                        logger.info(f"[CLOUD RESEARCH] ✅ API research ENABLED for {user_email} (toggle is ON)")
+                    else:
+                        logger.info(f"[CLOUD RESEARCH] User has access but toggle is OFF")
+                else:
+                    logger.info(f"[CLOUD RESEARCH] User doesn't have access")
+            else:
+                logger.info(f"[CLOUD RESEARCH] Feature disabled globally")
+            
             if corrected_answer:
                 # Use the corrected response
                 yield f"data: {json.dumps({'type': 'thinking_complete'})}\n\n"
@@ -3565,8 +3906,68 @@ Answer clearly and correctly based on the provided context and knowledge base.""
                 yield f"data: {json.dumps({'type': 'done', 'full_response': full_response, 'trace_id': trace_id, 'recommended_questions': recommended_questions})}\n\n"
                 return
             
+            # Cloud API Research if enabled
+            elif should_do_api_research:
+                from app.cloud_api_researcher import research_cloud_api
+                
+                cloud_name = extract_cloud_name_from_query(question)
+                
+                if cloud_name:
+                    logger.info(f"[CLOUD RESEARCH] User {user_email} researching: {cloud_name}")
+                    
+                    yield f"data: {json.dumps({'type': 'thinking', 'message': f'Hold on tight — researching {cloud_name} APIs can take a moment...'})}\n\n"
+                    
+                    try:
+                        # Perform research
+                        llm = get_llm()
+                        results = research_cloud_api(
+                            cloud_name=cloud_name,
+                            user_email=user_email,
+                            force_refresh=False,
+                            llm=llm
+                        )
+                        
+                        # Format results as markdown
+                        from app.response_formatter import format_cloud_research_markdown
+                        full_response = format_cloud_research_markdown(results, cloud_name)
+                        
+                        yield f"data: {json.dumps({'type': 'thinking_complete'})}\n\n"
+                        
+                        # Stream the response
+                        for i, char in enumerate(full_response):
+                            yield f"data: {json.dumps({'token': char, 'type': 'token'})}\n\n"
+                            if i % 10 == 0:
+                                await asyncio.sleep(0.01)
+                        
+                        # Save messages
+                        try:
+                            await save_message(session_id, "user", question)
+                            await save_message(session_id, "assistant", full_response)
+                        except Exception as e:
+                            logger.warning(f"Failed to save messages: {e}")
+                        
+                        yield f"data: {json.dumps({'type': 'done', 'full_response': full_response})}\n\n"
+                        return
+                        
+                    except Exception as e:
+                        error_msg = f"I encountered an error while researching {cloud_name}'s APIs: {str(e)}"
+                        logger.error(f"[ERROR] Cloud research failed: {e}")
+                        yield f"data: {json.dumps({'type': 'thinking_complete'})}\n\n"
+                        for char in error_msg:
+                            yield f"data: {json.dumps({'token': char, 'type': 'token'})}\n\n"
+                        yield f"data: {json.dumps({'type': 'done', 'full_response': error_msg})}\n\n"
+                        return
+                else:
+                    error_msg = "I couldn't identify which cloud you want to research. Please specify the cloud name clearly."
+                    logger.info(f"[CLOUD RESEARCH] Could not extract cloud name from: {question}")
+                    yield f"data: {json.dumps({'type': 'thinking_complete'})}\n\n"
+                    for char in error_msg:
+                        yield f"data: {json.dumps({'token': char, 'type': 'token'})}\n\n"
+                    yield f"data: {json.dumps({'type': 'done', 'full_response': error_msg})}\n\n"
+                    return
+            
             # ✅ MEMORY-ONLY QUESTION → do NOT run retrieval
-            if conversation_history and is_memory_only_question(question):
+            elif conversation_history and is_memory_only_question(question):
                 logger.info(f"[MEMORY-ONLY] Skipping RAG for: '{question}'")
                 
                 yield f"data: {json.dumps({'type': 'thinking_complete'})}\n\n"
@@ -3831,6 +4232,13 @@ Answer clearly and correctly based on the provided context and knowledge base.""
             doc_results = []
             retrieval_time_ms = 0  # Initialize to avoid UnboundLocalError if exception occurs
             
+            # Initialize retrieval parameters early to avoid UnboundLocalError
+            # These will be overwritten after retrieval, but need to exist for metadata logging
+            from config import DENSE_RETRIEVAL_K as DEFAULT_DENSE_K, BM25_RETRIEVAL_K as DEFAULT_BM25_K, FINAL_RETRIEVAL_K as DEFAULT_FINAL_K
+            DENSE_RETRIEVAL_K = DEFAULT_DENSE_K
+            BM25_RETRIEVAL_K = DEFAULT_BM25_K
+            FINAL_RETRIEVAL_K = DEFAULT_FINAL_K
+            
             try:
                 # Send status: Query expansion
                 if ENABLE_QUERY_EXPANSION:
@@ -3863,6 +4271,11 @@ Answer clearly and correctly based on the provided context and knowledge base.""
                     final_docs = [doc for doc, score in doc_results]
                     print(f"[RAG] Retrieved {len(final_docs)} docs using Intelligent Routing")
                     
+                    # Set retrieval parameters for metadata logging (intelligent routing path)
+                    DENSE_RETRIEVAL_K = 0  # Not used in intelligent routing
+                    BM25_RETRIEVAL_K = 0  # Not used in intelligent routing
+                    FINAL_RETRIEVAL_K = ROUTING_FINAL_K
+                    
                 else:
                     print("[RAG] Using Perplexity-Style (Option E) strategy")
                     
@@ -3880,6 +4293,11 @@ Answer clearly and correctly based on the provided context and knowledge base.""
 
                     final_docs = [doc for doc, score in doc_results]
                     print(f"[RAG] Retrieved {len(final_docs)} docs using Option E pipeline")
+                    
+                    # Set retrieval parameters for metadata logging (perplexity-style path)
+                    DENSE_RETRIEVAL_K = 60
+                    BM25_RETRIEVAL_K = 60
+                    FINAL_RETRIEVAL_K = 8
                 
                 # Send status: Documents found and reranking
                 yield f"data: {json.dumps({'type': 'status', 'status': 'reranking_docs', 'message': f'Found {len(doc_results)} documents, reranking for relevance'})}\n\n"
@@ -5140,15 +5558,33 @@ Answer clearly and correctly based on the provided context and knowledge base.""
             
             retrieval_start_time = time.time()
             
-            # Retrieve with retry mode (uses step-up retrieval)
-            doc_results = perplexity_style_retrieve(
-                query=enhanced_query,
-                retry_mode=True,
-                retry_attempt=retry_attempt,
-                use_expansion=RETRY_FORCE_EXPANSION or ENABLE_QUERY_EXPANSION,
-            )
+            # ====== INTELLIGENT ROUTING OR PERPLEXITY-STYLE RAG (RETRY MODE) ======
+            # Choose retrieval strategy based on configuration (same as regular chat)
+            if ENABLE_INTELLIGENT_ROUTING and intelligent_router:
+                print("[RETRY] Using Intelligent Routing strategy")
+                
+                # Use intelligent LLM-based routing (respects source priorities, reduces blog usage)
+                doc_results = intelligent_route_and_retrieve(
+                    query=enhanced_query,
+                    k_final=ROUTING_FINAL_K,
+                    use_routing=True
+                )
+                
+                final_docs = [doc for doc, score in doc_results]
+                print(f"[RETRY] Retrieved {len(final_docs)} docs using Intelligent Routing")
+            else:
+                print("[RETRY] Using Perplexity-Style (Option E) strategy")
+                
+                # Retrieve with retry mode (uses step-up retrieval)
+                doc_results = perplexity_style_retrieve(
+                    query=enhanced_query,
+                    retry_mode=True,
+                    retry_attempt=retry_attempt,
+                    use_expansion=RETRY_FORCE_EXPANSION or ENABLE_QUERY_EXPANSION,
+                )
+                
+                final_docs = [doc for doc, score in doc_results]
             
-            final_docs = [doc for doc, score in doc_results]
             retrieval_time_ms = int((time.time() - retrieval_start_time) * 1000)
             
             print(f"[RETRY] Retrieved {len(final_docs)} docs (attempt {retry_attempt})")
@@ -7208,7 +7644,17 @@ async def get_teams_analytics_summary(
     try:
         from app.langfuse_integration import langfuse_client
         from config import LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST
-        from app.models.teams import get_all_teams, get_team_by_member_email, get_team_color
+        from app.models.teams import (
+            get_all_teams,
+            get_all_email_to_team_mapping,
+            get_team_by_member_email,
+            get_team_color,
+        )
+        from app.trace_utils import (
+            TraceFilteringStats,
+            calculate_question_metrics,
+            process_trace_batch,
+        )
         import asyncio
         from datetime import datetime, timezone, timedelta, timezone
         
@@ -7286,17 +7732,13 @@ async def get_teams_analytics_summary(
         
         logger.info(f"[LANGFUSE ANALYTICS] Pagination: max_pages={max_pages}, batch_limit={batch_limit}")
         
-        # Collect all unique emails first for batch profile fetching
-        all_emails_set = set()
-        traces_data = []  # Store traces temporarily
-        traces_with_email = 0
-        traces_without_email = 0
+        email_to_team_map = get_all_email_to_team_mapping()
+        trace_stats = TraceFilteringStats()
         
         async with httpx.AsyncClient() as client:
             total_traces_fetched = 0
             total_pages_fetched = 0
             
-            # First pass: Collect all traces and unique emails
             while page <= max_pages:
                 try:
                     params = {
@@ -7340,26 +7782,20 @@ async def get_teams_analytics_summary(
                         logger.info(f"[LANGFUSE ANALYTICS] No more traces at page {page}, stopping pagination")
                         break
                     
-                    # Log sample traces for debugging
-                    for trace in traces[:3]:
-                        metadata = trace.get("metadata", {})
-                        logger.debug(
-                            "[LANGFUSE ANALYTICS] Trace sample - id=%s email=%s question=%s",
-                            trace.get("id"),
-                            metadata.get("user_email"),
-                            str(trace.get("input", ""))[:50] + "..." if len(str(trace.get("input", ""))) > 50 else trace.get("input", ""),
-                        )
-                    
-                    # Store traces and collect emails
-                    for trace in traces:
-                        metadata = trace.get("metadata", {})
-                        user_email = metadata.get("user_email")
-                        if user_email:
-                            user_email_str = str(user_email) if isinstance(user_email, list) else user_email
-                            normalized_email = user_email_str.lower().strip()
-                            if normalized_email:
-                                all_emails_set.add(normalized_email)
-                        traces_data.append(trace)
+                    traces_added = process_trace_batch(
+                        traces,
+                        email_to_team_map,
+                        get_team_by_member_email,
+                        teams_data,
+                        start_time=start_time,
+                        end_time=end_time,
+                        stats=trace_stats,
+                    )
+                    logger.debug(
+                        "[LANGFUSE ANALYTICS] Page %s: Processed %s traces into teams",
+                        page,
+                        traces_added,
+                    )
                     
                     if len(traces) < batch_limit:
                         logger.info(f"[LANGFUSE ANALYTICS] Last page reached (received {len(traces)} < {batch_limit} traces)")
@@ -7374,90 +7810,17 @@ async def get_teams_analytics_summary(
                     logger.error(f"[LANGFUSE ANALYTICS] Traceback: {traceback.format_exc()}")
                     break
             
-            # Batch fetch all user profiles at once
-            logger.info(f"[LANGFUSE ANALYTICS] Batch fetching profiles for {len(all_emails_set)} unique users")
-            user_profiles_cache = {}
-            
-            if all_emails_set:
-                try:
-                    await mongodb_memory.connect()
-                    user_activity_collection = mongodb_memory.database["user_activity"]
-                    
-                    # Fetch all profiles in a single query using $in
-                    profiles_cursor = user_activity_collection.find(
-                        {"user_id": {"$in": list(all_emails_set)}},
-                        {
-                            "user_id": 1,
-                            "user_email": 1,
-                            "team_name": 1
-                        }
-                    )
-                    
-                    async for profile_doc in profiles_cursor:
-                        user_id = profile_doc.get("user_id", "").lower()
-                        if user_id:
-                            user_profiles_cache[user_id] = profile_doc.get("team_name")
-                    
-                    logger.info(f"[LANGFUSE ANALYTICS] Loaded {len(user_profiles_cache)} user profiles from cache")
-                except Exception as e:
-                    logger.warning(f"[LANGFUSE ANALYTICS] Error batch fetching profiles: {e}, falling back to individual lookups")
-                    user_profiles_cache = {}
-            
-            # Second pass: Process traces with cached profiles
-            logger.info(f"[LANGFUSE ANALYTICS] Processing {len(traces_data)} traces with cached profiles")
-            
-            for trace in traces_data:
-                metadata = trace.get("metadata", {})
-                user_email = metadata.get("user_email")
-                question = trace.get("input", "")
-                
-                if user_email:
-                    user_email_str = str(user_email) if isinstance(user_email, list) else user_email
-                    normalized_email = user_email_str.lower().strip()
-                    if not normalized_email:
-                        traces_without_email += 1
-                        continue
-                    
-                    traces_with_email += 1
-                    
-                    # Get team from cache first
-                    team_name = user_profiles_cache.get(normalized_email)
-                    
-                    # Fallback to email matching if no profile team found
-                    if not team_name:
-                        team_name = get_team_by_member_email(normalized_email)
-                        if team_name and team_name != "Unassigned":
-                            logger.debug(f"[ANALYTICS] User {normalized_email} assigned to team via email matching: {team_name}")
-                    
-                    # If still no team, assign to "Unassigned"
-                    if not team_name:
-                        team_name = "Unassigned"
-                        
-                    if team_name in teams_data:
-                        teams_data[team_name]["active_members"].add(normalized_email)
-                        
-                        # Count ALL traces with user_email, even if question is empty
-                        teams_data[team_name]["total_questions"] += 1
-                        
-                        # Only add to questions_list if question exists (to avoid empty strings)
-                        if question:
-                            teams_data[team_name]["questions_list"].append(str(question))
-                else:
-                    traces_without_email += 1
-            
-            logger.info(f"[LANGFUSE ANALYTICS] Traces with user_email: {traces_with_email}, Traces without user_email: {traces_without_email}")
+            logger.info(
+                "[LANGFUSE ANALYTICS] Traces processed: %s filtered, %s missing email, %s out of range",
+                trace_stats.traces_filtered,
+                trace_stats.traces_without_email,
+                trace_stats.traces_out_of_date_range,
+            )
         
         # Calculate unique questions and top questions per team
         team_stats = []
         for team_name, team_info in teams_data.items():
-            try:
-                unique_questions = len(set(team_info["questions_list"]))
-                question_counter = Counter(team_info["questions_list"])
-                top_questions = question_counter.most_common(5)
-            except:
-                unique_questions = 0
-                top_questions = []
-            
+            question_metrics = calculate_question_metrics(team_info["questions_list"])
             team_stats.append({
                 "team_name": team_name,
                 "lead": team_info["lead"],
@@ -7466,10 +7829,8 @@ async def get_teams_analytics_summary(
                 "active_members_count": len(team_info["active_members"]),
                 "color": team_info["color"],
                 "total_questions": team_info["total_questions"],
-                "unique_questions": unique_questions,
-                "top_questions": [
-                    {"question": q[0], "count": q[1]} for q in top_questions
-                ]
+                "unique_questions": question_metrics["unique_count"],
+                "top_questions": question_metrics["top_questions"],
             })
         
         # Sort by total questions (descending)
@@ -7482,7 +7843,6 @@ async def get_teams_analytics_summary(
         logger.info(f"[LANGFUSE ANALYTICS] ===== Teams Summary Results =====")
         logger.info(f"[LANGFUSE ANALYTICS] Total pages fetched: {total_pages_fetched}")
         logger.info(f"[LANGFUSE ANALYTICS] Total traces fetched: {total_traces_fetched}")
-        logger.info(f"[LANGFUSE ANALYTICS] Total traces with user_email: {traces_with_email}")
         logger.info(f"[LANGFUSE ANALYTICS] Total teams: {len(team_stats)}")
         logger.info(f"[LANGFUSE ANALYTICS] Active teams (with traces): {total_active_teams}")
         logger.info(f"[LANGFUSE ANALYTICS] Total traces across all teams: {total_questions}")
@@ -7522,7 +7882,12 @@ async def get_team_details(
     try:
         from app.langfuse_integration import langfuse_client
         from config import LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST
-        from app.models.teams import get_team_by_name, get_all_team_members_emails
+        from app.models.teams import (
+            get_all_email_to_team_mapping,
+            get_all_team_members_emails,
+            get_team_by_name,
+        )
+        from app.trace_utils import get_trace_email, validate_and_parse_trace_date
         import asyncio
         from datetime import datetime, timezone, timedelta, timezone
         
@@ -7589,6 +7954,7 @@ async def get_team_details(
         # Get all team member emails
         all_team_members_emails = get_all_team_members_emails()
         team_emails = [e.lower() for e in all_team_members_emails.get(team_name, [])]
+        email_to_team_map = get_all_email_to_team_mapping()
         
         # Initialize stats for all team members
         for member in team_info.get("members", []):
@@ -7615,6 +7981,7 @@ async def get_team_details(
         page = 1
         batch_limit = 100
         max_pages = 10 if time_filter != "all" else 20
+        team_questions = []
         
         logger.info(f"[LANGFUSE ANALYTICS] Pagination: max_pages={max_pages}, batch_limit={batch_limit}")
         logger.info(f"[LANGFUSE ANALYTICS] Team member emails to filter: {len(team_emails)}")
@@ -7679,18 +8046,39 @@ async def get_team_details(
                 
                     # Process traces
                     for trace in traces:
-                        metadata = trace.get("metadata", {})
-                        user_email = metadata.get("user_email")
-                        question = trace.get("input", "")
-                        
-                        if user_email:
-                            user_email_str = str(user_email).lower() if isinstance(user_email, list) else str(user_email).lower()
-                            
-                            # Check if this user is in the team
-                            if user_email_str in member_stats:
-                                if question:
-                                    member_stats[user_email_str]["total_questions"] += 1
-                                    member_stats[user_email_str]["questions"].append(str(question))
+                        _, within_range = validate_and_parse_trace_date(
+                            trace.get("createdAt"), start_time, end_time
+                        )
+                        if not within_range:
+                            continue
+
+                        user_email = get_trace_email(trace)
+                        if not user_email:
+                            continue
+
+                        if email_to_team_map.get(user_email) != team_name:
+                            continue
+
+                        question_raw = trace.get("input", "")
+                        if isinstance(question_raw, list):
+                            question = " ".join(str(q).strip() for q in question_raw if q)
+                        else:
+                            question = str(question_raw).strip() if question_raw else ""
+
+                        if not question:
+                            continue
+
+                        if user_email not in member_stats:
+                            member_stats[user_email] = {
+                                "name": None,
+                                "email": user_email,
+                                "total_questions": 0,
+                                "questions": [],
+                            }
+
+                        member_stats[user_email]["total_questions"] += 1
+                        member_stats[user_email]["questions"].append(question)
+                        team_questions.append(question)
                     
                     if len(traces) < batch_limit:
                         logger.info(f"[LANGFUSE ANALYTICS] Last page reached (received {len(traces)} < {batch_limit} traces)")
@@ -7727,6 +8115,7 @@ async def get_team_details(
         
         active_members = sum(1 for m in members_list if m["total_questions"] > 0)
         team_total_questions = sum(m["total_questions"] for m in members_list)
+        team_unique_questions = len(set(team_questions)) if team_questions else 0
         
         # Log summary
         logger.info(f"[LANGFUSE ANALYTICS] ===== Team Details Results =====")
@@ -7749,7 +8138,7 @@ async def get_team_details(
             "total_members": len(members_list),
             "active_members": active_members,
             "team_total_questions": team_total_questions,
-            "team_unique_questions": len(set(q for m in members_list for q in m.get("questions", [])))
+            "team_unique_questions": team_unique_questions
         }
         
     except Exception as e:
@@ -9462,259 +9851,339 @@ async def microsoft_oauth_callback(
 #         ... (entire duplicate function body removed - using endpoint at line 3482 instead)
 
 
-@router.get("/analytics/langfuse/teams/details")
-async def get_langfuse_team_details(
-    team_name: str = Query(..., description="Team name"),
-    start_date: str = Query(None, description="Start date in YYYY-MM-DD format"),
-    end_date: str = Query(None, description="End date in YYYY-MM-DD format"),
-    time_filter: str = Query(None, description="(Legacy) Filter by time: today, yesterday, this_week, last_week, all"),
-    current_user: dict = Depends(require_restricted_admin)
+# ============================================================================
+# CLOUD API RESEARCH ENDPOINTS
+# ============================================================================
+
+class CloudResearchRequest(BaseModel):
+    """Request model for cloud API research"""
+    cloud_name: str
+    force_refresh: bool = False
+
+
+@router.post("/api/cloud-research/query")
+async def research_cloud_api_endpoint(
+    request: CloudResearchRequest,
+    user_info: dict = Depends(verify_user_access)
 ):
     """
-    Get detailed analytics for a specific team including all members and their stats.
-    Supports both date range (start_date/end_date) and preset filters (time_filter).
+    Research cloud API and return comprehensive documentation.
+    
+    Args:
+        request: Cloud research request with cloud name
+        user_info: Authenticated user information
+        
+    Returns:
+        Complete API research results
     """
     try:
-        from app.langfuse_integration import langfuse_client
-        from app.models.teams import TEAMS, get_team_for_member
-        from datetime import timedelta
+        from config import ENABLE_CLOUD_API_RESEARCH
         
-        if not langfuse_client:
-            return {"error": "Langfuse client not initialized", "status": "error"}
+        if not ENABLE_CLOUD_API_RESEARCH:
+            raise HTTPException(
+                status_code=503,
+                detail="Cloud API research feature is currently disabled"
+            )
         
-        # Validate team exists
-        if team_name not in TEAMS:
-            return {"status": "error", "error": "Team not found"}
+        cloud_name = request.cloud_name.strip()
+        user_email = user_info.get("email", "unknown")
         
-        # Calculate time range
-        start_time = None
-        end_time = datetime.utcnow()
-        max_pages = 30
-        request_timeout = 60.0
+        logger.info(f"[CLOUD RESEARCH] User {user_email} requesting research for {cloud_name}")
         
-        # Use custom date range if provided
-        if start_date and end_date:
-            try:
-                start_time = datetime.strptime(start_date, "%Y-%m-%d").replace(hour=0, minute=0, second=0, microsecond=0)
-                end_time = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59, microsecond=999999)
-                
-                # Adjust page limits based on date range width
-                date_diff = (end_time - start_time).days
-                if date_diff <= 1:
-                    max_pages = 10
-                    request_timeout = 30.0
-                elif date_diff <= 7:
-                    max_pages = 15
-                    request_timeout = 45.0
-                elif date_diff <= 30:
-                    max_pages = 20
-                    request_timeout = 60.0
-            except ValueError:
-                return {"error": "Invalid date format. Use YYYY-MM-DD", "status": "error"}
+        # Import here to avoid circular dependencies
+        from app.cloud_api_researcher import research_cloud_api
+        from app.llm_factory import get_llm
         
-        # Fallback to legacy time_filter
-        elif time_filter == "today":
-            start_time = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-            max_pages = 10
-            request_timeout = 30.0
-        elif time_filter == "yesterday":
-            start_time = (datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0) - 
-                         timedelta(days=1))
-            end_time = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-            max_pages = 10
-            request_timeout = 30.0
-        elif time_filter == "this_week":
-            start_time = datetime.utcnow() - timedelta(days=datetime.utcnow().weekday())
-            start_time = start_time.replace(hour=0, minute=0, second=0, microsecond=0)
-            max_pages = 15
-            request_timeout = 45.0
-        elif time_filter == "last_week":
-            utc_now = datetime.utcnow()
-            days_since_monday = utc_now.weekday()
-            last_monday = utc_now - timedelta(days=days_since_monday + 7)
-            start_time = last_monday.replace(hour=0, minute=0, second=0, microsecond=0)
-            max_pages = 20
-            request_timeout = 45.0
-        elif time_filter == "last_7_days":
-            start_time = datetime.utcnow() - timedelta(days=7)
-            max_pages = 20
-            request_timeout = 45.0
+        # Get LLM for intelligent normalization
+        llm = get_llm()
         
-        # Initialize member data structure
-        members_data = {}
-        team_info = TEAMS[team_name]
-        
-        for member_name in team_info.get("Members", []):
-            members_data[member_name.lower()] = {
-                "name": member_name,
-                "email": "",
-                "is_lead": False,
-                "total_questions": 0,
-                "questions_list": [],
-                "top_questions": []
-            }
-        
-        # Add lead
-        lead_name = team_info.get("Lead")
-        if lead_name:
-            members_data[lead_name.lower()] = {
-                "name": lead_name,
-                "email": "",
-                "is_lead": True,
-                "total_questions": 0,
-                "questions_list": [],
-                "top_questions": []
-            }
-        
-        team_total_questions = 0
-        all_team_questions = []
-        
-        # Fetch traces
-        page = 1
-        batch_limit = 100
-        
-        async with httpx.AsyncClient() as client:
-            from config import LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST
-            
-            while page <= max_pages:
-                try:
-                    params = {
-                        "page": page,
-                        "limit": batch_limit,
-                        "orderBy[createdAt]": "DESC"
-                    }
-                    if start_time:
-                        params["createdAt[gte]"] = start_time.isoformat() + "Z"
-                    if end_time:
-                        params["createdAt[lte]"] = end_time.isoformat() + "Z"
-                    
-                    response = await client.get(
-                        f"{LANGFUSE_HOST}/api/public/traces",
-                        params=params,
-                        auth=(LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY),
-                        timeout=request_timeout
-                    )
-                    
-                    if response.status_code == 429:
-                        break
-                    
-                    response.raise_for_status()
-                    
-                    traces_response = response.json()
-                    traces = traces_response.get("data", [])
-                    
-                    if not traces:
-                        break
-                    
-                    for trace in traces:
-                        try:
-                            metadata = trace.get("metadata", {})
-                            question = trace.get("input", "")
-                            user_email = str(metadata.get("user_email", ""))
-                            user_name = str(metadata.get("user_name", "Unknown"))
-                            
-                            # Check if this trace belongs to current team using email
-                            trace_team = None
-                            matching_member = None
-                            
-                            if user_email and user_email != "":
-                                # Try to find the member by email prefix match
-                                email_lower = user_email.lower()
-                                for member_lower in members_data.keys():
-                                    # Try to match: email starts with member name (with dots replacing spaces)
-                                    member_pattern = member_lower.replace(" ", ".")
-                                    if email_lower.startswith(member_pattern):
-                                        trace_team = team_name
-                                        matching_member = member_lower
-                                        break
-                            
-                            # Fallback to name matching if email didn't match
-                            if not trace_team and user_name and user_name != "Unknown":
-                                user_name_lower = user_name.lower()
-                                if user_name_lower in members_data:
-                                    trace_team = team_name
-                                    matching_member = user_name_lower
-                            
-                            if trace_team and matching_member and question:
-                                team_total_questions += 1
-                                all_team_questions.append(question)
-                                
-                                member_info = members_data[matching_member]
-                                member_info["total_questions"] += 1
-                                member_info["questions_list"].append(question)
-                                member_info["email"] = user_email
-                        except Exception as trace_err:
-                            print(f"[WARN] Error processing trace in team details: {trace_err}")
-                            continue
-                    
-                    if len(traces) < batch_limit:
-                        break
-                    
-                    page += 1
-                    await asyncio.sleep(0.5)
-                    
-                except Exception as e:
-                    print(f"[ERROR] Error fetching team details: {e}")
-                    break
-        
-        # Process members and calculate top questions
-        members_list = []
-        active_count = 0
-        
-        for member_lower, member_data in members_data.items():
-            if member_data["total_questions"] > 0:
-                active_count += 1
-                
-                # Get top questions for member
-                question_counts = Counter(member_data["questions_list"])
-                top_questions = question_counts.most_common(3)
-                member_data["top_questions"] = [
-                    {"question": q, "count": c} for q, c in top_questions
-                ]
-            
-            del member_data["questions_list"]
-            members_list.append(member_data)
-        
-        # Sort members by questions descending
-        members_list.sort(key=lambda x: x["total_questions"], reverse=True)
-        
-        # Calculate unique questions
-        unique_questions = len(set(all_team_questions)) if all_team_questions else 0
+        # Perform research
+        results = research_cloud_api(
+            cloud_name=cloud_name,
+            user_email=user_email,
+            force_refresh=request.force_refresh,
+            llm=llm
+        )
         
         return {
             "status": "success",
-            "team_name": team_name,
-            "lead": lead_name or "N/A",
-            "lead_email": members_data.get(lead_name.lower(), {}).get("email", "") if lead_name else "",
-            "color": get_team_color(team_name),
-            "time_filter": time_filter,
-            "members": members_list,
-            "total_members": len(team_info.get("Members", [])) + (1 if lead_name else 0),
-            "active_members": active_count,
-            "team_total_questions": team_total_questions,
-            "team_unique_questions": unique_questions
+            "data": results
         }
         
     except Exception as e:
-        print(f"[ERROR] Team details fetch failed: {e}")
+        logger.error(f"[ERROR] Cloud research failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/cloud-research/{cloud_name}")
+async def get_cached_research(
+    cloud_name: str,
+    user_info: dict = Depends(verify_user_access)
+):
+    """
+    Get cached cloud API research results.
+    
+    Args:
+        cloud_name: Name of the cloud
+        user_info: Authenticated user information
+        
+    Returns:
+        Cached research results or 404 if not found
+    """
+    try:
+        from app.models.cloud_research import get_cloud_research
+        
+        results = get_cloud_research(cloud_name)
+        
+        if not results:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No research found for {cloud_name}"
+            )
+        
         return {
-            "status": "error",
-            "error": str(e)
+            "status": "success",
+            "data": results
         }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[ERROR] Failed to get cached research: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-def get_team_color(team_name: str) -> str:
-    """Get the color hex code for a team."""
-    colors = {
-        "Content": "#3B82F6",  # Blue
-        "Messaging & Email": "#10B981",  # Green
-        "CF Manage": "#F59E0B",  # Amber
-        "QA": "#EF4444",  # Red
-        "Neutara Labs": "#8B5CF6",  # Purple
-        "Infra": "#EC4899",  # Pink
-        "Pre-Sales": "#06B6D4",  # Cyan
-        "Sales Ops": "#14B8A6"  # Teal
-    }
-    return colors.get(team_name, "#6B7280")  # Gray fallback
+@router.get("/api/cloud-research/list")
+async def list_researched_clouds_endpoint(
+    limit: int = Query(100, ge=1, le=500),
+    user_info: dict = Depends(verify_user_access)
+):
+    """
+    List all researched clouds.
+    
+    Args:
+        limit: Maximum number of results
+        user_info: Authenticated user information
+        
+    Returns:
+        List of researched clouds with basic info
+    """
+    try:
+        from app.models.cloud_research import list_researched_clouds
+        
+        clouds = list_researched_clouds(limit)
+        
+        return {
+            "status": "success",
+            "count": len(clouds),
+            "data": clouds
+        }
+        
+    except Exception as e:
+        logger.error(f"[ERROR] Failed to list clouds: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/cloud-research/refresh/{cloud_name}")
+async def refresh_cloud_research(
+    cloud_name: str,
+    user_info: dict = Depends(verify_user_access)
+):
+    """
+    Force refresh cloud API research (ignores cache).
+    
+    Args:
+        cloud_name: Name of the cloud
+        user_info: Authenticated user information
+        
+    Returns:
+        Fresh research results
+    """
+    try:
+        from app.cloud_api_researcher import research_cloud_api
+        from app.llm_factory import get_llm
+        
+        user_email = user_info.get("email", "unknown")
+        logger.info(f"[REFRESH] User {user_email} forcing refresh for {cloud_name}")
+        
+        llm = get_llm()
+        
+        results = research_cloud_api(
+            cloud_name=cloud_name,
+            user_email=user_email,
+            force_refresh=True,  # Always force refresh
+            llm=llm
+        )
+        
+        return {
+            "status": "success",
+            "data": results
+        }
+        
+    except Exception as e:
+        logger.error(f"[ERROR] Refresh failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/cloud-research/{cloud_name}/download")
+async def download_cloud_blueprint(
+    cloud_name: str,
+    user_info: dict = Depends(verify_user_access)
+):
+    """
+    Download JSON blueprint for a cloud.
+    
+    Args:
+        cloud_name: Name of the cloud
+        user_info: Authenticated user information
+        
+    Returns:
+        JSON file download
+    """
+    try:
+        from app.models.cloud_research import get_cloud_research
+        from fastapi.responses import Response
+        import json
+        
+        results = get_cloud_research(cloud_name)
+        
+        if not results:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No research found for {cloud_name}"
+            )
+        
+        # Generate JSON
+        json_data = json.dumps(results, indent=2, ensure_ascii=False)
+        
+        # Return as downloadable file
+        filename = f"{cloud_name.lower().replace(' ', '_')}_api_blueprint.json"
+        
+        return Response(
+            content=json_data,
+            media_type="application/json",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"'
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[ERROR] Download failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/cloud-research/statistics")
+async def get_research_statistics_endpoint(
+    user_info: dict = Depends(verify_user_access)
+):
+    """
+    Get overall cloud research statistics.
+    
+    Args:
+        user_info: Authenticated user information
+        
+    Returns:
+        Statistics about researched clouds
+    """
+    try:
+        from app.models.cloud_research import get_research_statistics
+        
+        stats = get_research_statistics()
+        
+        return {
+            "status": "success",
+            "data": stats
+        }
+        
+    except Exception as e:
+        logger.error(f"[ERROR] Failed to get statistics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/user/api-research/access")
+async def check_api_research_access(
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Check if user can access Cloud API Research feature.
+    
+    Returns:
+        can_access: bool - Whether user has permission
+        enabled: bool - Whether user has it enabled
+    """
+    try:
+        from app.auth import can_access_api_research
+        from app.mongodb_memory import get_api_research_preference
+        
+        user_email = current_user.get("email")
+        
+        # Check if user has access
+        can_access = can_access_api_research(user_email)
+        
+        # Check if user has it enabled
+        enabled = False
+        if can_access:
+            enabled = await get_api_research_preference(user_email)
+        
+        return {
+            "status": "success",
+            "can_access": can_access,
+            "enabled": enabled
+        }
+        
+    except Exception as e:
+        logger.error(f"[ERROR] Failed to check API research access: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/user/api-research/toggle")
+async def toggle_api_research(
+    request: Request,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Toggle Cloud API Research feature for current user.
+    
+    Body:
+        enabled: bool
+    """
+    try:
+        from app.auth import can_access_api_research
+        from app.mongodb_memory import update_api_research_preference
+        
+        user_email = current_user.get("email")
+        
+        # Check if user has access to this feature
+        if not can_access_api_research(user_email):
+            raise HTTPException(
+                status_code=403,
+                detail="You don't have access to Cloud API Research feature"
+            )
+        
+        data = await request.json()
+        enabled = data.get("enabled", False)
+        
+        # Update preference
+        success = await update_api_research_preference(user_email, enabled)
+        
+        if not success:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to update preference"
+            )
+        
+        return {
+            "status": "success",
+            "enabled": enabled,
+            "message": f"Cloud API Research {'enabled' if enabled else 'disabled'}"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[ERROR] Failed to toggle API research: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -1,0 +1,124 @@
+name: Deploy to Production Server
+
+# Trigger on push to before-agentic-rag branch
+on:
+  push:
+    branches:
+      - before-agentic-rag
+
+jobs:
+  deploy:
+    name: Deploy to ai.cloudfuze.com
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Deploy to server via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          port: 22
+          script: |
+            echo "========================================="
+            echo "Starting deployment to ai.cloudfuze.com"
+            echo "========================================="
+            
+            # Navigate to project directory
+            cd /opt/chatbot
+            
+            # Fix git permissions if needed
+            sudo chown -R $USER:$USER .git || true
+            
+            # Pull latest code
+            echo "Pulling latest code..."
+            git pull origin before-agentic-rag
+            
+            # Detect docker compose command
+            if docker compose version &> /dev/null; then
+                COMPOSE_CMD='docker compose'
+            else
+                COMPOSE_CMD='docker-compose'
+            fi
+            
+            # Smart disk space management
+            echo "========================================="
+            echo "Checking disk space..."
+            echo "========================================="
+            
+            # Check disk usage percentage
+            DISK_USAGE=$(df / | tail -1 | awk '{print $5}' | sed 's/%//')
+            echo "Current disk usage: ${DISK_USAGE}%"
+            df -h / || true
+            
+            # Only clean up if disk usage > 80%
+            if [ "$DISK_USAGE" -gt 80 ]; then
+                echo "Disk usage high (${DISK_USAGE}%), cleaning up..."
+                
+                # Remove old backup directories (keep only last 2)
+                echo "Cleaning old backup directories..."
+                ls -dt data_backup_* 2>/dev/null | tail -n +3 | xargs rm -rf 2>/dev/null || true
+                
+                # Remove only dangling/unused images (keep build cache!)
+                echo "Removing dangling images..."
+                docker image prune -af || true
+                
+                # Only prune build cache if still > 85%
+                if [ "$DISK_USAGE" -gt 85 ]; then
+                    echo "Disk usage very high, pruning build cache..."
+                    docker builder prune -af || true
+                fi
+            else
+                echo "Disk usage OK (${DISK_USAGE}%), skipping cleanup to preserve build cache"
+            fi
+            
+            # Stop services
+            echo "Stopping services..."
+            $COMPOSE_CMD -f docker-compose.ai.yml down
+            
+            # Use --build flag which only rebuilds changed layers (Docker layer caching!)
+            echo "Building and starting services (with smart rebuild)..."
+            $COMPOSE_CMD -f docker-compose.ai.yml --env-file .env.ai up -d --build
+            
+            # Wait for services to start
+            echo "Waiting for services to start..."
+            sleep 30
+            
+            # Check service status
+            echo "========================================="
+            echo "Service Status"
+            echo "========================================="
+            $COMPOSE_CMD -f docker-compose.ai.yml ps
+            
+            # Health checks
+            echo ""
+            echo "========================================="
+            echo "Health Checks"
+            echo "========================================="
+            
+            # Check backend health
+            echo "Backend Health:"
+            docker exec slack2teams-backend-ai curl -s http://localhost:8002/health || echo "Backend not ready yet"
+            
+            # Check nginx
+            echo ""
+            echo "Nginx Config:"
+            docker exec slack2teams-nginx-ai nginx -t
+            
+            echo ""
+            echo "========================================="
+            echo "Deployment Complete!"
+            echo "========================================="
+      
+      - name: Notify on success
+        if: success()
+        run: |
+          echo "✅ Deployment successful to ai.cloudfuze.com"
+      
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "❌ Deployment failed to ai.cloudfuze.com"

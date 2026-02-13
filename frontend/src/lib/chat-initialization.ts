@@ -221,6 +221,9 @@ export function initializeChatApp(options: InitOptions = {}) {
   // Track if we're in read-only mode (viewing others' chats)
   let isReadOnlyMode = false;
   
+  // Guard flag to prevent multiple simultaneous executions of continueInThisThread
+  let isContinuingThread = false;
+  
   // Initialize or create session (only auto-create if not provided explicitly)
   // Don't navigate immediately - wait for first message
   if (!initialSessionId) {
@@ -845,7 +848,14 @@ export function initializeChatApp(options: InitOptions = {}) {
   
   // Continue in this thread - copy others' chat to user's own chats
   function continueInThisThread() {
+    // Guard: Prevent multiple simultaneous executions
+    if (isContinuingThread) {
+      console.log('[CONTINUE] Already processing, ignoring duplicate request');
+      return;
+    }
+    
     try {
+      isContinuingThread = true; // Set guard flag
       console.log('[CONTINUE] Starting continue in thread functionality');
       
       // Get current messages from the DOM
@@ -907,18 +917,51 @@ export function initializeChatApp(options: InitOptions = {}) {
       if (messages.length === 0) {
         console.error('[CONTINUE] No messages found to copy');
         showToast('No messages to copy', 'error', 3000);
+        isContinuingThread = false; // Clear guard flag
         return;
       }
-      
-      // Create new session ID
-      const newSessionId = createNewSession();
-      console.log('[CONTINUE] Created new session ID:', newSessionId);
       
       // Get the title from the current session (use first user message if no title)
       const firstUserMessage = messages.find(m => m.role === 'user');
       const sessionTitle = firstUserMessage 
         ? firstUserMessage.content.substring(0, 50) + (firstUserMessage.content.length > 50 ? '...' : '')
         : 'Copied Chat';
+      
+      // Check if a session with the same title already exists
+      const sessions = getAllSessions();
+      
+      // 🔒 CRITICAL FIX: Defensive check before unshift
+      if (!Array.isArray(sessions)) {
+        console.error('[SESSION] Sessions is not an array:', sessions);
+        isContinuingThread = false; // Clear guard flag
+        return;
+      }
+      
+      // Check for duplicate session with same title and message count
+      const existingSession = sessions.find(s => 
+        s.title === sessionTitle && 
+        s.messages && 
+        s.messages.length === messages.length
+      );
+      
+      if (existingSession) {
+        console.log('[CONTINUE] Session with same title already exists, navigating to:', existingSession.id);
+        isContinuingThread = false; // Clear guard flag
+        isReadOnlyMode = false;
+        
+        // Navigate to existing session instead of creating new one
+        if (router) {
+          router.push(`/chat/${existingSession.id}`);
+        } else {
+          loadSession(existingSession, false);
+          showToast('Chat already exists, opening existing session.', 'success', 4000);
+        }
+        return;
+      }
+      
+      // Create new session ID
+      const newSessionId = createNewSession();
+      console.log('[CONTINUE] Created new session ID:', newSessionId);
       
       // Create new session object
       const now = Date.now();
@@ -929,15 +972,6 @@ export function initializeChatApp(options: InitOptions = {}) {
         createdAt: now,
         messages: messages
       };
-      
-      // Save to localStorage
-      const sessions = getAllSessions();
-      
-      // 🔒 CRITICAL FIX: Defensive check before unshift
-      if (!Array.isArray(sessions)) {
-        console.error('[SESSION] Sessions is not an array:', sessions);
-        return;
-      }
       
       sessions.unshift(newSession);
       
@@ -967,6 +1001,8 @@ export function initializeChatApp(options: InitOptions = {}) {
     } catch (error) {
       console.error('[CONTINUE] Failed to continue in thread:', error);
       showToast('Failed to copy chat. Please try again.', 'error', 4000);
+    } finally {
+      isContinuingThread = false; // Always clear guard flag
     }
   }
   
@@ -1162,22 +1198,90 @@ export function initializeChatApp(options: InitOptions = {}) {
     `;
   }
   
+  // Convert Jira REST API URLs to browse URLs and validate Jira URLs
+  function convertJiraApiUrlToBrowseUrl(url: string): string {
+    if (!url || typeof url !== 'string') return url;
+    
+    // Match Jira REST API URLs: https://[server]/rest/api/3/issue/[TICKET-KEY]?[query]#[fragment]
+    // Example: https://cf2020.atlassian.net/rest/api/3/issue/PRI-9802?utm_source=ai.cloudfuze.com
+    const apiUrlPattern = /(https?:\/\/[^\/]+)\/rest\/api\/\d+\/issue\/([A-Z]+-\d+)([?#].*)?$/i;
+    const match = url.match(apiUrlPattern);
+    
+    if (match) {
+      const server = match[1];
+      const ticketKey = match[2];
+      const queryAndFragment = match[3] || '';
+      // Convert to browse URL format: https://[server]/browse/[TICKET-KEY]?[query]#[fragment]
+      // Preserve query parameters and fragments (like UTM parameters)
+      return `${server}/browse/${ticketKey}${queryAndFragment}`;
+    }
+    
+    // Validate that Jira URLs are correct format - if it's supposed to be a Jira URL but isn't, try to fix it
+    // Check if URL contains a ticket key pattern (PRI-XXXX, CF-XXXX, etc.) but wrong domain
+    const ticketKeyPattern = /([A-Z]+-\d+)/i;
+    const ticketMatch = url.match(ticketKeyPattern);
+    
+    if (ticketMatch) {
+      const ticketKey = ticketMatch[1];
+      // If URL contains a ticket key but doesn't look like a Jira URL, it might be wrong
+      // Check if it's a CloudFuze website URL or other incorrect domain
+      if (url.includes('cloudfuze.com') && !url.includes('atlassian.net') && !url.includes('/browse/')) {
+        // This is likely an incorrect URL - try to construct correct Jira URL
+        // Default Jira server (can be made configurable if needed)
+        const jiraServer = 'https://cf2020.atlassian.net';
+        return `${jiraServer}/browse/${ticketKey}`;
+      }
+    }
+    
+    return url;
+  }
+
   // Add UTM parameter to URLs for tracking
   function addUtmParameter(url: string): string {
     if (!url || typeof url !== 'string') return url;
     
+    // First, convert any Jira REST API URLs to browse URLs
+    url = convertJiraApiUrlToBrowseUrl(url);
+    
     // Skip if URL already has utm_source parameter
     if (url.includes('utm_source=')) return url;
+    
+    // Only process absolute URLs (http:// or https://)
+    // Skip relative URLs (they should not get UTM parameters and shouldn't be modified)
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      return url; // Return relative URLs as-is (don't corrupt them)
+    }
     
     try {
       const urlObj = new URL(url);
       urlObj.searchParams.set('utm_source', 'ai.cloudfuze.com');
       return urlObj.toString();
     } catch {
-      // If URL parsing fails, try simple string append
-      const separator = url.includes('?') ? '&' : '?';
-      return `${url}${separator}utm_source=ai.cloudfuze.com`;
+      // If URL parsing fails, return as-is (don't corrupt it)
+      return url;
     }
+  }
+
+  // Validate and fix Jira ticket links
+  function validateJiraLink(linkText: string, url: string): string {
+    if (!url || !linkText) return url;
+    
+    // Check if link text contains a Jira ticket key (PRI-XXXX, CF-XXXX, etc.)
+    const ticketKeyPattern = /([A-Z]+-\d+)/i;
+    const ticketMatch = linkText.match(ticketKeyPattern);
+    
+    if (ticketMatch) {
+      const ticketKey = ticketMatch[1];
+      // If URL doesn't look like a valid Jira URL, fix it
+      // Check for common incorrect patterns: cloudfuze.com URLs, missing atlassian.net, missing /browse/
+      if (url.includes('cloudfuze.com') || (!url.includes('atlassian.net') && !url.includes('/browse/'))) {
+        // Construct correct Jira URL
+        const jiraServer = 'https://cf2020.atlassian.net';
+        return `${jiraServer}/browse/${ticketKey}`;
+      }
+    }
+    
+    return url;
   }
 
   // Convert plain text URLs and markdown links to clickable links, preserving HTML
@@ -1189,13 +1293,27 @@ export function initializeChatApp(options: InitOptions = {}) {
     
     if (hasHtmlTags) {
       // Text has HTML formatting (from renderMarkdown)
-      // First, add UTM to existing <a> tags
+      // First, add UTM to existing <a> tags and validate Jira links
+      processed = processed.replace(/<a\s+[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([^<]+)<\/a>/gi, (match, url, linkText) => {
+        // Skip if URL already has utm_source (already processed)
+        if (url.includes('utm_source=')) {
+          return match;
+        }
+        // Validate and fix Jira URLs based on link text
+        const validatedUrl = validateJiraLink(linkText, url);
+        // Add UTM parameter
+        const utmUrl = addUtmParameter(validatedUrl);
+        // Reconstruct the <a> tag with validated URL
+        return match.replace(/href\s*=\s*["'][^"']+["']/, `href="${utmUrl}"`);
+      });
+      
+      // Also handle href attributes that might not be in full <a> tags yet
       processed = processed.replace(/href\s*=\s*["']([^"']+)["']/gi, (match, url) => {
         // Skip if URL already has utm_source
         if (url.includes('utm_source=')) {
           return match;
         }
-        // Add UTM parameter
+        // Add UTM parameter (Jira validation happens in addUtmParameter via convertJiraApiUrlToBrowseUrl)
         const utmUrl = addUtmParameter(url);
         // Replace just the href value, keeping the quotes
         const quote = match.includes("'") ? "'" : '"';
@@ -1210,14 +1328,18 @@ export function initializeChatApp(options: InitOptions = {}) {
         if (beforeMatch.includes('<') && !beforeMatch.includes('>')) {
           return match; // Inside an HTML tag, don't convert
         }
-        const utmUrl = addUtmParameter(url);
+        // Validate and fix Jira URLs
+        const validatedUrl = validateJiraLink(linkText, url);
+        const utmUrl = addUtmParameter(validatedUrl);
         return `<a href="${utmUrl}" target="_blank" rel="noopener noreferrer" style="color: #0033CC; text-decoration: underline;">${linkText}</a>`;
       });
     } else {
       // Plain text - convert markdown and URLs to links
       // First handle markdown links [text](url)
       processed = processed.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, linkText, url) => {
-        const utmUrl = addUtmParameter(url);
+        // Validate and fix Jira URLs
+        const validatedUrl = validateJiraLink(linkText, url);
+        const utmUrl = addUtmParameter(validatedUrl);
         return `<a href="${utmUrl}" target="_blank" rel="noopener noreferrer" style="color: #0033CC; text-decoration: underline;">${linkText}</a>`;
       });
       

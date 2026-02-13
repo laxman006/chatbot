@@ -1,0 +1,207 @@
+﻿# Python cache and compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+env.bak/
+venv.bak/
+
+# Test files and test data
+test_*.py
+*_test.py
+tests/
+*.test.json
+*_test_results.json
+test_*.json
+
+# Log files
+*.log
+logs/
+
+# Cache directories
+.pytest_cache/
+.cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+.env.backup
+.env.ai
+
+# Build and distribution
+build/
+dist/
+*.egg-info/
+.eggs/
+wheels/
+*.whl
+
+# Node modules
+node_modules/
+.next/
+out/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+commits_temp.txt
+
+# Large data files and backups
+data/
+*.zip
+*.tar
+*.tar.gz
+langfuse_traces_backup/
+transcript_exports/
+Transcripts/
+
+# Migration and temporary documentation
+MIGRATION_*.md
+*_FIXES.md
+*_SUMMARY.md
+*_GUIDE.md
+*_REFERENCE.md
+*_COMPLETE*.md
+*_IMPLEMENTATION*.md
+CHANGES_*.md
+DEPLOYMENT_*.md
+JIRA_*.md
+RAG_*.md
+INTELLIGENT_*.md
+NGINX_*.md
+VERIFY_*.md
+QUICK_START.md
+CONVERSATIONAL_*.md
+DATA_SOURCES_*.md
+
+# Debug and check scripts
+check_*.py
+analyze_*.py
+fix_*.py
+delete_*.py
+force_*.py
+recover_*.py
+create_*.py
+build_*.py
+
+# JSON test data
+*.raw.json
+*_test.json
+*_comments_test.json
+jira_ticket_raw.json
+migration_kb_tickets_test.json
+multi_board_test_results.json
+
+# Frontend build artifacts
+frontend/.next/
+frontend/out/
+frontend/dist/
+frontend/build/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+*.db-shm
+*.db-wal
+
+# Coverage reports
+coverage/
+htmlcov/
+.coverage
+*.cover
+*.coveragerc
+
+# Deployment and infrastructure files
+deploy*.sh
+deploy*.bat
+*.sh
+*.bat
+*.ps1
+Dockerfile*
+docker-compose*.yml
+nginx*.conf
+*.conf
+
+# Documentation folders
+Context_Folder/
+testing_related_context/
+*.md
+
+# Scripts and data files
+scripts/*.csv
+scripts/*.xlsx
+scripts/*.json
+*.csv
+*.xlsx
+
+# Temporary Python files
+temp_*.py
+*_old.py
+*_backup.py
+
+# Analysis and routing files
+routing_log_analysis.json
+*_analysis.json
+*_log*.json
+
+# Backup files
+*.backup
+page.tsx.backup
+
+# Frontend backup images
+frontend/public/images/backup/
+
+# Environment example files
+*.example
+env.*.example
+
+# Server and service files
+server.py
+start_*.sh
+stop_*.sh
+restart_*.sh
+restart_*.bat
+run_*.sh
+run_*.bat
+setup_*.sh
+setup_*.bat
+enable-*.sh
+pre-*.sh
+quick-start.*
+
+# Additional temporary files
+--build-arg
+ROUTE_ARCHITECTURE_DIAGRAM.txt
+sync-data*.md
+sync-data*.ps1
+
+# Frontend additional artifacts
+frontend/.turbo/
+frontend/.vercel/
+*.tsbuildinfo

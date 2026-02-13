@@ -86,6 +86,28 @@ services:
       retries: 3
       start_period: 40s
 
+  # Weaviate vector database
+  weaviate:
+    image: semitechnologies/weaviate:latest
+    container_name: slack2teams-weaviate
+    ports:
+      - "8080:8080"
+      - "50051:50051"
+    environment:
+      - PERSISTENCE_DATA_PATH=/var/lib/weaviate
+      - DEFAULT_VECTORIZER_MODULE=none
+      - ENABLE_MODULES=text2vec-openai,text2vec-cohere,text2vec-huggingface,ref2vec-centroid,generative-openai,qna-openai
+      - CLUSTER_HOSTNAME=node1
+    volumes:
+      - weaviate_data:/var/lib/weaviate
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/v1/.well-known/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
   # Optional: Langfuse for observability (if you want to run it locally)
   langfuse:
     image: langfuse/langfuse:latest
@@ -119,3 +141,5 @@ services:
 volumes:
   postgres_data:
   mongodb_data:
+  weaviate_data:
+

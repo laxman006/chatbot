@@ -46,6 +46,7 @@ def format_docs(docs):
             jira_header = f"{tag_info}\n"
             jira_header += f"JIRA TICKET: {ticket_key}\n"
             if ticket_url:
+                # Make URL prominent - LLM should extract and use this exact URL for links
                 jira_header += f"Ticket URL: {ticket_url}\n"
             if status:
                 jira_header += f"Status: {status}\n"
@@ -76,8 +77,15 @@ def format_docs(docs):
         elif metadata.get("source_type") == "sharepoint":
             file_name = metadata.get('file_name', '')
             folder_path = metadata.get('folder_path', '')
+            file_url = metadata.get('file_url') or metadata.get('page_url') or metadata.get('webUrl', '')
+            sharepoint_header = f"{tag_info}\n"
             if file_name:
-                content = f"{tag_info}\nFile: {file_name}\nFolder: {folder_path}\n\n{content}"
+                sharepoint_header += f"File: {file_name}\n"
+            if folder_path:
+                sharepoint_header += f"Folder: {folder_path}\n"
+            if file_url:
+                sharepoint_header += f"File URL: {file_url}\n"
+            content = f"{sharepoint_header}\n{content}"
         elif metadata.get("source_type") == "outlook" or "email" in tag.lower():
             # Add email-specific context to help LLM understand email threads
             subject = metadata.get('conversation_topic') or metadata.get('subject', '')

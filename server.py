@@ -158,7 +158,12 @@ async def lifespan(app: FastAPI):
                 name='Weekly Team Leaderboard Report',
                 replace_existing=True
             )
+<<<<<<< HEAD
             logger.info(f"[STARTUP] ✅ Weekly report scheduler started (runs every Monday at {WEEKLY_REPORT_SEND_HOUR:02d}:{WEEKLY_REPORT_SEND_MINUTE:02d} {timezone_str})")
+=======
+            logger.info(f"[STARTUP] ✅ Weekly report scheduler started (runs every Monday at {WEEKLY_REPORT_SEND_HOUR:02d}:{WEEKLY_REPORT_SEND_MINUTE:02d})")
+            run_weekly_report_if_missed(WEEKLY_REPORT_SEND_HOUR, WEEKLY_REPORT_SEND_MINUTE)
+>>>>>>> de3dddcaa21a73eb710ead852c326d33c91c8b70
         else:
             logger.info("[STARTUP] Weekly report scheduler is disabled (WEEKLY_REPORT_ENABLED=false)")
     except Exception as e:

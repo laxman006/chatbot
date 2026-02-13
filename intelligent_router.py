@@ -10,6 +10,7 @@ from typing import Dict, List, Tuple, Optional
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.documents import Document
 import json
+import re
 from config import (
     ROUTING_TOTAL_BUDGET,
     ROUTING_MIN_CONFIDENCE,
@@ -72,6 +73,26 @@ class IntelligentQueryRouter:
                 "max_k": MAX_EXCEL_K
             }
         }
+    
+    def _is_who_is_question(self, query: str) -> bool:
+        """
+        Check if query is asking "who is" about a person.
+        
+        Args:
+            query: User query string
+            
+        Returns:
+            True if query matches "who is" pattern asking about a person
+        """
+        query_lower = query.lower().strip()
+        # Pattern: "who is" followed by a name/person identifier
+        # Handles variations like "who is", "who's", with optional punctuation/question marks
+        # Matches: "who is nirosh", "who's john", "who is nivas?", etc.
+        pattern = r'^who[\'s]?\s+is\s+\w+'
+        if re.match(pattern, query_lower):
+            print(f"[ROUTER] Detected 'who is' question: {query}")
+            return True
+        return False
     
     def route_query(self, query: str) -> Dict:
         """
@@ -145,7 +166,12 @@ Analyze the user query and determine:
 - Queries about changing/modifying files, configs, settings during migration need SharePoint + Jira (not blog)
 - If query mentions specific error messages or failures, prioritize Jira
 - Be generous with k values for internal sources - better to over-retrieve than return 0 results
-- **Blog should rarely get k > 5** - only when internal sources truly don't have the information
+- **Blog should rarely get k > 3** - only when internal sources truly don't have the information
+- **Default blog allocation should be k=0-2** - only allocate if query is clearly about marketing/public content
+
+**🚫 JIRA EXCLUSION PATTERNS:**
+Queries MUST NOT route to Jira (set relevance=0.0, k=0) if they are:
+- **"Who is" questions**: Queries asking "who is [name]" about a person - these are about people, not tickets. Use SharePoint or other internal docs instead.
 
 **🎯 JIRA-SPECIFIC PATTERNS (HIGH PRIORITY):**
 Queries MUST route primarily to Jira (relevance ≥ 0.8, k ≥ 25) if they contain:
@@ -220,7 +246,14 @@ Analyze this query and determine the optimal retrieval strategy. Consider:
             routing_plan = json.loads(result_text)
             
             # Validate and normalize
-            routing_plan = self._validate_routing_plan(routing_plan)
+            routing_plan = self._validate_routing_plan(routing_plan, query)
+            
+            # Exclude Jira for "who is" questions
+            if self._is_who_is_question(query):
+                if "jira" in routing_plan.get("sources", {}):
+                    routing_plan["sources"]["jira"]["k"] = 0
+                    routing_plan["sources"]["jira"]["relevance"] = 0.0
+                    routing_plan["sources"]["jira"]["reasoning"] = "Excluded - 'who is' questions don't need Jira tickets"
             
             # Log routing decision
             self._log_routing_decision(query, routing_plan)
@@ -232,9 +265,9 @@ Analyze this query and determine the optimal retrieval strategy. Consider:
             import traceback
             traceback.print_exc()
             # Fallback to balanced retrieval
-            return self._get_fallback_routing()
+            return self._get_fallback_routing(query)
     
-    def _validate_routing_plan(self, plan: Dict) -> Dict:
+    def _validate_routing_plan(self, plan: Dict, query: Optional[str] = None) -> Dict:
         """
         Validate and normalize routing plan.
         
@@ -267,29 +300,37 @@ Analyze this query and determine the optimal retrieval strategy. Consider:
         total_k = sum(src.get("k", 0) for src in sources.values())
         if total_k == 0:
             print("[ROUTER] No retrieval planned, using fallback")
-            return self._get_fallback_routing()
+            return self._get_fallback_routing(query)
         
         return plan
     
-    def _get_fallback_routing(self) -> Dict:
+    def _get_fallback_routing(self, query: Optional[str] = None) -> Dict:
         """
         Fallback routing when LLM fails.
         Returns balanced allocation across primary sources.
         Prioritizes internal sources over blog.
         """
-        return {
+        fallback = {
             "query_type": "general_info",
             "query_intent": "General query (fallback routing)",
             "sources": {
                 "sharepoint": {"relevance": 0.7, "k": 20, "reasoning": "Fallback - SharePoint is primary internal documentation source"},
                 "jira": {"relevance": 0.6, "k": 15, "reasoning": "Fallback - check for known issues and workarounds"},
                 "pdfs": {"relevance": 0.5, "k": 10, "reasoning": "Fallback - technical documentation"},
-                "blog": {"relevance": 0.3, "k": 5, "reasoning": "Fallback - low priority marketing content, use sparingly"},
+                "blog": {"relevance": 0.2, "k": 2, "reasoning": "Fallback - low priority marketing content, use sparingly"},
                 "transcripts": {"relevance": 0.0, "k": 0, "reasoning": "Fallback - skip transcripts"},
                 "excel": {"relevance": 0.0, "k": 0, "reasoning": "Fallback - skip structured data"}
             },
             "confidence": 0.4
         }
+        
+        # Exclude Jira for "who is" questions
+        if query and self._is_who_is_question(query):
+            fallback["sources"]["jira"]["k"] = 0
+            fallback["sources"]["jira"]["relevance"] = 0.0
+            fallback["sources"]["jira"]["reasoning"] = "Excluded - 'who is' questions don't need Jira tickets"
+        
+        return fallback
     
     def _log_routing_decision(self, query: str, plan: Dict):
         """Log routing decision for monitoring and debugging."""

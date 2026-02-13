@@ -1,0 +1,332 @@
+================================================================================
+CLOUD API RESEARCH - VISUAL IMPLEMENTATION GUIDE
+================================================================================
+
+█████████████████████████████████████████████████████████████████████████████
+█                                                                           █
+█  STEP-BY-STEP: HOW THE FEATURE WORKS                                     █
+█                                                                           █
+█████████████████████████████████████████████████████████████████████████████
+
+STEP 1: USER LOGS IN
+════════════════════
+
+User: Ravi (CloudFuze Manage team member)
+Login: ravic@cloudfuze.com
+
+Backend checks:
+  ✓ Is user in CloudFuze Manage team? YES
+  ✓ Is user an admin? NO
+  → User CAN access API Research feature
+
+
+STEP 2: SIDEBAR LOADS
+══════════════════════
+
+Frontend calls: GET /api/user/api-research/access
+
+Backend response:
+  {
+    "can_access": true,
+    "enabled": false  ← Feature is OFF by default
+  }
+
+Sidebar shows:
+  ┌──────────────────────┐
+  │ [+] New chat         │
+  │                      │
+  │ 🔒 API Research: OFF │ ← Gray button visible
+  │                      │
+  │ My Chats             │
+  └──────────────────────┘
+
+
+STEP 3: USER ENABLES FEATURE
+═════════════════════════════
+
+User clicks toggle button
+
+Frontend calls: POST /api/user/api-research/toggle
+Body: {"enabled": true}
+
+Backend:
+  1. Checks if user has access (✓)
+  2. Saves to MongoDB user_profiles collection:
+     {
+       "email": "ravic@cloudfuze.com",
+       "api_research_enabled": true,
+       "api_research_updated_at": "2026-01-30T12:00:00Z"
+     }
+  3. Returns: {"status": "success", "enabled": true}
+
+Sidebar updates:
+  ┌──────────────────────┐
+  │ [+] New chat         │
+  │                      │
+  │ 🔬 API Research: ON ✓│ ← Green button with checkmark
+  │                      │
+  │ My Chats             │
+  └──────────────────────┘
+
+
+STEP 4: USER ASKS RESEARCH QUERY
+═════════════════════════════════
+
+User types: "Research APIs for Slack"
+
+Chat endpoint receives query
+
+Backend checks:
+  1. Is this a research query? 
+     ✓ YES (matches pattern: "research apis for {cloud}")
+  
+  2. Is ENABLE_CLOUD_API_RESEARCH true? 
+     ✓ YES (config setting)
+  
+  3. Does user have access?
+     ✓ YES (Manage team member)
+  
+  4. Has user enabled it?
+     ✓ YES (MongoDB: api_research_enabled = true)
+
+→ Proceed with API research!
+
+
+STEP 5: RESEARCH BEGINS
+════════════════════════
+
+Phase 1: DISCOVERY
+------------------
+Searches web for:
+  - "Slack REST API documentation"
+  - "Slack API reference complete"
+  - "Slack API users groups"
+  - "Slack OAuth authentication"
+  - "Slack SCIM API"
+
+Finds official sources:
+  ✓ https://api.slack.com/
+  ✓ https://api.slack.com/methods
+  ✓ https://api.slack.com/scim
+  (filtered to only official .slack.com domains)
+
+Phase 2: EXTRACTION
+-------------------
+Scrapes documentation pages (with 2-second delays)
+Extracts:
+  ✓ 237 API endpoints
+  ✓ Authentication details
+  ✓ Code examples
+  ✓ Documentation links
+
+Phase 3: NORMALIZATION
+----------------------
+Maps Slack APIs to CloudFuze operations:
+  - "users.list" → getUsers (confidence: 0.9)
+  - "admin.users.invite" → createUser (confidence: 0.9)
+  - "usergroups.list" → getGroups (confidence: 0.9)
+  [... 12 core operations mapped ...]
+
+Phase 4: VERIFICATION
+---------------------
+  ✓ Validates all URLs are accessible
+  ✓ Detects SCIM 2.0 support
+  ✓ Extracts SDK links
+  ✓ Calculates confidence score: 0.96
+  ✓ Saves to MongoDB (cloud_api_research collection)
+
+
+STEP 6: USER RECEIVES RESULTS
+══════════════════════════════
+
+Chat displays comprehensive markdown:
+
+┌─────────────────────────────────────────────────────────────┐
+│                                                             │
+│  # Cloud API Research: Slack                                │
+│                                                             │
+│  ## Official Documentation                                  │
+│  - Developer Portal: [Slack API](https://api.slack.com/)   │
+│  - API Reference: [All Methods](https://api.slack.com/...)  │
+│  - SCIM Docs: [SCIM API](https://api.slack.com/scim)       │
+│                                                             │
+│  ## Core Operations                                         │
+│                                                             │
+│  ### getUsers                                               │
+│  - Method: GET | Endpoint: /users.list                      │
+│  - Documentation: [users.list](https://api.slack.com/...)   │
+│                                                             │
+│  ### createUser                                             │
+│  - Method: POST | Endpoint: /admin.users.invite             │
+│  - Documentation: [admin.users.invite](https://...)         │
+│                                                             │
+│  [... all other operations ...]                             │
+│                                                             │
+│  ## SCIM Support                                            │
+│  ✅ Slack supports SCIM 2.0                                 │
+│                                                             │
+│  ## Developer Resources                                     │
+│  - Python: python-slack-sdk (pip install slack-sdk)         │
+│  - Node.js: @slack/web-api (npm install @slack/web-api)    │
+│                                                             │
+│  ## API Coverage Summary                                    │
+│  | Operation | Status |                                      │
+│  |-----------|--------|                                      │
+│  | getUsers  | ✅      |                                      │
+│  | createUser| ✅      |                                      │
+│  [... complete table ...]                                    │
+│                                                             │
+│  Core Coverage: 100%                                        │
+│  Confidence: 0.96/1.0                                       │
+│                                                             │
+│  [Download Complete JSON Blueprint](http://localhost:...)   │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+
+User can:
+  ✓ Click any documentation link → Opens official Slack docs
+  ✓ Click Download link → Gets complete JSON specification
+  ✓ Copy endpoints directly → Start implementing connector
+
+
+STEP 7: USER DISABLES FEATURE
+══════════════════════════════
+
+User clicks toggle again → Turns gray
+
+Next query: "Research APIs for Okta"
+
+Backend checks:
+  1. Is this a research query? ✓ YES
+  2. Does user have access? ✓ YES
+  3. Has user enabled it? ✗ NO (just disabled)
+
+→ Treat as normal chat question (no API research)
+
+Bot responds with general information about Okta, not API research.
+
+
+================================================================================
+VISUAL: ACCESS CONTROL MATRIX
+================================================================================
+
+┌─────────────────────────┬──────────────┬────────────┬──────────────┐
+│ User Type               │ See Toggle?  │ Default    │ Can Research │
+├─────────────────────────┼──────────────┼────────────┼──────────────┤
+│ Ravi (Manage Lead)      │ ✅ YES       │ 🔒 OFF     │ When ON: ✅  │
+│ Suraj (Manage Team)     │ ✅ YES       │ 🔒 OFF     │ When ON: ✅  │
+│ Laxman (Admin)          │ ✅ YES       │ 🔒 OFF     │ When ON: ✅  │
+│ Santosh (Content Team)  │ ❌ NO        │ 🔒 OFF     │ ❌ NEVER     │
+│ Ankit (M+E Team)        │ ❌ NO        │ 🔒 OFF     │ ❌ NEVER     │
+└─────────────────────────┴──────────────┴────────────┴──────────────┘
+
+
+================================================================================
+VISUAL: DATA FLOW
+================================================================================
+
+USER QUERY: "Research APIs for Slack"
+↓
+CHAT INTERFACE
+↓
+IS RESEARCH QUERY? ────────────→ YES
+↓
+CHECK USER EMAIL ──────────────→ ravic@cloudfuze.com
+↓
+IS MANAGE TEAM OR ADMIN? ──────→ YES (Manage team)
+↓
+CHECK MONGODB PREFERENCE ──────→ api_research_enabled: true
+↓
+ALL CONDITIONS MET ✅
+↓
+CLOUD API RESEARCHER AGENT
+↓
+┌─────────────────────────────────────────┐
+│ Phase 1: DISCOVERY                      │
+│  → Web search for Slack docs            │
+│  → Filter official sources              │
+│                                         │
+│ Phase 2: EXTRACTION                     │
+│  → Scrape 10 documentation pages        │
+│  → Extract 237 endpoints                │
+│                                         │
+│ Phase 3: NORMALIZATION                  │
+│  → Map to CloudFuze operations          │
+│  → users.list → getUsers                │
+│  → admin.users.invite → createUser      │
+│                                         │
+│ Phase 4: VERIFICATION                   │
+│  → Validate URLs                        │
+│  → Detect SCIM 2.0 ✅                   │
+│  → Calculate confidence: 0.96           │
+└─────────────────────────────────────────┘
+↓
+SAVE TO MONGODB
+↓
+FORMAT AS MARKDOWN (with doc links)
+↓
+RETURN TO USER
+↓
+USER SEES: Comprehensive API documentation with clickable links
+
+
+================================================================================
+VISUAL: MONGODB COLLECTIONS
+================================================================================
+
+COLLECTION: user_profiles
+─────────────────────────
+{
+  "_id": ObjectId("..."),
+  "email": "ravic@cloudfuze.com",
+  "team_name": "CloudFuze Manage",
+  "api_research_enabled": true,     ← NEW FIELD
+  "api_research_updated_at": "..."  ← NEW FIELD
+}
+
+COLLECTION: cloud_api_research
+───────────────────────────────
+{
+  "_id": ObjectId("..."),
+  "cloud_name": "Slack",
+  "api_version": "v1",
+  "last_researched": "2026-01-30T12:00:00Z",
+  "confidence_score": 0.96,
+  "documentation": {
+    "docs_home": "https://api.slack.com/",
+    "api_reference": "https://api.slack.com/methods",
+    ...
+  },
+  "core_operations": {
+    "getUsers": [{...}],
+    "createUser": [{...}],
+    ...
+  },
+  "scim_support": {
+    "enabled": true,
+    "version": "2.0"
+  },
+  "created_by": "ravic@cloudfuze.com"
+}
+
+
+================================================================================
+READY TO USE! 🚀
+================================================================================
+
+The Cloud API Research Assistant is fully implemented and ready for use!
+
+CloudFuze Manage team members can now:
+1. Enable the feature via sidebar toggle
+2. Research any cloud's APIs via chat
+3. Get comprehensive documentation with links
+4. Download JSON blueprints
+5. Accelerate cloud integration by 10x
+
+Try it now:
+  1. Log in as a Manage team member
+  2. Click the API Research toggle
+  3. Ask: "Research APIs for Slack"
+  4. Watch the magic happen! ✨
+
+================================================================================
