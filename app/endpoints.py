@@ -48,7 +48,7 @@ from app.auth import verify_user_access, require_admin, require_restricted_admin
 from app.user_data import get_user_job_title
 from app.models.teams import TEAMS_STRUCTURE, get_team_by_name
 from config import (
-    SYSTEM_PROMPT, MICROSOFT_CLIENT_ID, MICROSOFT_CLIENT_SECRET, MICROSOFT_TENANT,
+    SYSTEM_PROMPT, EMAIL_DRAFT_SYSTEM_PROMPT, MICROSOFT_CLIENT_ID, MICROSOFT_CLIENT_SECRET, MICROSOFT_TENANT,
     ENABLE_INTENT_CLASSIFICATION, ENABLE_QUERY_EXPANSION, ENABLE_CONTEXT_COMPRESSION,
     DENSE_RETRIEVAL_K, BM25_RETRIEVAL_K, FINAL_RETRIEVAL_K,
     DENSE_WEIGHT, BM25_WEIGHT, RERANKER_WEIGHT,
@@ -3769,12 +3769,23 @@ User Question:
 
 # ---------------- Streaming Chat Endpoint ----------------
 
+# Email drafting: trigger phrases for intent-based detection (Copilot-style). Toggle override uses ui_mode.
+EMAIL_DRAFT_TRIGGERS = [
+    "write a professional email", "draft a professional email", "draft the email", "draft this email",
+    "please draft the email", "can you draft the email", "polish this email", "rewrite this email",
+    "make this email professional", "help me write an email", "rephrase this email", "email draft",
+    "make the tone more formal", "shorten the email", "shorten the email content", "add a thank-you closing",
+    "add a thank-you closing line", "make it more concise", "add a deadline for response",
+    "include a request for confirmation", "include a contact for support",
+]
+
 @router.post("/chat/stream")
 async def chat_stream(request: Request, auth_user: dict = Depends(require_auth)):
     """Streaming chat endpoint. PROTECTED - requires valid authentication."""
     data = await request.json()
     question = data.get("question", "")
     session_id = data.get("session_id", str(uuid.uuid4()))
+    ui_mode = data.get("ui_mode")  # optional: "email" when Email Drafting toggle is ON
     
     # Use VERIFIED user info from auth token, NOT from request body
     user_id = auth_user["user_id"]
@@ -3803,7 +3814,42 @@ Answer clearly and correctly based on the provided context and knowledge base.""
 
     async def generate_stream():
         try:
-            # FIRST: Check if we have a corrected response for this question
+            # EMAIL DRAFT MODE: User toggled Email Drafting or query matches triggers (no RAG)
+            is_email_draft = (ui_mode == "email") or any(
+                trigger in (question or "").strip().lower() for trigger in EMAIL_DRAFT_TRIGGERS
+            )
+            if is_email_draft:
+                logger.info(f"[EMAIL DRAFT] Processing email draft for user {user_email}")
+                yield f"data: {json.dumps({'type': 'thinking_complete'})}\n\n"
+                llm = get_llm(temperature=0.2, max_tokens=1500)
+                messages = [SystemMessage(content=EMAIL_DRAFT_SYSTEM_PROMPT), HumanMessage(content=question)]
+                full_response = ""
+                async for chunk in llm.astream(messages):
+                    if hasattr(chunk, "content") and chunk.content:
+                        token = chunk.content
+                        full_response += token
+                        yield f"data: {json.dumps({'token': token, 'type': 'token'})}\n\n"
+                        await asyncio.sleep(0.01)
+                try:
+                    await save_message(session_id, "user", question)
+                    await save_message(session_id, "assistant", full_response)
+                except Exception as e:
+                    logger.warning(f"Failed to save email draft messages: {e}")
+                await add_to_conversation(conversation_id, "user", question)
+                await add_to_conversation(conversation_id, "assistant", full_response)
+                trace_id = None
+                try:
+                    trace_id = langfuse_tracker.create_trace(
+                        user_id=conversation_id, question=question, answer=full_response,
+                        session_id=session_id, user_name=user_name, user_email=user_email,
+                        metadata={"intent": "email_draft", "endpoint": "/chat/stream"}
+                    )
+                except Exception as e:
+                    print(f"Warning: Langfuse logging failed: {e}")
+                yield f"data: {json.dumps({'type': 'done', 'full_response': full_response, 'trace_id': trace_id, 'recommended_questions': [], 'intent': 'email_draft'})}\n\n"
+                return
+
+            # Check if we have a corrected response for this question
             corrected_answer = find_similar_corrected_response(question)
             
             # Check if user has API research enabled FIRST
@@ -5482,6 +5528,7 @@ async def chat_retry_stream(request: Request, auth_user: dict = Depends(require_
     session_id = data.get("session_id", str(uuid.uuid4()))
     previous_trace_id = data.get("previous_trace_id", "")
     retry_attempt = data.get("retry_attempt", 1)
+    ui_mode = data.get("ui_mode")  # optional: "email" when Email Drafting toggle is ON
     
     # Use VERIFIED user info from auth token
     user_id = auth_user["user_id"]
@@ -5507,7 +5554,36 @@ Answer clearly and correctly based on the provided context and knowledge base.""
     
     async def generate_retry_stream():
         try:
-            
+            # EMAIL DRAFT MODE: Regenerate polished email (no RAG)
+            if ui_mode == "email" or any(trigger in (question or "").strip().lower() for trigger in EMAIL_DRAFT_TRIGGERS):
+                logger.info(f"[EMAIL DRAFT RETRY] Regenerating email draft for user {user_email}")
+                yield f"data: {json.dumps({'type': 'thinking_complete'})}\n\n"
+                llm = get_llm(temperature=0.2, max_tokens=1500)
+                messages = [SystemMessage(content=EMAIL_DRAFT_SYSTEM_PROMPT), HumanMessage(content=question)]
+                full_response = ""
+                async for chunk in llm.astream(messages):
+                    if hasattr(chunk, "content") and chunk.content:
+                        token = chunk.content
+                        full_response += token
+                        yield f"data: {json.dumps({'token': token, 'type': 'token'})}\n\n"
+                        await asyncio.sleep(0.01)
+                try:
+                    await save_message(session_id, "user", question)
+                    await save_message(session_id, "assistant", full_response)
+                except Exception as e:
+                    logger.warning(f"Failed to save retry email draft messages: {e}")
+                trace_id = None
+                try:
+                    trace_id = langfuse_tracker.create_trace(
+                        user_id=conversation_id, question=question, answer=full_response,
+                        session_id=session_id, user_name=user_name, user_email=user_email,
+                        metadata={"intent": "email_draft", "endpoint": "/chat/retry/stream", "retry_attempt": retry_attempt}
+                    )
+                except Exception as e:
+                    print(f"Warning: Langfuse logging failed: {e}")
+                yield f"data: {json.dumps({'type': 'done', 'full_response': full_response, 'trace_id': trace_id, 'recommended_questions': [], 'intent': 'email_draft'})}\n\n"
+                return
+
             # Enhance query (same as regular chat)
             enhanced_query = question
             if conversation_history:
@@ -6151,13 +6227,19 @@ async def get_user_chat_messages(
         first_message = next((msg for msg in messages if msg.get("role") == "user"), None)
         title = first_message["content"][:50] + "..." if first_message else "Chat conversation"
         
-        # Format messages for frontend
+        # Format messages for frontend (pass through intent, emailContent, traceId, recommendedQuestions for email-draft UI restore)
         formatted_messages = []
         for msg in messages:
-            formatted_messages.append({
-                "role": msg.get("role", "user"),
-                "content": msg.get("content", "")
-            })
+            m = {"role": msg.get("role", "user"), "content": msg.get("content", "")}
+            if msg.get("traceId") is not None:
+                m["traceId"] = msg["traceId"]
+            if msg.get("intent") is not None:
+                m["intent"] = msg["intent"]
+            if msg.get("emailContent") is not None:
+                m["emailContent"] = msg["emailContent"]
+            if msg.get("recommendedQuestions") is not None:
+                m["recommendedQuestions"] = msg["recommendedQuestions"]
+            formatted_messages.append(m)
         
         return {
             "messages": formatted_messages,
@@ -6209,13 +6291,19 @@ async def get_user_by_conversation_id(
         first_message = next((msg for msg in messages if msg.get("role") == "user"), None)
         title = first_message["content"][:50] + "..." if first_message else "Chat conversation"
         
-        # Format messages for frontend
+        # Format messages for frontend (pass through intent, emailContent, traceId, recommendedQuestions for email-draft UI restore)
         formatted_messages = []
         for msg in messages:
-            formatted_messages.append({
-                "role": msg.get("role", "user"),
-                "content": msg.get("content", "")
-            })
+            m = {"role": msg.get("role", "user"), "content": msg.get("content", "")}
+            if msg.get("traceId") is not None:
+                m["traceId"] = msg["traceId"]
+            if msg.get("intent") is not None:
+                m["intent"] = msg["intent"]
+            if msg.get("emailContent") is not None:
+                m["emailContent"] = msg["emailContent"]
+            if msg.get("recommendedQuestions") is not None:
+                m["recommendedQuestions"] = msg["recommendedQuestions"]
+            formatted_messages.append(m)
         
         print(f"[CONVERSATION] Successfully loaded conversation: {conversation_id}, user: {user_id}, messages: {len(formatted_messages)}")
         

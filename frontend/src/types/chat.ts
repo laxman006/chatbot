@@ -16,6 +16,10 @@ export interface Message {
   feedbackSubmitted?: boolean;
   feedbackRating?: 'thumbs_up' | 'thumbs_down';
   recommendedQuestions?: string[];
+  /** When "email_draft", UI shows email heading/body/refinement buttons; preserved on refresh */
+  intent?: string;
+  /** Raw email text for refinement buttons; only set when intent === "email_draft" */
+  emailContent?: string;
 }
 
 export interface ChatSession {

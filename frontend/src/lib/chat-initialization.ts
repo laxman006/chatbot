@@ -550,6 +550,10 @@ export function initializeChatApp(options: InitOptions = {}) {
         const feedbackRating = (child as HTMLElement).dataset.feedbackRating as ('thumbs_up' | 'thumbs_down' | undefined);
         const recommendedQuestionsDiv = child.querySelector('.recommended-questions');
         const recommendedQuestions: string[] = [];
+        // Preserve email-draft format so it survives refresh
+        const isEmailDraft = (child as HTMLElement).dataset.emailContent != null ||
+          (child as HTMLElement).querySelector('.email-draft-body') != null;
+        const emailContent = (child as HTMLElement).dataset.emailContent;
         
         console.log(`[SESSION SAVE] Processing bot message ${index}, has .recommended-questions:`, !!recommendedQuestionsDiv);
         
@@ -571,7 +575,9 @@ export function initializeChatApp(options: InitOptions = {}) {
           traceId,
           feedbackSubmitted,
           feedbackRating,
-          recommendedQuestions: recommendedQuestions.length > 0 ? recommendedQuestions : undefined
+          recommendedQuestions: recommendedQuestions.length > 0 ? recommendedQuestions : undefined,
+          ...(isEmailDraft && { intent: 'email_draft' as const }),
+          ...(emailContent != null && emailContent !== '' && { emailContent })
         };
         
         if (result.recommendedQuestions) {
@@ -645,6 +651,8 @@ export function initializeChatApp(options: InitOptions = {}) {
     const traceId = botDiv.dataset.traceId;
     const recommendedQuestionsDiv = botDiv.querySelector('.recommended-questions');
     const recommendedQuestions: string[] = [];
+    const isEmailDraft = botDiv.dataset.emailContent != null || botDiv.querySelector('.email-draft-body') != null;
+    const emailContent = botDiv.dataset.emailContent;
     
     // Extract recommended questions if present
     if (recommendedQuestionsDiv) {
@@ -655,12 +663,14 @@ export function initializeChatApp(options: InitOptions = {}) {
       });
     }
     
-    // Add completed message to session
+    // Add completed message to session (preserve email-draft so format survives refresh)
     sessions[sessionIndex].messages.push({
       role: 'assistant',
       content: content,
       traceId: traceId,
-      recommendedQuestions: recommendedQuestions.length > 0 ? recommendedQuestions : undefined
+      recommendedQuestions: recommendedQuestions.length > 0 ? recommendedQuestions : undefined,
+      ...(isEmailDraft && { intent: 'email_draft' as const }),
+      ...(emailContent != null && emailContent !== '' && { emailContent })
     });
     
     // Update timestamp
@@ -1415,6 +1425,23 @@ export function initializeChatApp(options: InitOptions = {}) {
           div.dataset.parentTraceId = parentTraceId;
         }
         
+        // Restore email-draft format so UI matches after refresh (persist intent + emailContent in session)
+        const msgIntent = (msg as { intent?: string }).intent;
+        let emailContentRaw = (msg as { emailContent?: string }).emailContent;
+        const isEmailDraft = msgIntent === 'email_draft' || (emailContentRaw != null && String(emailContentRaw).trim() !== '');
+        if (isEmailDraft) {
+          if (emailContentRaw && String(emailContentRaw).trim() !== '') {
+            div.dataset.emailContent = String(emailContentRaw);
+          } else {
+            // Fallback: derive raw text from saved content so refinement still works
+            const rawFromContent = typeof msg.content === 'string' ? msg.content.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() : '';
+            if (rawFromContent) {
+              div.dataset.emailContent = rawFromContent;
+              emailContentRaw = rawFromContent;
+            }
+          }
+        }
+        
         // Render markdown to HTML first, then make links clickable
         let formattedContent = msg.content;
         
@@ -1426,15 +1453,55 @@ export function initializeChatApp(options: InitOptions = {}) {
         }
         
         // Make sure links are clickable
-        const contentWithLinks = linkifyText(formattedContent);
+        let contentWithLinks = linkifyText(formattedContent);
+        // For email draft restore: re-apply paragraph spacing from raw text when content was saved as HTML
+        if (isEmailDraft && emailContentRaw && !hasHtmlTags) {
+          const paragraphs = emailContentRaw.split(/\n\n+/).map((s: string) => s.trim()).filter(Boolean);
+          const emailHtml = paragraphs
+            .map((para: string) => {
+              const html = renderMarkdown(para);
+              return html.trim().startsWith('<p>') ? html : `<p>${html}</p>`;
+            })
+            .join('\n');
+          contentWithLinks = linkifyText(emailHtml);
+        }
+        
+        const emailHeadingHTML = isEmailDraft
+          ? '<p class="email-draft-heading">Polished email</p>'
+          : '';
+        const emailHelperLine = isEmailDraft
+          ? '<p class="email-draft-helper">You can refine this email further using the options below.</p>'
+          : '';
+        const emailRefinementHTML = isEmailDraft
+          ? `<div class="email-refinement-buttons" style="display:flex;flex-wrap:wrap;gap:8px;">
+              <button type="button" class="email-refinement-btn" data-action="email-refinement" data-refinement="Make the tone more formal">Make it more formal</button>
+              <button type="button" class="email-refinement-btn" data-action="email-refinement" data-refinement="Make it more concise">Make it shorter</button>
+              <button type="button" class="email-refinement-btn" data-action="email-refinement" data-refinement="Add a deadline for response">Add a response deadline</button>
+              <button type="button" class="email-refinement-btn" data-action="email-refinement" data-refinement="Include a request for confirmation">Ask for confirmation</button>
+            </div>`
+          : '';
+        const emailContentWrapper = isEmailDraft
+          ? `<div class="email-draft-body"><div class="message-content">${contentWithLinks}</div></div>`
+          : `<div class="message-content">${contentWithLinks}</div>`;
+        const feedbackClass = isEmailDraft ? 'feedback-buttons email-draft-meta' : 'feedback-buttons';
         
         div.innerHTML = `
-          <div class="message-content">${contentWithLinks}</div>
-          <div class="feedback-buttons">
+          ${emailHeadingHTML}
+          ${emailContentWrapper}
+          ${emailHelperLine}
+          ${emailRefinementHTML}
+          <div class="${feedbackClass}">
             <button class="copy-button" data-action="copy-message" title="Copy message">
               <img src="/images/copy-icon.svg?v=2" alt="Copy" width="16" height="16">
             </button>
-            ${!isReadOnly ? `
+            ${isEmailDraft && !isReadOnly ? `
+            <button class="edit-btn" data-action="edit-email-draft" title="Edit email">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path>
+              </svg>
+            </button>
+            ` : ''}
+            ${!isReadOnly && !isEmailDraft ? `
             <button class="retry-button" data-action="retry-message" title="Regenerate response" data-trace-id="${msg.traceId || ''}">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M1 8a7 7 0 0 1 7-7v2M15 8a7 7 0 0 1-7 7v-2M8 1l2 2-2 2M8 15l-2-2 2-2"/>
@@ -2694,10 +2761,14 @@ export function initializeChatApp(options: InitOptions = {}) {
       
       // ✅ FIX 2: Session-based auth - no token validation needed
       // Session is validated automatically by backend via session_id cookie
-      const requestBody = { 
+      const requestBody: { question: string; session_id: string; ui_mode?: string } = {
         question,
         session_id: sessionId
       };
+      const emailDraftingToggle = document.getElementById('email-drafting-toggle') as HTMLInputElement | null;
+      if (emailDraftingToggle?.checked) {
+        requestBody.ui_mode = 'email';
+      }
       
       // ✅ Session-based auth - session_id cookie sent automatically via proxy
       const response = await apiFetch('/chat/stream', {
@@ -2793,6 +2864,7 @@ export function initializeChatApp(options: InitOptions = {}) {
               } else if (data.type === 'done') {
                 fullResponse = data.full_response || fullResponse;
                 const traceId = data.trace_id;
+                const responseIntent = data.intent;
                 const recommendedQuestions = data.recommended_questions || [];
                 
                 // Store initial version (version 1) in responseVersions Map
@@ -2832,8 +2904,21 @@ export function initializeChatApp(options: InitOptions = {}) {
                 const recommendedQuestionsHTML = buildRecommendedQuestionsHTML(recommendedQuestions);
                 
                 // Render markdown and add UTM parameters to all links
-                const renderedMarkdown = renderMarkdown(fullResponse);
-                const contentWithLinks = linkifyText(renderedMarkdown);
+                let contentWithLinks: string;
+                if (responseIntent === 'email_draft') {
+                  // Preserve paragraph spacing in UI (match pasted email: blank line between paragraphs)
+                  const paragraphs = fullResponse.split(/\n\n+/).map((s) => s.trim()).filter(Boolean);
+                  const emailHtml = paragraphs
+                    .map((para) => {
+                      const html = renderMarkdown(para);
+                      return html.trim().startsWith('<p>') ? html : `<p>${html}</p>`;
+                    })
+                    .join('\n');
+                  contentWithLinks = linkifyText(emailHtml);
+                } else {
+                  const renderedMarkdown = renderMarkdown(fullResponse);
+                  contentWithLinks = linkifyText(renderedMarkdown);
+                }
                 
                 // ✅ Store trace_id BEFORE generating HTML (so we can disable buttons if missing)
                 if (traceId) {
@@ -2853,18 +2938,51 @@ export function initializeChatApp(options: InitOptions = {}) {
                   console.warn('[TRACE_ID] ⚠️ No trace_id to store - feedback buttons will be disabled');
                 }
                 
+                // ✅ Email draft: store raw content for refinement and show heading + buttons
+                if (responseIntent === 'email_draft') {
+                  botDiv.dataset.emailContent = fullResponse;
+                }
+                
                 // ✅ Disable feedback buttons if traceId is missing
                 const feedbackDisabled = !traceId;
                 const feedbackDisabledAttr = feedbackDisabled ? 'disabled' : '';
                 const feedbackDisabledClass = feedbackDisabled ? 'disabled' : '';
                 
+                const emailHeadingHTML = responseIntent === 'email_draft'
+                  ? '<p class="email-draft-heading">Polished email</p>'
+                  : '';
+                const emailHelperLine = responseIntent === 'email_draft'
+                  ? '<p class="email-draft-helper">You can refine this email further using the options below.</p>'
+                  : '';
+                const emailRefinementHTML = responseIntent === 'email_draft'
+                  ? `<div class="email-refinement-buttons" style="display:flex;flex-wrap:wrap;gap:8px;">
+                      <button type="button" class="email-refinement-btn" data-action="email-refinement" data-refinement="Make the tone more formal">Make it more formal</button>
+                      <button type="button" class="email-refinement-btn" data-action="email-refinement" data-refinement="Make it more concise">Make it shorter</button>
+                      <button type="button" class="email-refinement-btn" data-action="email-refinement" data-refinement="Add a deadline for response">Add a response deadline</button>
+                      <button type="button" class="email-refinement-btn" data-action="email-refinement" data-refinement="Include a request for confirmation">Ask for confirmation</button>
+                    </div>`
+                  : '';
+                const emailContentWrapper = responseIntent === 'email_draft'
+                  ? `<div class="email-draft-body"><div class="message-content">${contentWithLinks}</div></div>`
+                  : `<div class="message-content">${contentWithLinks}</div>`;
+                
                 botDiv.innerHTML = `
-                  <div class="message-content">${contentWithLinks}</div>
-                  <div class="feedback-buttons">
+                  ${emailHeadingHTML}
+                  ${emailContentWrapper}
+                  ${emailHelperLine}
+                  ${emailRefinementHTML}
+                  <div class="feedback-buttons email-draft-meta">
                     <button class="copy-button" data-action="copy-message" title="Copy message">
                       <img src="/images/copy-icon.svg?v=2" alt="Copy" width="16" height="16">
                     </button>
                     ${!isReadOnlyMode ? `
+                    <button class="edit-btn" data-action="edit-email-draft" title="Edit email">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path>
+                      </svg>
+                    </button>
+                    ` : ''}
+                    ${!isReadOnlyMode && responseIntent !== 'email_draft' ? `
                     <button class="retry-button" data-action="retry-message" title="Regenerate response" data-trace-id="${traceId || ''}">
                       <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M1 8a7 7 0 0 1 7-7v2M15 8a7 7 0 0 1-7 7v-2M8 1l2 2-2 2M8 15l-2-2 2-2"/>
@@ -3120,14 +3238,19 @@ export function initializeChatApp(options: InitOptions = {}) {
       console.log('[RETRY] Starting retry:', { question: userQuestion, traceId, attempt: retryAttempt });
       
       // Call retry endpoint
+      const retryBody: { question: string; session_id: string; previous_trace_id: string; retry_attempt: number; ui_mode?: string } = {
+        question: userQuestion,
+        session_id: sessionId,
+        previous_trace_id: traceId,
+        retry_attempt: retryAttempt
+      };
+      const emailDraftingToggleRetry = document.getElementById('email-drafting-toggle') as HTMLInputElement | null;
+      if (emailDraftingToggleRetry?.checked) {
+        retryBody.ui_mode = 'email';
+      }
       const response = await apiFetch('/chat/retry/stream', {
         method: 'POST',
-        body: JSON.stringify({
-          question: userQuestion,
-          session_id: sessionId,
-          previous_trace_id: traceId,
-          retry_attempt: retryAttempt
-        })
+        body: JSON.stringify(retryBody)
       });
       
       if (response.status === 401 || response.status === 403) {
@@ -4235,6 +4358,115 @@ export function initializeChatApp(options: InitOptions = {}) {
     sendMessageText(newText);
   }
 
+  // Edit email draft (ChatGPT-style: inline edit, save updates display only)
+  function editEmailDraft(button: HTMLElement) {
+    const botDiv = button.closest('.message.bot') as HTMLElement;
+    const emailDraftBody = botDiv?.querySelector('.email-draft-body') as HTMLElement;
+    if (!botDiv || !emailDraftBody) return;
+
+    const messageContent = emailDraftBody.querySelector('.message-content');
+    if (!messageContent) return;
+
+    const originalContent = botDiv.dataset.emailContent || (messageContent as HTMLElement).innerText || '';
+    const originalHtml = (messageContent as HTMLElement).innerHTML;
+
+    // Store for cancel
+    emailDraftBody.setAttribute('data-original-html', originalHtml);
+    emailDraftBody.setAttribute('data-original-content', originalContent);
+    emailDraftBody.classList.add('editing');
+    // Hide refinement buttons and helper during edit
+    const helperLine = botDiv.querySelector('.email-draft-helper');
+    const refinementBtns = botDiv.querySelector('.email-refinement-buttons');
+    if (helperLine) (helperLine as HTMLElement).style.display = 'none';
+    if (refinementBtns) (refinementBtns as HTMLElement).style.display = 'none';
+
+    // Replace with textarea + actions
+    emailDraftBody.innerHTML = `
+      <textarea class="edit-textarea email-draft-edit-textarea" rows="6">${String(originalContent).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
+      <div class="edit-actions">
+        <button class="edit-action-btn edit-cancel-btn" data-action="cancel-edit-email-draft">Cancel</button>
+        <button class="edit-action-btn edit-save-btn" data-action="save-edit-email-draft" title="Save">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/>
+          </svg>
+        </button>
+      </div>
+    `;
+
+    const textarea = emailDraftBody.querySelector('.email-draft-edit-textarea') as HTMLTextAreaElement;
+    if (textarea) {
+      const autoResize = () => {
+        textarea.style.height = 'auto';
+        textarea.style.height = Math.min(textarea.scrollHeight, 300) + 'px';
+      };
+      textarea.addEventListener('input', autoResize);
+      textarea.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          const saveBtn = emailDraftBody.querySelector('[data-action="save-edit-email-draft"]') as HTMLButtonElement;
+          if (saveBtn) saveBtn.click();
+        }
+      });
+      autoResize();
+      textarea.focus();
+      textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    }
+  }
+
+  function cancelEditEmailDraft(button: HTMLElement) {
+    const emailDraftBody = button.closest('.email-draft-body') as HTMLElement;
+    if (!emailDraftBody) return;
+
+    const originalHtml = emailDraftBody.getAttribute('data-original-html') || '';
+    emailDraftBody.classList.remove('editing');
+    emailDraftBody.innerHTML = `<div class="message-content">${originalHtml}</div>`;
+    emailDraftBody.removeAttribute('data-original-html');
+    emailDraftBody.removeAttribute('data-original-content');
+    // Restore refinement buttons and helper
+    const botDiv = emailDraftBody.closest('.message.bot');
+    const helperLine = botDiv?.querySelector('.email-draft-helper');
+    const refinementBtns = botDiv?.querySelector('.email-refinement-buttons');
+    if (helperLine) (helperLine as HTMLElement).style.display = '';
+    if (refinementBtns) (refinementBtns as HTMLElement).style.display = '';
+  }
+
+  function saveEditEmailDraft(button: HTMLElement) {
+    const emailDraftBody = button.closest('.email-draft-body') as HTMLElement;
+    const botDiv = emailDraftBody?.closest('.message.bot') as HTMLElement;
+    if (!emailDraftBody || !botDiv) return;
+
+    const textarea = emailDraftBody.querySelector('.email-draft-edit-textarea') as HTMLTextAreaElement;
+    if (!textarea) return;
+
+    const newContent = textarea.value.trim();
+    if (!newContent) return;
+
+    // Update dataset so refinement buttons still work
+    botDiv.dataset.emailContent = newContent;
+
+    // Re-render with paragraph spacing (match email format)
+    const paragraphs = newContent.split(/\n\n+/).map((s) => s.trim()).filter(Boolean);
+    const emailHtml = paragraphs
+      .map((para) => {
+        const html = renderMarkdown(para);
+        return html.trim().startsWith('<p>') ? html : `<p>${html}</p>`;
+      })
+      .join('\n');
+    const contentWithLinks = linkifyText(emailHtml);
+
+    emailDraftBody.classList.remove('editing');
+    emailDraftBody.innerHTML = `<div class="message-content">${contentWithLinks}</div>`;
+    emailDraftBody.removeAttribute('data-original-html');
+    emailDraftBody.removeAttribute('data-original-content');
+    // Restore refinement buttons and helper (they were hidden during edit)
+    const helperLine = botDiv.querySelector('.email-draft-helper');
+    const refinementBtns = botDiv.querySelector('.email-refinement-buttons');
+    if (helperLine) (helperLine as HTMLElement).style.display = '';
+    if (refinementBtns) (refinementBtns as HTMLElement).style.display = '';
+
+    saveCurrentSession();
+  }
+
   // Expose ALL functions to window for onclick handlers
   (window as any).copyMessage = copyMessage;
   (window as any).copyUserMessage = copyUserMessage;
@@ -5287,6 +5519,29 @@ export function initializeChatApp(options: InitOptions = {}) {
             console.warn('[EVENT] No question attribute found on recommended question button');
           }
           break;
+        case 'edit-email-draft':
+          editEmailDraft(button);
+          break;
+        case 'cancel-edit-email-draft':
+          cancelEditEmailDraft(button);
+          break;
+        case 'save-edit-email-draft':
+          saveEditEmailDraft(button);
+          break;
+        case 'email-refinement': {
+          const refinement = button.getAttribute('data-refinement');
+          const msgDiv = button.closest('.message.bot') as HTMLElement | null;
+          const emailContent = msgDiv?.dataset?.emailContent;
+          if (!refinement || !emailContent || typeof sendMessageText !== 'function') break;
+          // Remove refinement options (behave like follow-up: options disappear after click)
+          const refinementContainer = button.closest('.email-refinement-buttons');
+          refinementContainer?.remove();
+          // Show clicked option as user message (like recommended question)
+          const label = (button.textContent ?? refinement).trim();
+          addMessage(label, 'user');
+          sendMessageText(refinement + '\n\n' + emailContent);
+          break;
+        }
       }
     };
     
