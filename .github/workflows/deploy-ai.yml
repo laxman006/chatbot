@@ -79,13 +79,12 @@ jobs:
             echo "Stopping services..."
             $COMPOSE_CMD -f docker-compose.ai.yml down
             
-            # Force frontend rebuild (no cache) so UI changes always deploy - Docker cache can serve stale frontend
-            echo "Building frontend (no cache to ensure latest UI)..."
-            $COMPOSE_CMD -f docker-compose.ai.yml build --no-cache frontend
+            # Force full rebuild (no cache) - ensures both frontend UI and backend endpoints deploy
+            echo "Building frontend and backend (no cache)..."
+            $COMPOSE_CMD -f docker-compose.ai.yml build --no-cache
             
-            # Build backend (with cache) and start all services
-            echo "Building backend and starting services..."
-            $COMPOSE_CMD -f docker-compose.ai.yml --env-file .env.ai up -d --build
+            echo "Starting services..."
+            $COMPOSE_CMD -f docker-compose.ai.yml --env-file .env.ai up -d
             
             # Wait for services to start
             echo "Waiting for services to start..."

@@ -32,7 +32,7 @@ export default function ChatInterface({ sessionId, onSendMessage }: ChatInterfac
   }, [sessionId]);
 
   return (
-    <main className="chatgpt-main">
+    <main className="chatgpt-main" data-email-mode={emailMode ? 'true' : 'false'}>
       {/* Chat Header - will be shown/hidden by chat initialization */}
       <div id="chat-header-container"></div>
       

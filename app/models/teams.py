@@ -166,8 +166,8 @@ TEAMS_STRUCTURE = {
         "description": "M1"
     },
     "M2": {
-        "lead": "Maheswari Aram",
-        "lead_email": "maheswari.aram@cloudfuze.com",
+        "lead": "Harika",
+        "lead_email": "Harika.Velidi@cloudfuze.com",
         "members": [
             {"name": "Maheswari Aram", "email": "maheswari.aram@cloudfuze.com"},
             {"name": "Tejaswini Sivakumaram", "email": "sivakumaram.tejaswini@cloudfuze.com"},
@@ -247,8 +247,8 @@ TEAMS_STRUCTURE = {
         "description": "M5"
     },
     "BD": {
-        "lead": "Karthik Brahmakal",
-        "lead_email": "karthik.brahmakal@cloudfuze.com",
+        "lead": "Varsha Nallasham",
+        "lead_email": "Varsha.Nallashami@cloudfuze.com",
         "members": [
             {"name": "Karthik Brahmakal", "email": "karthik.brahmakal@cloudfuze.com"},
             {"name": "Pruthvi Raygol", "email": "Pruthvi.Raygol@cloudfuze.com"},
@@ -259,19 +259,18 @@ TEAMS_STRUCTURE = {
             {"name": "Hrushikesh Sholapure", "email": "Hrushikesh.Sholapure@cloudfuze.com"},
             {"name": "Preethi John", "email": "Preethi.John@cloudfuze.com"},
             {"name": "Kevin Anto", "email": "kevin.anto@cloudfuze.com"},
+            {"name": "Varsha Nallashami", "email": "Varsha.Nallashami@cloudfuze.com"},
         ],
         "color": "#06B6D4",  # Cyan
         "description": "Business Development"
     },
     "Sales Ops": {
-        "lead": "Harini Elangovan",
-        "lead_email": "Harini.Elangovan@cloudfuze.com",
+        "lead": "Raya Durai",
+        "lead_email": "Raya.durai@cloudfuze.com",
         "members": [
-            {"name": "Harini Elangovan", "email": "Harini.Elangovan@cloudfuze.com"},
             {"name": "Rahul Gowda", "email": "rahul.gowda@cloudfuze.com"},
             {"name": "Sakshi Priya", "email": "Sakshi.Priya@cloudfuze.com"},
             {"name": "Raya Durai", "email": "Raya.durai@cloudfuze.com"},
-            {"name": "Varsha Nallashami", "email": "Varsha.Nallashami@cloudfuze.com"},
             {"name": "Sanjana Khanapur", "email": "sanjana.khanapur@cloudfuze.com"},
         ],
         "color": "#8B5CF6",  # Purple

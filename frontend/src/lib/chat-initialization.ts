@@ -2765,8 +2765,13 @@ export function initializeChatApp(options: InitOptions = {}) {
         question,
         session_id: sessionId
       };
+      // Email mode: checkbox (primary) or data-email-mode fallback (when empty-state sends before main input mounts)
       const emailDraftingToggle = document.getElementById('email-drafting-toggle') as HTMLInputElement | null;
+      const emailModeFromData = document.querySelector('.chatgpt-main')?.getAttribute('data-email-mode') === 'true';
+      const emailModeActive = document.querySelector('.email-draft-toggle-btn.active') != null;
       if (emailDraftingToggle?.checked) {
+        requestBody.ui_mode = 'email';
+      } else if (emailModeFromData || emailModeActive) {
         requestBody.ui_mode = 'email';
       }
       
@@ -3245,7 +3250,11 @@ export function initializeChatApp(options: InitOptions = {}) {
         retry_attempt: retryAttempt
       };
       const emailDraftingToggleRetry = document.getElementById('email-drafting-toggle') as HTMLInputElement | null;
+      const emailModeFromDataRetry = document.querySelector('.chatgpt-main')?.getAttribute('data-email-mode') === 'true';
+      const emailModeActiveRetry = document.querySelector('.email-draft-toggle-btn.active') != null;
       if (emailDraftingToggleRetry?.checked) {
+        retryBody.ui_mode = 'email';
+      } else if (emailModeFromDataRetry || emailModeActiveRetry) {
         retryBody.ui_mode = 'email';
       }
       const response = await apiFetch('/chat/retry/stream', {
