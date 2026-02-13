@@ -63,6 +63,9 @@ Thumbs.db
 # Vectorstore data (large binary files)
 data/
 data.zip
+
+# Weaviate backup (large binary files – do not push to GitHub)
+weaviate_backup/
 *.zip
 chatbot-code.tar.gz
 frontend/slack2teams-frontend-ai.tar
