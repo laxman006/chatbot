@@ -30,15 +30,6 @@ except ImportError as e:
     _get_jira_vectorstore_cached = None
     print(f"[WARNING] Jira vectorstore not available: {e}")
     print("[INFO] Jira features will be disabled. Install jira package with: pip install jira")
-# Optional capabilities ChromaDB (dedicated DB for migration capabilities/limitations)
-try:
-    from app.capabilities_vectorstore import is_capability_related_query, is_capability_related_query_llm, get_capability_docs
-    CAPABILITIES_VECTORSTORE_AVAILABLE = True
-except ImportError:
-    CAPABILITIES_VECTORSTORE_AVAILABLE = False
-    is_capability_related_query = lambda q: False
-    is_capability_related_query_llm = lambda q, llm: False
-    get_capability_docs = lambda q, k=15, force=False: []
 from app.mongodb_memory import (
     get_response_versions,
     set_current_version,
@@ -1393,67 +1384,6 @@ def extract_migration_direction(text: str) -> dict:
         "amazon_s3": [r"\bamazon\s+s3\b", r"\bs3\b"],
         "sharefile": [r"\bsharefile\b", r"\bcitrix\s+sharefile\b"],
     }
-    
-    # Content migration combinations (from capability matrix Excel) — for filtering / direction when query is about migration capabilities
-    content_migration_display_patterns = [
-        "Box - One Drive for Business",
-        "Box - Share Point Online",
-        "Box - Google Suite",
-        "Box - Google Shared Drive",
-        "Box - Dropbox",
-        "Box for business to Box for business",
-        "Dropbox for Business - One Drive for Business",
-        "Dropbox for Business - Share Point Online",
-        "Dropbox for Business - Google Drive",
-        "Dropbox for Business - Google Shared Drive",
-        "Google Suite - One Drive for Business",
-        "Google Suite - Share Point Online",
-        "Google Suite - Google Suite",
-        "Google Suite - Dropbox",
-        "GSuite - Egnyte",
-        "Gsuite - Box",
-        "Shared Drive-Shared Drive",
-        "Shared Drive- Share Point Online",
-        "Citrix - One Drive for Business",
-        "Citrix -Share Point Online",
-        "Citrix -Google Suite",
-        "Citrix - Shared Drive",
-        "Egnyte - Onedrive for Business",
-        "Egnyte - Sharepoint for Business",
-        "Egnyte - Gsuite",
-        "Egnyte - Gshared Drive",
-        "Box - Citrix",
-        "DropBox to Azure",
-        "Dropbox to Box",
-        "DropBox to egnyte",
-        "Citrix - Citrix",
-        "Shared Drive- Egnyte",
-        "Shared Drive -  Onedrive",
-        "Share point online - Shared Drive",
-        "share point online - mydrive",
-        "share point online - Share point online",
-        "sharepint online -egnyte",
-        "NFS - onedrive",
-        "NFS - sharepoint online",
-        "NFS t-mydrive",
-        "NFS t--shared drive",
-        "OneDrive to Amazon s3",
-        "Box to Amazon s3",
-        "SharePoint Online to Amazon S3",
-        "Google Shared Drive to Amazon S3",
-        "Sharefile to Amazon S3",
-        "SharePoint Online to Azure",
-        "Google Shared Drive to Azure",
-        "Sharefile to Azure",
-        "Dropbox to Azure",
-        "Egnyte to Azure",
-        "Amazon S3 to SharePoint Online",
-        "Onedrive to- onedrive",
-        "Onedrive-google mydrive",
-        "Amazon workdocs to NFS",
-        "Amazon wordocs to Sharepoint",
-        "Amazon wordocs to OneDrive",
-    ]
     
     # CRITICAL FIX: Handle ambiguous "chat" patterns BEFORE general direction matching
     # Check for explicit "Teams to Chat" or "Chat to Teams" patterns first
@@ -3075,20 +3005,6 @@ def perplexity_style_retrieve(
     
     pool_candidates.extend(jira_pool)
     
-    # ---- 5b. Add capability/limitation docs from dedicated ChromaDB when query is capability-related (LLM classification, fallback path) ----
-    if CAPABILITIES_VECTORSTORE_AVAILABLE:
-        try:
-            _cap_llm = get_llm(temperature=0)
-            if is_capability_related_query_llm(query, _cap_llm):
-                capability_docs = get_capability_docs(query, k=15, force=True)
-                if capability_docs:
-                    # Add with high similarity so they enter the pool (rerank will order)
-                    cap_score = 0.85
-                    pool_candidates.extend((doc, cap_score) for doc in capability_docs)
-                    print(f"[RETRIEVAL] Retrieved {len(capability_docs)} docs from capabilities ChromaDB (LLM classified as capabilities)")
-        except Exception as e:
-            print(f"[WARN] Capabilities retrieval failed: {e}")
-    
     # ---- 6. Deduplicate by document (max 2 chunks per document) ----
     import hashlib
     MAX_CHUNKS_PER_DOC = 2
@@ -3342,23 +3258,6 @@ def intelligent_route_and_retrieve(
         enable_deduplication=ROUTING_ENABLE_DEDUPLICATION,
         always_include_limitations=False  # ✅ STAGE 1: No pinned limitations (2-stage retrieval)
     )
-    
-    # ---- Add capability/limitation docs from dedicated ChromaDB when router classified as capabilities ----
-    is_capabilities_query = routing_plan and routing_plan.get("query_type") == "capabilities"
-    if CAPABILITIES_VECTORSTORE_AVAILABLE and is_capabilities_query:
-        try:
-            capability_docs = get_capability_docs(query, k=15, force=True)
-            if capability_docs:
-                # Candidates use distance (lower=better); use low distance so they rank high after normalize_scores
-                cap_distance = 0.2
-                all_candidates.extend((doc, cap_distance) for doc in capability_docs)
-                print(f"[RETRIEVAL] ✓ Retrieved {len(capability_docs)} docs from capabilities ChromaDB (query_type=capabilities)")
-            else:
-                print(f"[RETRIEVAL] Capabilities ChromaDB: no docs returned (DB may be empty or filter matched nothing)")
-        except Exception as e:
-            print(f"[WARN] Capabilities retrieval failed: {e}")
-    elif is_capabilities_query and not CAPABILITIES_VECTORSTORE_AVAILABLE:
-        print(f"[RETRIEVAL] Capabilities query (query_type=capabilities) but capabilities vectorstore not available (import or DB path)")
     
     if not all_candidates:
         print("[WARN] No candidates retrieved")
@@ -7819,6 +7718,10 @@ async def clear_corrected_responses(current_user: dict = Depends(require_admin))
 @router.get("/analytics/langfuse/teams/summary")
 async def get_teams_analytics_summary(
     time_filter: str = Query("today", description="today|yesterday|this_week|last_week|last_7_days|all"),
+    from_date: Optional[str] = Query(None, description="Start date YYYY-MM-DD (overrides time_filter)"),
+    to_date: Optional[str] = Query(None, description="End date YYYY-MM-DD (overrides time_filter)"),
+    exclude_users: Optional[str] = Query(None, description="Comma-separated list of user emails to exclude"),
+    exclude_teams: Optional[str] = Query(None, description="Comma-separated list of team names to exclude"),
     current_user: dict = Depends(require_restricted_admin)
 ):
     """
@@ -7843,48 +7746,32 @@ async def get_teams_analytics_summary(
             TraceFilteringStats,
             calculate_question_metrics,
             process_trace_batch,
+            get_analytics_date_range,
+            validate_time_filter,
         )
         import asyncio
-        from datetime import datetime, timezone, timedelta, timezone
         
+        try:
+            time_filter = validate_time_filter(time_filter)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        start_time, end_time = get_analytics_date_range(time_filter, from_date, to_date)
+        
+        exclude_list_users = [u.strip().lower() for u in (exclude_users or "").split(",") if u and u.strip()]
+        exclude_list_teams = [t.strip() for t in (exclude_teams or "").split(",") if t and t.strip()]
+
         logger.info("[LANGFUSE ANALYTICS] ===== Teams Summary Request Started =====")
         logger.info(f"[LANGFUSE ANALYTICS] Endpoint: /analytics/langfuse/teams/summary")
         logger.info(f"[LANGFUSE ANALYTICS] Time Filter: {time_filter}")
         logger.info(f"[LANGFUSE ANALYTICS] Requested by: {current_user.get('email', 'unknown')}")
+        if exclude_list_users:
+            logger.info(f"[LANGFUSE ANALYTICS] Excluding users: {exclude_list_users}")
+        if exclude_list_teams:
+            logger.info(f"[LANGFUSE ANALYTICS] Excluding teams: {exclude_list_teams}")
         
         if not langfuse_client:
             logger.error("[LANGFUSE ANALYTICS] Langfuse client not initialized")
             return {"error": "Langfuse client not initialized", "status": "error"}
-        
-        # Calculate date range
-        now = datetime.now(timezone.utc)
-        start_time = now
-        end_time = now
-        
-        if time_filter == "today":
-            start_time = now.replace(hour=0, minute=0, second=0, microsecond=0)
-            end_time = now
-        elif time_filter == "yesterday":
-            yesterday = now - timedelta(days=1)
-            start_time = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
-            end_time = yesterday.replace(hour=23, minute=59, second=59, microsecond=999999)
-        elif time_filter == "this_week":
-            start_time = now - timedelta(days=now.weekday())
-            start_time = start_time.replace(hour=0, minute=0, second=0, microsecond=0)
-            end_time = now
-        elif time_filter == "last_week":
-            days_since_monday = now.weekday()
-            last_monday = now - timedelta(days=days_since_monday + 7)
-            start_time = last_monday.replace(hour=0, minute=0, second=0, microsecond=0)
-            end_time = (last_monday + timedelta(days=6)).replace(
-                hour=23, minute=59, second=59, microsecond=999999
-            )
-        elif time_filter == "last_7_days":
-            start_time = now - timedelta(days=7)
-            end_time = now
-        else:
-            start_time = None
-            end_time = None
         
         # Log time frame details
         if start_time and end_time:
@@ -7979,6 +7866,8 @@ async def get_teams_analytics_summary(
                         start_time=start_time,
                         end_time=end_time,
                         stats=trace_stats,
+                        exclude_users=exclude_list_users if exclude_list_users else None,
+                        exclude_teams=exclude_list_teams if exclude_list_teams else None,
                     )
                     logger.debug(
                         "[LANGFUSE ANALYTICS] Page %s: Processed %s traces into teams",
@@ -8008,7 +7897,10 @@ async def get_teams_analytics_summary(
         
         # Calculate unique questions and top questions per team
         team_stats = []
+        exclude_teams_set = {t.strip().lower() for t in exclude_list_teams} if exclude_list_teams else set()
         for team_name, team_info in teams_data.items():
+            if exclude_teams_set and team_name and team_name.strip().lower() in exclude_teams_set:
+                continue
             question_metrics = calculate_question_metrics(team_info["questions_list"])
             team_stats.append({
                 "team_name": team_name,
@@ -8043,7 +7935,11 @@ async def get_teams_analytics_summary(
             "teams": team_stats,
             "total_teams": len(team_stats),
             "total_questions": total_questions,
-            "total_active_teams": total_active_teams
+            "total_active_teams": total_active_teams,
+            "filters_applied": {
+                "excluded_users_count": len(exclude_list_users),
+                "excluded_teams_count": len(exclude_list_teams),
+            } if (exclude_list_users or exclude_list_teams) else None,
         }
         
     except Exception as e:
@@ -8058,6 +7954,8 @@ async def get_teams_analytics_summary(
 async def get_team_details(
     team_name: str = Query(..., description="Team name"),
     time_filter: str = Query("today", description="today|yesterday|this_week|last_week|last_7_days|all"),
+    from_date: Optional[str] = Query(None, description="Start date YYYY-MM-DD (overrides time_filter)"),
+    to_date: Optional[str] = Query(None, description="End date YYYY-MM-DD (overrides time_filter)"),
     current_user: dict = Depends(require_restricted_admin)
 ):
     """
@@ -8076,9 +7974,19 @@ async def get_team_details(
             get_all_team_members_emails,
             get_team_by_name,
         )
-        from app.trace_utils import get_trace_email, validate_and_parse_trace_date
+        from app.trace_utils import (
+            get_trace_email,
+            validate_and_parse_trace_date,
+            get_analytics_date_range,
+            validate_time_filter,
+        )
         import asyncio
-        from datetime import datetime, timezone, timedelta, timezone
+        
+        try:
+            time_filter = validate_time_filter(time_filter)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        start_time, end_time = get_analytics_date_range(time_filter, from_date, to_date)
         
         logger.info("[LANGFUSE ANALYTICS] ===== Team Details Request Started =====")
         logger.info(f"[LANGFUSE ANALYTICS] Endpoint: /analytics/langfuse/teams/details")
@@ -8097,36 +8005,6 @@ async def get_team_details(
             return {"error": f"Team '{team_name}' not found", "status": "error"}
         
         logger.info(f"[LANGFUSE ANALYTICS] Team found: {team_name} with {len(team_info.get('members', []))} members")
-        
-        # Calculate date range
-        now = datetime.now(timezone.utc)
-        start_time = now
-        end_time = now
-        
-        if time_filter == "today":
-            start_time = now.replace(hour=0, minute=0, second=0, microsecond=0)
-            end_time = now
-        elif time_filter == "yesterday":
-            yesterday = now - timedelta(days=1)
-            start_time = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
-            end_time = yesterday.replace(hour=23, minute=59, second=59, microsecond=999999)
-        elif time_filter == "this_week":
-            start_time = now - timedelta(days=now.weekday())
-            start_time = start_time.replace(hour=0, minute=0, second=0, microsecond=0)
-            end_time = now
-        elif time_filter == "last_week":
-            days_since_monday = now.weekday()
-            last_monday = now - timedelta(days=days_since_monday + 7)
-            start_time = last_monday.replace(hour=0, minute=0, second=0, microsecond=0)
-            end_time = (last_monday + timedelta(days=6)).replace(
-                hour=23, minute=59, second=59, microsecond=999999
-            )
-        elif time_filter == "last_7_days":
-            start_time = now - timedelta(days=7)
-            end_time = now
-        else:
-            start_time = None
-            end_time = None
         
         # Log time frame details
         if start_time and end_time:
@@ -8341,6 +8219,8 @@ async def get_team_details(
 @router.get("/analytics/langfuse/dashboard-summary")
 async def get_langfuse_dashboard_summary(
     time_filter: str = Query("today", description="today|yesterday|this_week|last_week|last_7_days|all"),
+    from_date: Optional[str] = Query(None, description="Start date YYYY-MM-DD (overrides time_filter)"),
+    to_date: Optional[str] = Query(None, description="End date YYYY-MM-DD (overrides time_filter)"),
     current_user: dict = Depends(require_restricted_admin)
 ):
     """
@@ -8362,8 +8242,14 @@ async def get_langfuse_dashboard_summary(
     """
     try:
         from app.langfuse_integration import langfuse_client
+        from app.trace_utils import get_analytics_date_range, validate_time_filter
         import asyncio
-        from datetime import datetime, timezone, timedelta, timezone
+        
+        try:
+            time_filter = validate_time_filter(time_filter)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        start_time, end_time = get_analytics_date_range(time_filter, from_date, to_date)
         
         logger.info("[LANGFUSE ANALYTICS] ===== Dashboard Summary Request Started =====")
         logger.info(f"[LANGFUSE ANALYTICS] Endpoint: /analytics/langfuse/dashboard-summary")
@@ -8373,40 +8259,6 @@ async def get_langfuse_dashboard_summary(
         if not langfuse_client:
             logger.error("[LANGFUSE ANALYTICS] Langfuse client not initialized")
             return {"error": "Langfuse client not initialized", "status": "error"}
-        
-        # Calculate date range based on filter
-        now = datetime.now(timezone.utc)
-        start_time = now
-        end_time = now
-        
-        if time_filter == "today":
-            start_time = now.replace(hour=0, minute=0, second=0, microsecond=0)
-            end_time = now
-        elif time_filter == "yesterday":
-            yesterday = now - timedelta(days=1)
-            start_time = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
-            end_time = yesterday.replace(hour=23, minute=59, second=59, microsecond=999999)
-        elif time_filter == "this_week":
-            # Monday to now
-            start_time = now - timedelta(days=now.weekday())
-            start_time = start_time.replace(hour=0, minute=0, second=0, microsecond=0)
-            end_time = now
-        elif time_filter == "last_week":
-            # Previous calendar week (Monday to Sunday of last week)
-            days_since_monday = now.weekday()
-            # Go back to last Monday
-            last_monday = now - timedelta(days=days_since_monday + 7)
-            start_time = last_monday.replace(hour=0, minute=0, second=0, microsecond=0)
-            # Last Sunday (end of last week)
-            end_time = last_monday + timedelta(days=6)
-            end_time = end_time.replace(hour=23, minute=59, second=59, microsecond=999999)
-        elif time_filter == "last_7_days":
-            # Rolling 7 days
-            start_time = now - timedelta(days=7)
-            end_time = now
-        else:  # "all"
-            start_time = None
-            end_time = None
         
         # Log time frame details
         if start_time and end_time:
@@ -8573,6 +8425,8 @@ async def get_langfuse_dashboard_summary(
 @router.get("/analytics/langfuse/users")
 async def get_langfuse_users_analytics(
     time_filter: str = Query("today", description="today|yesterday|this_week|last_week|last_7_days|all"),
+    from_date: Optional[str] = Query(None, description="Start date YYYY-MM-DD (overrides time_filter)"),
+    to_date: Optional[str] = Query(None, description="End date YYYY-MM-DD (overrides time_filter)"),
     current_user: dict = Depends(require_restricted_admin)
 ):
     """
@@ -8595,8 +8449,14 @@ async def get_langfuse_users_analytics(
     try:
         from app.langfuse_integration import langfuse_client
         from config import LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST
+        from app.trace_utils import get_analytics_date_range, validate_time_filter
         import asyncio
-        from datetime import datetime, timezone, timedelta, timezone
+        
+        try:
+            time_filter = validate_time_filter(time_filter)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        start_time, end_time = get_analytics_date_range(time_filter, from_date, to_date)
         
         logger.info("[LANGFUSE ANALYTICS] ===== Users Analytics Request Started =====")
         logger.info(f"[LANGFUSE ANALYTICS] Endpoint: /analytics/langfuse/users")
@@ -8609,36 +8469,6 @@ async def get_langfuse_users_analytics(
                 "error": "Langfuse client not initialized",
                 "status": "error"
             }
-        
-        # Calculate date range
-        now = datetime.now(timezone.utc)
-        start_time = now
-        end_time = now
-        
-        if time_filter == "today":
-            start_time = now.replace(hour=0, minute=0, second=0, microsecond=0)
-            end_time = now
-        elif time_filter == "yesterday":
-            yesterday = now - timedelta(days=1)
-            start_time = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
-            end_time = yesterday.replace(hour=23, minute=59, second=59, microsecond=999999)
-        elif time_filter == "this_week":
-            start_time = now - timedelta(days=now.weekday())
-            start_time = start_time.replace(hour=0, minute=0, second=0, microsecond=0)
-            end_time = now
-        elif time_filter == "last_week":
-            days_since_monday = now.weekday()
-            last_monday = now - timedelta(days=days_since_monday + 7)
-            start_time = last_monday.replace(hour=0, minute=0, second=0, microsecond=0)
-            end_time = (last_monday + timedelta(days=6)).replace(
-                hour=23, minute=59, second=59, microsecond=999999
-            )
-        elif time_filter == "last_7_days":
-            start_time = now - timedelta(days=7)
-            end_time = now
-        else:
-            start_time = None
-            end_time = None
         
         # Log time frame details
         if start_time and end_time:
@@ -8830,6 +8660,8 @@ async def get_langfuse_users_analytics(
 async def get_user_langfuse_analytics(
     user_id: str,
     time_filter: str = Query("today", description="today|yesterday|this_week|last_week|last_7_days|all"),
+    from_date: Optional[str] = Query(None, description="Start date YYYY-MM-DD (overrides time_filter)"),
+    to_date: Optional[str] = Query(None, description="End date YYYY-MM-DD (overrides time_filter)"),
     current_user: dict = Depends(require_restricted_admin)
 ):
     """
@@ -8851,8 +8683,14 @@ async def get_user_langfuse_analytics(
     try:
         from app.langfuse_integration import langfuse_client
         from config import LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST
+        from app.trace_utils import get_analytics_date_range, validate_time_filter
         import asyncio
-        from datetime import datetime, timezone, timedelta, timezone
+        
+        try:
+            time_filter = validate_time_filter(time_filter)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        start_time, end_time = get_analytics_date_range(time_filter, from_date, to_date)
         
         logger.info("[LANGFUSE ANALYTICS] ===== User Analytics Request Started =====")
         logger.info(f"[LANGFUSE ANALYTICS] Endpoint: /analytics/langfuse/users/{user_id}")
@@ -8863,36 +8701,6 @@ async def get_user_langfuse_analytics(
         if not langfuse_client:
             logger.error("[LANGFUSE ANALYTICS] Langfuse client not initialized")
             return {"error": "Langfuse client not initialized"}
-        
-        # Calculate date range
-        now = datetime.now(timezone.utc)
-        start_time = now
-        end_time = now
-        
-        if time_filter == "today":
-            start_time = now.replace(hour=0, minute=0, second=0, microsecond=0)
-            end_time = now
-        elif time_filter == "yesterday":
-            yesterday = now - timedelta(days=1)
-            start_time = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
-            end_time = yesterday.replace(hour=23, minute=59, second=59, microsecond=999999)
-        elif time_filter == "this_week":
-            start_time = now - timedelta(days=now.weekday())
-            start_time = start_time.replace(hour=0, minute=0, second=0, microsecond=0)
-            end_time = now
-        elif time_filter == "last_week":
-            days_since_monday = now.weekday()
-            last_monday = now - timedelta(days=days_since_monday + 7)
-            start_time = last_monday.replace(hour=0, minute=0, second=0, microsecond=0)
-            end_time = (last_monday + timedelta(days=6)).replace(
-                hour=23, minute=59, second=59, microsecond=999999
-            )
-        elif time_filter == "last_7_days":
-            start_time = now - timedelta(days=7)
-            end_time = now
-        else:
-            start_time = None
-            end_time = None
         
         # Log time frame details
         if start_time and end_time:

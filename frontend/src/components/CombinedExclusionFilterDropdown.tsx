@@ -69,39 +69,41 @@ export default function CombinedExclusionFilterDropdown({
   }, [excludedTeams]);
 
   const toggleUser = (email: string) => {
-    setExcludedUsers(prev => {
-      if (prev.includes(email)) {
-        return prev.filter(e => e !== email);
-      } else {
-        return [...prev, email];
-      }
-    });
+    const next = excludedUsers.includes(email)
+      ? excludedUsers.filter(e => e !== email)
+      : [...excludedUsers, email];
+    setExcludedUsers(next);
+    onDeveloperExclusionChange(next);
   };
 
   const toggleTeam = (teamName: string) => {
-    setExcludedTeams(prev => {
-      if (prev.includes(teamName)) {
-        return prev.filter(t => t !== teamName);
-      } else {
-        return [...prev, teamName];
-      }
-    });
+    const next = excludedTeams.includes(teamName)
+      ? excludedTeams.filter(t => t !== teamName)
+      : [...excludedTeams, teamName];
+    setExcludedTeams(next);
+    onTeamExclusionChange(next); // Notify parent immediately (avoids Apply-click race)
   };
 
   const selectAllDevelopers = () => {
-    setExcludedUsers([...developerEmails]);
+    const next = [...developerEmails];
+    setExcludedUsers(next);
+    onDeveloperExclusionChange(next);
   };
 
   const deselectAllDevelopers = () => {
     setExcludedUsers([]);
+    onDeveloperExclusionChange([]);
   };
 
   const selectAllTeams = () => {
-    setExcludedTeams(teams.map(team => team.team_name));
+    const next = teams.map(team => team.team_name);
+    setExcludedTeams(next);
+    onTeamExclusionChange(next);
   };
 
   const deselectAllTeams = () => {
     setExcludedTeams([]);
+    onTeamExclusionChange([]);
   };
 
   const formatDisplayText = (): string => {

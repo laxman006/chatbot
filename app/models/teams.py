@@ -23,6 +23,8 @@ TEAMS_STRUCTURE = {
             {"name": "Ravi Srivastava", "email": "ravi.srivastava@cloudfuze.com"},
             {"name": "Vishal Kumar", "email": "Vishal.Kumar@cloudfuze.com"},
             {"name": "Jaswanth Adari", "email": "jaswanth.adari@cloudfuze.com"},
+            {"name" : " laxman janakwade", "email": "Laxman.Janakwade@cloudfuze.com"},
+            {"name" : "Soubhagya Behera", "email": "Soubhagya.Behera@cloudfuze.com"},
         ],
         "color": "#3B82F6",  # Blue
         "description": "Content Development"
@@ -247,7 +249,7 @@ TEAMS_STRUCTURE = {
         "description": "M5"
     },
     "BD": {
-        "lead": "Varsha Nallasham",
+        "lead": "Varsha Nallashami",
         "lead_email": "Varsha.Nallashami@cloudfuze.com",
         "members": [
             {"name": "Karthik Brahmakal", "email": "karthik.brahmakal@cloudfuze.com"},

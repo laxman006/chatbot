@@ -10,7 +10,7 @@ by providing centralized functions for:
 - Comprehensive logging and diagnostics
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Tuple, Optional, Any
 from collections import Counter
 import logging
@@ -19,6 +19,93 @@ import os
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+# Valid time filter presets for Langfuse analytics
+VALID_TIME_FILTERS = frozenset({"today", "yesterday", "this_week", "last_week", "last_7_days", "all"})
+
+
+def get_analytics_date_range(
+    time_filter: str,
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+    now: Optional[datetime] = None,
+) -> Tuple[Optional[datetime], Optional[datetime]]:
+    """
+    Get start_time and end_time for analytics queries.
+    
+    Supports:
+    - Preset time_filter: today, yesterday, this_week, last_week, last_7_days, all
+    - Custom range: from_date/to_date in YYYY-MM-DD format (overrides time_filter)
+    
+    Args:
+        time_filter: Preset filter (today, yesterday, etc.)
+        from_date: Optional start date YYYY-MM-DD
+        to_date: Optional end date YYYY-MM-DD
+        now: Optional reference time (default: now UTC)
+    
+    Returns:
+        (start_time, end_time) - both UTC, or (None, None) for "all"
+    """
+    now = now or datetime.now(timezone.utc)
+    
+    # Custom date range takes precedence
+    if from_date or to_date:
+        try:
+            start_time = None
+            end_time = None
+            if from_date:
+                parsed = datetime.strptime(from_date, "%Y-%m-%d")
+                start_time = parsed.replace(tzinfo=timezone.utc)
+            if to_date:
+                parsed = datetime.strptime(to_date, "%Y-%m-%d")
+                end_time = parsed.replace(
+                    hour=23, minute=59, second=59, microsecond=999999,
+                    tzinfo=timezone.utc
+                )
+            return start_time, end_time
+        except ValueError:
+            logger.warning(f"Invalid from_date/to_date format, falling back to time_filter")
+    
+    if time_filter == "today":
+        start_time = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        return start_time, now
+    elif time_filter == "yesterday":
+        yesterday = now - timedelta(days=1)
+        start_time = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_time = yesterday.replace(hour=23, minute=59, second=59, microsecond=999999)
+        return start_time, end_time
+    elif time_filter == "this_week":
+        start_time = now - timedelta(days=now.weekday())
+        start_time = start_time.replace(hour=0, minute=0, second=0, microsecond=0)
+        return start_time, now
+    elif time_filter == "last_week":
+        days_since_monday = now.weekday()
+        last_monday = now - timedelta(days=days_since_monday + 7)
+        start_time = last_monday.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_time = (last_monday + timedelta(days=6)).replace(
+            hour=23, minute=59, second=59, microsecond=999999
+        )
+        return start_time, end_time
+    elif time_filter == "last_7_days":
+        start_time = now - timedelta(days=7)
+        return start_time, now
+    else:
+        return None, None
+
+
+def validate_time_filter(time_filter: str) -> str:
+    """
+    Validate time_filter. Returns the filter if valid, raises ValueError if invalid.
+    """
+    if not time_filter or not isinstance(time_filter, str):
+        raise ValueError("time_filter is required")
+    normalized = time_filter.strip().lower()
+    if normalized not in VALID_TIME_FILTERS:
+        raise ValueError(
+            f"Invalid time_filter '{time_filter}'. "
+            f"Must be one of: {', '.join(sorted(VALID_TIME_FILTERS))}"
+        )
+    return normalized
 
 
 class TraceFilteringStats:
@@ -131,9 +218,26 @@ def validate_and_parse_trace_date(
         return None, False
 
 
+def _normalize_and_validate_email(value: Any) -> Optional[str]:
+    """Normalize and validate an email string. Returns None if invalid."""
+    if not value:
+        return None
+    if isinstance(value, list):
+        value = value[0] if value else None
+    if not value:
+        return None
+    s = str(value).strip().lower()
+    if "@" not in s or len(s) < 5:
+        return None
+    return s
+
+
 def get_trace_email(trace: Dict[str, Any]) -> Optional[str]:
     """
-    Safely extract and validate email from trace metadata.
+    Safely extract and validate email from trace.
+    
+    Checks metadata.user_email first, then falls back to trace.userId when it
+    looks like an email (e.g. when user_id is set to email for analytics).
     
     Args:
         trace: Trace dictionary from Langfuse API
@@ -144,24 +248,18 @@ def get_trace_email(trace: Dict[str, Any]) -> Optional[str]:
     try:
         metadata = trace.get("metadata", {})
         user_email = metadata.get("user_email")
+        email = _normalize_and_validate_email(user_email)
+        if email:
+            return email
         
-        if not user_email:
-            return None
+        # Fallback: userId may be email when auth uses email as user_id
+        user_id = trace.get("userId")
+        if user_id and isinstance(user_id, str) and "@" in user_id:
+            email = _normalize_and_validate_email(user_id)
+            if email:
+                return email
         
-        # Handle list values (convert to string)
-        if isinstance(user_email, list):
-            user_email = user_email[0] if user_email else None
-        
-        if not user_email:
-            return None
-        
-        user_email_str = str(user_email).strip().lower()
-        
-        # Basic email validation
-        if "@" not in user_email_str or len(user_email_str) < 5:
-            return None
-        
-        return user_email_str
+        return None
     
     except Exception as e:
         logger.warning(f"Error extracting email from trace: {e}")
@@ -220,7 +318,9 @@ def process_trace_batch(
     teams_data: Dict[str, Dict],
     start_time: Optional[datetime] = None,
     end_time: Optional[datetime] = None,
-    stats: Optional[TraceFilteringStats] = None
+    stats: Optional[TraceFilteringStats] = None,
+    exclude_users: Optional[List[str]] = None,
+    exclude_teams: Optional[List[str]] = None,
 ) -> int:
     """
     Process a batch of traces and assign to teams.
@@ -233,12 +333,17 @@ def process_trace_batch(
         start_time: Optional start of date range
         end_time: Optional end of date range
         stats: Statistics tracker (created if not provided)
+        exclude_users: Optional list of user emails to exclude from analytics
+        exclude_teams: Optional list of team names to exclude from analytics
     
     Returns:
         Number of traces successfully filtered and added
     """
     if stats is None:
         stats = TraceFilteringStats()
+    
+    exclude_emails_lower = {e.strip().lower() for e in (exclude_users or []) if e and e.strip()}
+    exclude_teams_set = {t.strip().lower() for t in (exclude_teams or []) if t and t.strip()}
     
     traces_added = 0
     sales_teams = {"Sales [SMB]", "Sales [ENT]", "Sales [AM]"}  # For diagnostics
@@ -301,6 +406,14 @@ def process_trace_batch(
                     team = get_team_by_email_func(extracted_email) if extracted_email else None
                     if team in sales_teams:
                         logger.debug(f"[SALES_DEBUG] Trace NOT ASSIGNED for {extracted_email} (assigned_to: {team})")
+                continue
+            
+            # Skip excluded users
+            if exclude_emails_lower and extracted_email and extracted_email.lower() in exclude_emails_lower:
+                continue
+            
+            # Skip excluded teams (case-insensitive)
+            if exclude_teams_set and team_name and team_name.strip().lower() in exclude_teams_set:
                 continue
             
             # Add to team data

@@ -6,6 +6,7 @@ import { getCurrentUser } from '@/lib/session-utils';
 import { getApiBase } from '@/lib/api';
 import { isAdminEmail } from '@/constants/admins';
 import { colorPalette } from '@/constants/colors';
+import CombinedExclusionFilterDropdown from '@/components/CombinedExclusionFilterDropdown';
 
 interface TeamStats {
   team_name: string;
@@ -108,6 +109,8 @@ export default function TeamsAnalyticsPage() {
   const [selectedFilter, setSelectedFilter] = useState<string>('this_week'); // Filter selected by user
   const [appliedFilter, setAppliedFilter] = useState<string>('this_week'); // Filter actually applied/fetched
   const [lastFetchTime, setLastFetchTime] = useState<number | null>(null);
+  const [excludedUsers, setExcludedUsers] = useState<string[]>([]);
+  const [excludedTeams, setExcludedTeams] = useState<string[]>([]);
 
   // Check admin access on mount
   useEffect(() => {
@@ -129,7 +132,11 @@ export default function TeamsAnalyticsPage() {
   }, [router]);
 
   // Fetch teams analytics
-  const fetchTeamsAnalytics = useCallback(async (filter: string) => {
+  const fetchTeamsAnalytics = useCallback(async (
+    filter: string,
+    excludeUsers?: string[],
+    excludeTeams?: string[]
+  ) => {
     try {
       setFetching(true);
       setError(null);
@@ -151,7 +158,14 @@ export default function TeamsAnalyticsPage() {
         'Content-Type': 'application/json',
       };
 
-      const url = `${apiBase}/analytics/langfuse/teams/summary?time_filter=${filter}`;
+      const params = new URLSearchParams({ time_filter: filter });
+      if (excludeUsers && excludeUsers.length > 0) {
+        params.append('exclude_users', excludeUsers.join(','));
+      }
+      if (excludeTeams && excludeTeams.length > 0) {
+        params.append('exclude_teams', excludeTeams.join(','));
+      }
+      const url = `${apiBase}/analytics/langfuse/teams/summary?${params.toString()}`;
       console.log('[Teams Fetch] Attempting to fetch from:', url);
       console.log('[Teams Fetch] Headers:', headers);
 
@@ -280,7 +294,11 @@ export default function TeamsAnalyticsPage() {
   // Handle apply button click (fetches with selected filter)
   const handleApplyFilter = () => {
     setAppliedFilter(selectedFilter);
-    fetchTeamsAnalytics(selectedFilter);
+    fetchTeamsAnalytics(
+      selectedFilter,
+      excludedUsers.length > 0 ? excludedUsers : undefined,
+      excludedTeams.length > 0 ? excludedTeams : undefined
+    );
   };
 
   // NO automatic fetching - only fetch when Apply button is clicked
@@ -458,6 +476,10 @@ export default function TeamsAnalyticsPage() {
         >
           {fetching ? 'Loading...' : 'Apply'}
         </button>
+        <CombinedExclusionFilterDropdown
+          onDeveloperExclusionChange={setExcludedUsers}
+          onTeamExclusionChange={setExcludedTeams}
+        />
       </div>
 
       {/* Fetch Time */}
