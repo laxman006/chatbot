@@ -30,6 +30,15 @@ except ImportError as e:
     _get_jira_vectorstore_cached = None
     print(f"[WARNING] Jira vectorstore not available: {e}")
     print("[INFO] Jira features will be disabled. Install jira package with: pip install jira")
+# Optional capabilities ChromaDB (dedicated DB for migration capabilities/limitations)
+try:
+    from app.capabilities_vectorstore import is_capability_related_query, is_capability_related_query_llm, get_capability_docs
+    CAPABILITIES_VECTORSTORE_AVAILABLE = True
+except ImportError:
+    CAPABILITIES_VECTORSTORE_AVAILABLE = False
+    is_capability_related_query = lambda q: False
+    is_capability_related_query_llm = lambda q, llm: False
+    get_capability_docs = lambda q, k=15, force=False: []
 from app.mongodb_memory import (
     get_response_versions,
     set_current_version,
@@ -1384,6 +1393,67 @@ def extract_migration_direction(text: str) -> dict:
         "amazon_s3": [r"\bamazon\s+s3\b", r"\bs3\b"],
         "sharefile": [r"\bsharefile\b", r"\bcitrix\s+sharefile\b"],
     }
+    
+    # Content migration combinations (from capability matrix Excel) — for filtering / direction when query is about migration capabilities
+    content_migration_display_patterns = [
+        "Box - One Drive for Business",
+        "Box - Share Point Online",
+        "Box - Google Suite",
+        "Box - Google Shared Drive",
+        "Box - Dropbox",
+        "Box for business to Box for business",
+        "Dropbox for Business - One Drive for Business",
+        "Dropbox for Business - Share Point Online",
+        "Dropbox for Business - Google Drive",
+        "Dropbox for Business - Google Shared Drive",
+        "Google Suite - One Drive for Business",
+        "Google Suite - Share Point Online",
+        "Google Suite - Google Suite",
+        "Google Suite - Dropbox",
+        "GSuite - Egnyte",
+        "Gsuite - Box",
+        "Shared Drive-Shared Drive",
+        "Shared Drive- Share Point Online",
+        "Citrix - One Drive for Business",
+        "Citrix -Share Point Online",
+        "Citrix -Google Suite",
+        "Citrix - Shared Drive",
+        "Egnyte - Onedrive for Business",
+        "Egnyte - Sharepoint for Business",
+        "Egnyte - Gsuite",
+        "Egnyte - Gshared Drive",
+        "Box - Citrix",
+        "DropBox to Azure",
+        "Dropbox to Box",
+        "DropBox to egnyte",
+        "Citrix - Citrix",
+        "Shared Drive- Egnyte",
+        "Shared Drive -  Onedrive",
+        "Share point online - Shared Drive",
+        "share point online - mydrive",
+        "share point online - Share point online",
+        "sharepint online -egnyte",
+        "NFS - onedrive",
+        "NFS - sharepoint online",
+        "NFS t-mydrive",
+        "NFS t--shared drive",
+        "OneDrive to Amazon s3",
+        "Box to Amazon s3",
+        "SharePoint Online to Amazon S3",
+        "Google Shared Drive to Amazon S3",
+        "Sharefile to Amazon S3",
+        "SharePoint Online to Azure",
+        "Google Shared Drive to Azure",
+        "Sharefile to Azure",
+        "Dropbox to Azure",
+        "Egnyte to Azure",
+        "Amazon S3 to SharePoint Online",
+        "Onedrive to- onedrive",
+        "Onedrive-google mydrive",
+        "Amazon workdocs to NFS",
+        "Amazon wordocs to Sharepoint",
+        "Amazon wordocs to OneDrive",
+    ]
     
     # CRITICAL FIX: Handle ambiguous "chat" patterns BEFORE general direction matching
     # Check for explicit "Teams to Chat" or "Chat to Teams" patterns first
@@ -3005,6 +3075,20 @@ def perplexity_style_retrieve(
     
     pool_candidates.extend(jira_pool)
     
+    # ---- 5b. Add capability/limitation docs from dedicated ChromaDB when query is capability-related (LLM classification, fallback path) ----
+    if CAPABILITIES_VECTORSTORE_AVAILABLE:
+        try:
+            _cap_llm = get_llm(temperature=0)
+            if is_capability_related_query_llm(query, _cap_llm):
+                capability_docs = get_capability_docs(query, k=15, force=True)
+                if capability_docs:
+                    # Add with high similarity so they enter the pool (rerank will order)
+                    cap_score = 0.85
+                    pool_candidates.extend((doc, cap_score) for doc in capability_docs)
+                    print(f"[RETRIEVAL] Retrieved {len(capability_docs)} docs from capabilities ChromaDB (LLM classified as capabilities)")
+        except Exception as e:
+            print(f"[WARN] Capabilities retrieval failed: {e}")
+    
     # ---- 6. Deduplicate by document (max 2 chunks per document) ----
     import hashlib
     MAX_CHUNKS_PER_DOC = 2
@@ -3258,6 +3342,23 @@ def intelligent_route_and_retrieve(
         enable_deduplication=ROUTING_ENABLE_DEDUPLICATION,
         always_include_limitations=False  # ✅ STAGE 1: No pinned limitations (2-stage retrieval)
     )
+    
+    # ---- Add capability/limitation docs from dedicated ChromaDB when router classified as capabilities ----
+    is_capabilities_query = routing_plan and routing_plan.get("query_type") == "capabilities"
+    if CAPABILITIES_VECTORSTORE_AVAILABLE and is_capabilities_query:
+        try:
+            capability_docs = get_capability_docs(query, k=15, force=True)
+            if capability_docs:
+                # Candidates use distance (lower=better); use low distance so they rank high after normalize_scores
+                cap_distance = 0.2
+                all_candidates.extend((doc, cap_distance) for doc in capability_docs)
+                print(f"[RETRIEVAL] ✓ Retrieved {len(capability_docs)} docs from capabilities ChromaDB (query_type=capabilities)")
+            else:
+                print(f"[RETRIEVAL] Capabilities ChromaDB: no docs returned (DB may be empty or filter matched nothing)")
+        except Exception as e:
+            print(f"[WARN] Capabilities retrieval failed: {e}")
+    elif is_capabilities_query and not CAPABILITIES_VECTORSTORE_AVAILABLE:
+        print(f"[RETRIEVAL] Capabilities query (query_type=capabilities) but capabilities vectorstore not available (import or DB path)")
     
     if not all_candidates:
         print("[WARN] No candidates retrieved")

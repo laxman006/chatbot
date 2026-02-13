@@ -1,7 +1,5 @@
 export const ADMIN_EMAILS = [
-  'laxman.kadari@cloudfuze.com',
-  'chaitanya.malle@cloudfuze.com',
-  'nirosh.reddy@cloudfuze.com'
+  'chaitanya.malle@cloudfuze.com'
 ].map((email) => email.toLowerCase());
 
 export function isAdminEmail(email?: string | null): boolean {

@@ -75,6 +75,13 @@ class MongoDBMemoryManager:
                     # Create indexes for better performance
                     await self._create_indexes()
                     
+                    # Preload capabilities ChromaDB so startup logs show if it's available
+                    try:
+                        from app.capabilities_vectorstore import preload_capabilities_vectorstore
+                        preload_capabilities_vectorstore()
+                    except Exception as cap_e:
+                        logger.debug(f"[STARTUP] Capabilities vectorstore preload skipped: {cap_e}")
+                    
                 except ConnectionFailure as e:
                     logger.error(f"Failed to connect to MongoDB: {e}")
                     raise e

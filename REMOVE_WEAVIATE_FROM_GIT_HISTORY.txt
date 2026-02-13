@@ -1,0 +1,15 @@
+# Remove weaviate_backup from Git history (fix GH001 large file push error)
+
+Run these commands in Git Bash from the repo root (Slack2teams-2-confident-chatbot).
+
+Step 1 - Rewrite history to remove weaviate_backup from every commit:
+  git filter-branch --force --index-filter "git rm -rf --cached --ignore-unmatch weaviate_backup/" --prune-empty HEAD
+
+Step 2 - Clean up refs and run garbage collection:
+  git reflog expire --expire=now --all
+  git gc --prune=now --aggressive
+
+Step 3 - Force-push your branch (replace with your branch name if different):
+  git push --force origin before-agentic-rag
+
+After this, the push should succeed. You can delete this file afterward.

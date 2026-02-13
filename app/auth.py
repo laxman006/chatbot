@@ -27,8 +27,6 @@ security = HTTPBearer()
 # Restricted admin allowlist (lowercase for consistent comparison)
 ADMIN_EMAILS: Set[str] = {
     "chaitanya.malle@cloudfuze.com",
-    "laxman.kadari@cloudfuze.com",
-    "nirosh.reddy@cloudfuze.com"
 }
 
 # Developer emails to exclude from dashboard statistics

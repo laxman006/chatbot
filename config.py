@@ -386,6 +386,9 @@ SHAREPOINT_LIMITATIONS_SITE_URL = os.getenv("SHAREPOINT_LIMITATIONS_SITE_URL", "
 SHAREPOINT_LIMITATIONS_FOLDER_PATH = os.getenv("SHAREPOINT_LIMITATIONS_FOLDER_PATH", "Neutara Labs/Limitations and features")
 SHAREPOINT_LIMITATIONS_MAX_DEPTH = int(os.getenv("SHAREPOINT_LIMITATIONS_MAX_DEPTH", "999"))
 
+# Capabilities ChromaDB: when true, ingest script reads Excel files directly from SharePoint (no local download)
+ENABLE_CAPABILITY_FROM_SHAREPOINT = os.getenv("ENABLE_CAPABILITY_FROM_SHAREPOINT", "false").lower() == "true"
+
 # PPTX Extraction Pipeline
 # Extract PPTX files and add to vectorstore (production-ready)
 ENABLE_PPTX_PIPELINE = os.getenv("ENABLE_PPTX_PIPELINE", "false").lower() == "true"

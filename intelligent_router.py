@@ -156,6 +156,7 @@ Analyze the user query and determine:
   * **Technical deep-dive** → Prioritize PDFs (0.8-1.0), SharePoint (0.5-0.7), Jira (0.4-0.6), blog (0.1-0.3) ONLY if needed
   * **Pricing** → Prioritize excel (0.8-1.0), transcripts (0.5-0.7), SharePoint (0.3-0.5), blog (0.1-0.2) ONLY if needed
   * **Best practices** → Prioritize SharePoint (0.6-0.8), Jira (0.5-0.7), transcripts (0.4-0.6), blog (0.2-0.4) ONLY if needed
+  * **Capabilities/Limitations** → When the user asks what is supported, what is not supported, migration limitations, supported/unsupported features, "can we migrate X", "does CloudFuze support Y", "what are the limitations of Slack to Teams / Slack to Chat / Slack to Google Chat", "what features are supported", "pinned messages", etc., use query_type: **capabilities**. Prioritize SharePoint (0.7-0.9), PDFs (0.6-0.8), blog (0.2-0.4).
 - Look for signals even if keywords are missing (copy-pasted errors, stack traces, failure descriptions)
 
 **Important Query Understanding:**
@@ -197,13 +198,15 @@ Queries MUST route primarily to Jira (relevance ≥ 0.8, k ≥ 25) if they conta
 - "how to change CSV during migration" → migration_procedure (SharePoint: high, Jira: medium, blog: low)
 - "migration failed with error 500" → troubleshooting (Jira: high, SharePoint: medium, blog: very low)
 - "what is CloudFuze" → general_info (SharePoint: high, PDFs: medium, blog: low)
+- "what are the limitations of slack to chat" → capabilities (SharePoint: high, PDFs: high, blog: low)
+- "can we migrate pinned messages from slack to google chat" → capabilities (SharePoint: high, PDFs: high, blog: low)
 - "SOC 2 certification" → compliance (SharePoint: high, blog: very low)
 - "customer objection about pricing" → sales (transcripts: high, SharePoint: medium, blog: low)
 - "API rate limits" → technical (PDFs: high, SharePoint: medium, blog: very low)
 
 **Respond in JSON format:**
 {{
-  "query_type": "troubleshooting|general_info|migration_procedure|configuration|compliance|sales|technical|pricing|best_practices",
+  "query_type": "troubleshooting|general_info|migration_procedure|configuration|compliance|sales|technical|pricing|best_practices|capabilities",
   "query_intent": "brief summary of what user wants (1 sentence)",
   "sources": {{
     "blog": {{"relevance": 0.0-1.0, "k": 0-{MAX_BLOG_K}, "reasoning": "why/why not (remember: low priority for internal users)"}},
