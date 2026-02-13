@@ -3,6 +3,8 @@
 Weekly Reports Scheduler
 
 Scheduled task that generates and sends weekly team leaderboard reports.
+Uses MongoDB (message_events, user_activity) only - no vectorstore/Weaviate.
+Runs every Monday at configured time; on startup runs once if the scheduled time was missed (e.g. after deploy).
 """
 
 import os
@@ -19,6 +21,35 @@ from app.email_sender import send_weekly_report_email
 from app.models.teams import get_team_by_name, get_team_color, get_team_by_member_email, TEAMS_STRUCTURE
 
 logger = logging.getLogger(__name__)
+
+
+def run_weekly_report_if_missed(send_hour: int, send_minute: int) -> None:
+    """
+    Run the weekly report once at startup if we missed the scheduled run this week.
+    E.g. if the app is deployed on Tuesday, or on Monday after the scheduled time, run the report.
+    Uses scheduler timezone from config.
+    Runs in a thread so asyncio.run() inside scheduled_weekly_reports_sync does not conflict
+    with the server's already-running event loop.
+    """
+    try:
+        from config import SCHEDULER_TIMEZONE
+        import pytz
+        tz = pytz.timezone(SCHEDULER_TIMEZONE) if SCHEDULER_TIMEZONE else pytz.UTC
+    except Exception:
+        import pytz
+        tz = pytz.UTC
+    now = datetime.now(tz)
+    # Monday = 0: run if (Tuesday–Sunday) or (Monday and already past scheduled time)
+    if now.weekday() == 0:
+        scheduled_today = now.replace(hour=send_hour, minute=send_minute, second=0, microsecond=0)
+        if now < scheduled_today:
+            return  # Cron will run later today
+    logger.info("[WEEKLY REPORT] Startup: scheduled run was missed this week; running report once...")
+    # Run in a thread: server lifespan already has an event loop, and scheduled_weekly_reports_sync
+    # uses asyncio.run(), which cannot be called from a running loop.
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        executor.submit(scheduled_weekly_reports_sync).result()
 
 
 async def scheduled_weekly_reports():

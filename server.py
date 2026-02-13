@@ -147,7 +147,7 @@ async def lifespan(app: FastAPI):
         from config import WEEKLY_REPORT_ENABLED, WEEKLY_REPORT_SEND_HOUR, WEEKLY_REPORT_SEND_MINUTE
         
         if WEEKLY_REPORT_ENABLED:
-            from app.weekly_reports_scheduler import scheduled_weekly_reports_sync
+            from app.weekly_reports_scheduler import scheduled_weekly_reports_sync, run_weekly_report_if_missed
             
             # Use the same timezone as scheduler initialization
             timezone_str = SCHEDULER_TIMEZONE if SCHEDULER_TIMEZONE else "system local timezone"
@@ -158,12 +158,8 @@ async def lifespan(app: FastAPI):
                 name='Weekly Team Leaderboard Report',
                 replace_existing=True
             )
-<<<<<<< HEAD
-            logger.info(f"[STARTUP] ✅ Weekly report scheduler started (runs every Monday at {WEEKLY_REPORT_SEND_HOUR:02d}:{WEEKLY_REPORT_SEND_MINUTE:02d} {timezone_str})")
-=======
-            logger.info(f"[STARTUP] ✅ Weekly report scheduler started (runs every Monday at {WEEKLY_REPORT_SEND_HOUR:02d}:{WEEKLY_REPORT_SEND_MINUTE:02d})")
+            logger.info(f"[STARTUP] Weekly report scheduler started (runs every Monday at {WEEKLY_REPORT_SEND_HOUR:02d}:{WEEKLY_REPORT_SEND_MINUTE:02d} {timezone_str})")
             run_weekly_report_if_missed(WEEKLY_REPORT_SEND_HOUR, WEEKLY_REPORT_SEND_MINUTE)
->>>>>>> de3dddcaa21a73eb710ead852c326d33c91c8b70
         else:
             logger.info("[STARTUP] Weekly report scheduler is disabled (WEEKLY_REPORT_ENABLED=false)")
     except Exception as e:

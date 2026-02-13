@@ -114,6 +114,46 @@ def send_email_via_graph_api(
         return False
 
 
+def send_weekly_report_email(
+    report_data: dict,
+    date_range: str,
+    html_body: str,
+    pdf_path: Optional[str] = None,
+    exclude_note: Optional[str] = None
+) -> bool:
+    """
+    Send a single weekly report email to admin users (used by the scheduler).
+    Uses Microsoft Graph API with HTML body and optional PDF attachment.
+
+    Args:
+        report_data: Team statistics dict (for logging; not used for content)
+        date_range: Date range string for subject line
+        html_body: HTML content for email body
+        pdf_path: Optional path to PDF attachment
+        exclude_note: Optional note about exclusions (e.g. "Excluding Neutara Labs")
+
+    Returns:
+        True if email sent successfully, False otherwise
+    """
+    admin_email_list = list(ADMIN_EMAILS)
+    if not admin_email_list:
+        logger.error("[EMAIL] No admin emails configured")
+        return False
+
+    subject = f"Weekly Team Leaderboard Report - {date_range}"
+    if exclude_note:
+        subject = f"{subject} ({exclude_note})"
+    pdf_name = f"Team_Leaderboard_Report_{date_range.replace(' ', '_')}.pdf" if date_range else "weekly_report.pdf"
+
+    return send_email_via_graph_api(
+        to_emails=admin_email_list,
+        subject=subject,
+        html_body=html_body,
+        pdf_attachment_path=pdf_path,
+        pdf_attachment_name=pdf_name
+    )
+
+
 def send_weekly_report_emails(
     report_data_with_exclusion: dict,
     report_data_without_exclusion: dict,
