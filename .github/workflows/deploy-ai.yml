@@ -79,9 +79,12 @@ jobs:
             echo "Stopping services..."
             $COMPOSE_CMD -f docker-compose.ai.yml down
             
-            # Use --build flag which only rebuilds changed layers (Docker layer caching!)
-            echo "Building and starting services (with smart rebuild)..."
-            $COMPOSE_CMD -f docker-compose.ai.yml --env-file .env.ai up -d --build
+            # Force full rebuild (no cache) - ensures both frontend UI and backend endpoints deploy
+            echo "Building frontend and backend (no cache)..."
+            $COMPOSE_CMD -f docker-compose.ai.yml build --no-cache
+            
+            echo "Starting services..."
+            $COMPOSE_CMD -f docker-compose.ai.yml --env-file .env.ai up -d
             
             # Wait for services to start
             echo "Waiting for services to start..."

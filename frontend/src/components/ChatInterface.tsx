@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { MAX_PROMPT_LENGTH } from '@/types/chat';
 import ChatHeader from './ChatHeader';
 
@@ -11,6 +11,7 @@ interface ChatInterfaceProps {
 
 export default function ChatInterface({ sessionId, onSendMessage }: ChatInterfaceProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [emailMode, setEmailMode] = useState(false);
   
   // ✅ CRITICAL FIX: Clear messages when sessionId changes to undefined (new chat)
   useEffect(() => {
@@ -31,7 +32,7 @@ export default function ChatInterface({ sessionId, onSendMessage }: ChatInterfac
   }, [sessionId]);
 
   return (
-    <main className="chatgpt-main">
+    <main className="chatgpt-main" data-email-mode={emailMode ? 'true' : 'false'}>
       {/* Chat Header - will be shown/hidden by chat initialization */}
       <div id="chat-header-container"></div>
       
@@ -60,12 +61,25 @@ export default function ChatInterface({ sessionId, onSendMessage }: ChatInterfac
                   fontSize: '12px',
                   color: '#6b7280',
                   position: 'absolute',
-                  right: '55px',
+                  right: '90px',
                   bottom: '8px',
                   display: 'none',
                   fontWeight: '400',
                   pointerEvents: 'none'
                 }}></span>
+                <button
+                  type="button"
+                  className={`email-draft-toggle-btn ${emailMode ? 'active' : ''}`}
+                  onClick={() => setEmailMode((v) => !v)}
+                  title={emailMode ? 'Email drafting on – click to turn off' : 'Email drafting – polish and rephrase emails'}
+                  aria-label={emailMode ? 'Email drafting on' : 'Email drafting off'}
+                  aria-pressed={emailMode}
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+                    <polyline points="22,6 12,13 2,6" />
+                  </svg>
+                </button>
                 <button id="send-btn-empty" className="chatgpt-send-btn">
                   <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                     <path d="M8 1a1 1 0 011 1v10.586l2.293-2.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L7 12.586V2a1 1 0 011-1z" transform="rotate(180 8 8)"/>
@@ -162,6 +176,16 @@ export default function ChatInterface({ sessionId, onSendMessage }: ChatInterfac
       {/* ChatGPT-Style Input Section - Shows when there are messages */}
       <div className="chatgpt-input-section">
         <div className="input-container-inner">
+          {/* Hidden checkbox so chat-initialization can read email mode; toggled by Email icon in input bar */}
+          <input
+            type="checkbox"
+            id="email-drafting-toggle"
+            checked={emailMode}
+            onChange={() => setEmailMode((v) => !v)}
+            aria-hidden="true"
+            tabIndex={-1}
+            style={{ position: 'absolute', opacity: 0, pointerEvents: 'none', width: 0, height: 0 }}
+          />
           <div className="input-wrapper-chatgpt" style={{ position: 'relative' }}>
             <textarea
               ref={textareaRef}
@@ -176,12 +200,25 @@ export default function ChatInterface({ sessionId, onSendMessage }: ChatInterfac
               fontSize: '12px',
               color: '#6b7280',
               position: 'absolute',
-              right: '55px',
+              right: '90px',
               bottom: '8px',
               display: 'none',
               fontWeight: '400',
               pointerEvents: 'none'
             }}></span>
+            <button
+              type="button"
+              className={`email-draft-toggle-btn ${emailMode ? 'active' : ''}`}
+              onClick={() => setEmailMode((v) => !v)}
+              title={emailMode ? 'Email drafting on – click to turn off' : 'Email drafting – polish and rephrase emails'}
+              aria-label={emailMode ? 'Email drafting on' : 'Email drafting off'}
+              aria-pressed={emailMode}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+                <polyline points="22,6 12,13 2,6" />
+              </svg>
+            </button>
             <button id="send-btn" className="chatgpt-send-btn">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M8 1a1 1 0 011 1v10.586l2.293-2.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L7 12.586V2a1 1 0 011-1z" transform="rotate(180 8 8)"/>
