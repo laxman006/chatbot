@@ -128,17 +128,16 @@ async def scheduled_weekly_reports():
                 # Try lookup by user_id first
                 if user_id:
                     user_doc = await user_activity_collection.find_one(
-                        {"user_id": user_id},
+                        {"user_id": user_id, "is_active": {"$ne": False}},
                         {"team_name": 1, "user_email": 1, "user_name": 1}
                     )
                     if user_doc:
                         team_name = user_doc.get("team_name")
                         user_name = user_doc.get("user_name", "")
                 
-                # Try by email if not found
                 if not team_name and user_email:
                     user_doc = await user_activity_collection.find_one(
-                        {"user_email": user_email},
+                        {"user_email": user_email, "is_active": {"$ne": False}},
                         {"team_name": 1, "user_email": 1, "user_name": 1}
                     )
                     if user_doc:

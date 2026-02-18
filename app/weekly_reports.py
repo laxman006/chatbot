@@ -41,8 +41,8 @@ async def _get_all_time_team_data(exclude_teams_list: List[str]) -> Dict:
     
     user_activity_collection = mongodb_memory.database["user_activity"]
     
-    # Get all user_activity documents
-    cursor = user_activity_collection.find({})
+    # Active users only (is_active != False; missing field included for backward compat)
+    cursor = user_activity_collection.find({"is_active": {"$ne": False}})
     all_users = await cursor.to_list(length=None)
     
     logger.info(f"[WEEKLY REPORT] Found {len(all_users)} users in user_activity (all-time)")
@@ -315,8 +315,7 @@ async def generate_team_report_data(
             logger.warning(f"[WEEKLY REPORT] FALLBACK: Using all-time data from user_activity instead")
             use_all_time_fallback = True
             
-            # Get all user_activity documents (same logic as UI /admin/teams/summary without dates)
-            all_users = await user_activity_collection.find({}).to_list(length=None)
+            all_users = await user_activity_collection.find({"is_active": {"$ne": False}}).to_list(length=None)
             logger.info(f"[WEEKLY REPORT] Found {len(all_users)} users in user_activity (all-time)")
             
             # Convert user_activity format to match message_events format
@@ -345,17 +344,15 @@ async def generate_team_report_data(
             team_name = None
             user_doc = None
             
-            # Try lookup by user_id first
             if user_id:
                 user_doc = await user_activity_collection.find_one(
-                    {"user_id": user_id},
+                    {"user_id": user_id, "is_active": {"$ne": False}},
                     {"team_name": 1, "user_email": 1, "user_name": 1}
                 )
             
-            # If not found by user_id, try by user_email
             if not user_doc and user_email:
                 user_doc = await user_activity_collection.find_one(
-                    {"user_email": user_email},
+                    {"user_email": user_email, "is_active": {"$ne": False}},
                     {"team_name": 1, "user_email": 1, "user_name": 1}
                 )
             

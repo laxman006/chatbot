@@ -1,5 +1,6 @@
 from typing import List, Dict, Optional
 import asyncio
+import re
 from datetime import datetime, timezone
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import ConnectionFailure, DuplicateKeyError
@@ -117,6 +118,9 @@ class MongoDBMemoryManager:
             await user_activity_collection.create_index("last_active")
             await user_activity_collection.create_index("total_messages")
             await user_activity_collection.create_index("total_sessions")
+            await user_activity_collection.create_index("user_email")
+            await user_activity_collection.create_index("team_name")
+            await user_activity_collection.create_index("is_active")
             
             # Create indexes for message_events collection (time-based analytics)
             message_events_collection = self.database["message_events"]
@@ -136,6 +140,13 @@ class MongoDBMemoryManager:
             await chat_messages_collection.create_index("session_id")
             await chat_messages_collection.create_index([("session_id", 1), ("created_at", -1)])
             await chat_messages_collection.create_index("created_at")
+            
+            # Teams collection (user management)
+            teams_collection = self.database["teams"]
+            await teams_collection.create_index("team_name", unique=True)
+            # Audit logs (user management)
+            audit_logs_collection = self.database["audit_logs"]
+            await audit_logs_collection.create_index("created_at")
             
             logger.info("MongoDB indexes created successfully")
         except Exception as e:
@@ -807,68 +818,101 @@ class MongoDBMemoryManager:
             # Don't raise - event tracking should not break chat flow
     
     async def get_user_statistics(
-        self, 
-        exclude_users: Optional[List[str]] = None
+        self,
+        exclude_users: Optional[List[str]] = None,
+        include_inactive: bool = False
     ) -> List[Dict]:
         """
         Get ALL-TIME user statistics from user_activity collection (single source of truth).
         This reads pre-calculated lifetime metrics - NO date filtering.
-        
+        Returns one logical user per email (deduped by user_email).
+
         Args:
             exclude_users: Optional list of user emails or names to exclude
+            include_inactive: If True, include users with is_active=False; if False, exclude them
         """
         await self.connect()
-        
+
         try:
             user_activity_collection = self.database["user_activity"]
-            
+
             # Query ALL user_activity documents (no date filtering - lifetime stats only)
-            logger.info(f"Querying user_activity (all-time) with exclude_users={exclude_users}")
-            
-            cursor = user_activity_collection.find({})
+            query = {} if include_inactive else {"is_active": {"$ne": False}}
+            logger.info(f"Querying user_activity (all-time) with exclude_users={exclude_users}, include_inactive={include_inactive}")
+
+            cursor = user_activity_collection.find(query)
             results = await cursor.to_list(length=None)
-            
+
             logger.info(f"Raw user_activity results count: {len(results)}")
-            
-            # Format results and apply user exclusion filter
-            formatted = []
-            exclude_emails_lower = [email.lower() for email in (exclude_users or [])]
-            
+
+            # Group by user_email (lowercase) so we return one logical user per email.
+            # Prefer canonical doc: is_active != false over inactive, then more recent last_active / more messages.
+            by_email: Dict[str, Dict] = {}
             for doc in results:
-                user_email = doc.get("user_email", "").lower()
-                user_name = doc.get("user_name", "").lower()
-                
-                # Skip excluded users (check both email and name)
+                user_email = (doc.get("user_email") or "").strip()
+                email_lower = user_email.lower()
+                existing = by_email.get(email_lower)
+                doc_active = doc.get("is_active", True) is not False
+                if existing is None:
+                    by_email[email_lower] = doc
+                else:
+                    existing_active = existing.get("is_active", True) is not False
+                    # Prefer active doc over inactive when selecting representative
+                    if doc_active and not existing_active:
+                        by_email[email_lower] = doc
+                    elif existing_active and not doc_active:
+                        pass  # keep existing
+                    else:
+                        existing_la = existing.get("last_active")
+                        doc_la = doc.get("last_active")
+                        existing_ts = existing_la if isinstance(existing_la, datetime) else None
+                        doc_ts = doc_la if isinstance(doc_la, datetime) else None
+                        if doc_ts and (existing_ts is None or (doc_ts > existing_ts)):
+                            by_email[email_lower] = doc
+                        elif existing_ts is None and doc_ts is None:
+                            if (doc.get("total_messages") or 0) > (existing.get("total_messages") or 0):
+                                by_email[email_lower] = doc
+
+            exclude_emails_lower = [e.lower() for e in (exclude_users or [])]
+
+            formatted = []
+            for doc in by_email.values():
+                user_email = (doc.get("user_email") or "").strip()
+                user_name = (doc.get("user_name") or "").lower()
+                email_lower = user_email.lower()
+
                 if exclude_users:
-                    if user_email in exclude_emails_lower or user_name in exclude_emails_lower:
+                    if email_lower in exclude_emails_lower or user_name in exclude_emails_lower:
                         continue
-                    # Also check if any excluded email/name is contained in user_email or user_name
-                    if any(excluded.lower() in user_email or excluded.lower() in user_name for excluded in exclude_users):
+                    if any(excluded.lower() in email_lower or excluded.lower() in user_name for excluded in exclude_users):
                         continue
-                
+
                 last_active = doc.get("last_active")
                 if isinstance(last_active, datetime):
                     last_active = last_active.isoformat()
-                
+
                 formatted.append({
                     "user_id": doc.get("user_id", ""),
-                    "user_email": doc.get("user_email", ""),
+                    "user_email": user_email,
                     "user_name": doc.get("user_name", ""),
                     "total_messages": doc.get("total_messages", 0),
                     "total_sessions": doc.get("total_sessions", 0),
                     "avg_messages_per_session": round(doc.get("avg_messages_per_session", 0), 2),
-                    "last_active": last_active
+                    "last_active": last_active,
+                    "role": doc.get("role"),
+                    "team_name": doc.get("team_name"),
+                    "manager_name": doc.get("manager_name"),
+                    "is_active": doc.get("is_active", True),
                 })
-            
             # Sort by total_messages descending
             formatted.sort(key=lambda x: x.get("total_messages", 0), reverse=True)
-            
-            logger.info(f"Final formatted results count (after exclusion): {len(formatted)}")
+
+            logger.info(f"Final formatted results count (one per email, after exclusion): {len(formatted)}")
             if formatted:
                 logger.info(f"Top user: {formatted[0].get('user_email', 'N/A')} with {formatted[0].get('total_messages', 0)} messages")
-            
+
             return formatted
-            
+
         except Exception as e:
             logger.error(f"Error getting user statistics: {e}")
             return []
@@ -1290,7 +1334,10 @@ class MongoDBMemoryManager:
                     "team_name": 1,
                     "manager_email": 1,
                     "manager_name": 1,
-                    "role": 1
+                    "role": 1,
+                    "is_active": 1,
+                    "last_modified_by": 1,
+                    "last_modified_at": 1
                 }
             )
             
@@ -1305,6 +1352,116 @@ class MongoDBMemoryManager:
         except Exception as e:
             logger.error(f"Error getting user profile for {user_id}: {e}")
             return None
+    
+    async def update_user_profile_by_email(
+        self,
+        actor_email: str,
+        target_email: str,
+        team_name: Optional[str] = None,
+        role: Optional[str] = None
+    ) -> bool:
+        """
+        Admin: update another user's profile by email. Sets last_modified_by, last_modified_at.
+        Validates team exists if team_name provided. Resolves manager from teams repository.
+        """
+        try:
+            await self.connect()
+            from datetime import datetime, timezone
+            email_lower = (target_email or "").strip().lower()
+            if not email_lower:
+                return False
+            if team_name is not None:
+                from app.teams_repository import get_team_by_name
+                team_info = get_team_by_name(team_name)
+                if not team_info:
+                    return False
+                manager_email = (team_info.get("lead_email") or "").strip()
+                manager_name = (team_info.get("lead") or "").strip()
+            else:
+                manager_email = None
+                manager_name = None
+            update_doc = {
+                "last_modified_by": (actor_email or "").strip().lower(),
+                "last_modified_at": datetime.now(timezone.utc)
+            }
+            if team_name is not None:
+                update_doc["team_name"] = team_name
+                update_doc["manager_email"] = manager_email
+                update_doc["manager_name"] = manager_name
+            if role is not None:
+                update_doc["role"] = role
+            ua = self.database["user_activity"]
+            # Case-insensitive email match: DB may store "User@Domain.com", we query with lowercased
+            email_regex = {"$regex": f"^{re.escape(email_lower)}$", "$options": "i"}
+            filter_by_email = {"$or": [{"user_email": email_regex}, {"user_id": email_lower}]}
+            r = await ua.update_many(filter_by_email, {"$set": update_doc})
+            return r.matched_count > 0
+        except Exception as e:
+            logger.error(f"Error update_user_profile_by_email: {e}")
+            return False
+    
+    async def set_user_active(
+        self,
+        actor_email: str,
+        target_email: str,
+        is_active: bool
+    ) -> Optional[bool]:
+        """
+        Admin: set is_active for a user. Returns False if target_email == actor_email (caller should reject).
+        Returns True if updated, False if not found or no change.
+        """
+        actor_lower = (actor_email or "").strip().lower()
+        target_lower = (target_email or "").strip().lower()
+        if actor_lower and target_lower and actor_lower == target_lower:
+            return None  # signal: self-mutation not allowed
+        try:
+            await self.connect()
+            from datetime import datetime, timezone
+            ua = self.database["user_activity"]
+            # Case-insensitive email match: DB may store "User@Domain.com", we query with lowercased
+            email_regex = {"$regex": f"^{re.escape(target_lower)}$", "$options": "i"}
+            filter_query = {"$or": [{"user_email": email_regex}, {"user_id": target_lower}]}
+            if not is_active:
+                filter_query["is_active"] = {"$ne": False}
+            # update_many so all documents for this user (e.g. duplicates with same email) get same is_active
+            r = await ua.update_many(
+                filter_query,
+                {"$set": {
+                    "is_active": is_active,
+                    "last_modified_by": actor_lower,
+                    "last_modified_at": datetime.now(timezone.utc)
+                }}
+            )
+            return r.matched_count > 0
+        except Exception as e:
+            logger.error(f"Error set_user_active: {e}")
+            return False
+    
+    async def insert_audit_log(
+        self,
+        action: str,
+        actor_email: str,
+        target_type: str,
+        target_id: str,
+        changes: Dict
+    ) -> bool:
+        """Insert one audit log entry (action, actor, target, diff, created_at)."""
+        try:
+            await self.connect()
+            from datetime import datetime, timezone
+            coll = self.database["audit_logs"]
+            await coll.insert_one({
+                "action": action,
+                "actor_email": (actor_email or "").strip().lower(),
+                "target_type": target_type,
+                "target_id": (target_id or "").strip(),
+                "changes": changes,
+                "created_at": datetime.now(timezone.utc)
+            })
+            return True
+        except Exception as e:
+            logger.error(f"Error insert_audit_log: {e}")
+            return False
     
     async def save_message(
         self, 
@@ -1606,10 +1763,11 @@ async def get_shared_chat(share_token: str) -> Optional[Dict]:
     return await mongodb_memory.get_shared_chat(share_token)
 
 async def get_user_statistics(
-    exclude_users: Optional[List[str]] = None
+    exclude_users: Optional[List[str]] = None,
+    include_inactive: bool = False
 ) -> List[Dict]:
-    """Get ALL-TIME user statistics from user_activity collection (single source of truth)."""
-    return await mongodb_memory.get_user_statistics(exclude_users=exclude_users)
+    """Get ALL-TIME user statistics from user_activity collection (single source of truth). One logical user per email."""
+    return await mongodb_memory.get_user_statistics(exclude_users=exclude_users, include_inactive=include_inactive)
 
 async def get_rankers_by_date(
     start_date: Optional[datetime] = None,
@@ -1708,6 +1866,41 @@ async def get_api_research_preference(user_email: str) -> bool:
 async def get_user_profile(user_id: str) -> Optional[Dict]:
     """Get user profile including team, manager, and role."""
     return await mongodb_memory.get_user_profile(user_id)
+
+
+async def update_user_profile_by_email(
+    actor_email: str,
+    target_email: str,
+    team_name: Optional[str] = None,
+    role: Optional[str] = None
+) -> bool:
+    """Admin: update another user's profile by email."""
+    return await mongodb_memory.update_user_profile_by_email(
+        actor_email, target_email, team_name=team_name, role=role
+    )
+
+
+async def set_user_active(
+    actor_email: str,
+    target_email: str,
+    is_active: bool
+) -> Optional[bool]:
+    """Admin: set is_active for a user. Returns None if self-mutation (caller should reject)."""
+    return await mongodb_memory.set_user_active(actor_email, target_email, is_active)
+
+
+async def insert_audit_log(
+    action: str,
+    actor_email: str,
+    target_type: str,
+    target_id: str,
+    changes: Dict
+) -> bool:
+    """Insert one audit log entry."""
+    return await mongodb_memory.insert_audit_log(
+        action, actor_email, target_type, target_id, changes
+    )
+
 
 async def migrate_existing_data_to_user_activity():
     """Migration helper: Backfill user_activity collection from existing chat_sessions."""
