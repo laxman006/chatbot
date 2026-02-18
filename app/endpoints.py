@@ -81,6 +81,7 @@ from collections import Counter, defaultdict
 # Intelligent Routing System
 from intelligent_router import IntelligentQueryRouter, get_routing_confidence
 from multi_source_retrieval import intelligent_multi_source_retrieve, normalize_scores, retrieve_limitations_documents
+from app.capabilities_vectorstore import get_capability_docs, get_migrations_mentioned_in_query
 
 
 # ============================================================================
@@ -3260,6 +3261,23 @@ def intelligent_route_and_retrieve(
         enable_deduplication=ROUTING_ENABLE_DEDUPLICATION,
         always_include_limitations=False  # ✅ STAGE 1: No pinned limitations (2-stage retrieval)
     )
+    
+    # Add capability/limitations docs from ChromaDB when router says "capabilities" or
+    # "migration_procedure" with a known migration path (e.g. Teams to Teams, Slack to Chat).
+    query_type = (routing_plan or {}).get("query_type") or ""
+    add_capability = (
+        query_type == "capabilities"
+        or (
+            query_type == "migration_procedure"
+            and get_migrations_mentioned_in_query(query)
+        )
+    )
+    if add_capability:
+        capability_docs = get_capability_docs(query, k=15, force=True)
+        for doc in capability_docs:
+            all_candidates.append((doc, 0.2))  # low distance = high relevance
+        if capability_docs:
+            print(f"[RETRIEVAL] ✓ Retrieved {len(capability_docs)} docs from capabilities ChromaDB")
     
     if not all_candidates:
         print("[WARN] No candidates retrieved")
