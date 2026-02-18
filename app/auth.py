@@ -17,6 +17,7 @@ from typing import Optional, Dict
 import logging
 from typing import Set
 from datetime import datetime
+import os
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -24,16 +25,20 @@ logger = logging.getLogger(__name__)
 # OAuth2 Bearer token security scheme (for backward compatibility during migration)
 security = HTTPBearer()
 
-# Restricted admin allowlist (lowercase for consistent comparison)
-ADMIN_EMAILS: Set[str] = {
-    "chaitanya.malle@cloudfuze.com",
-    "laxman.kadari@cloudfuze.com",
-    "nirosh.reddy@cloudfuze.com",
-}
+# Restricted admin allowlist (lowercase for consistent comparison).
+# Load from env ADMIN_EMAILS (comma-separated) so allowlist can change without deploy.
+_admin_emails_env = os.getenv("ADMIN_EMAILS", "").strip()
+if _admin_emails_env:
+    ADMIN_EMAILS: Set[str] = {
+        email.strip().lower() for email in _admin_emails_env.split(",") if email.strip()
+    }
+else:
+    ADMIN_EMAILS: Set[str] = {
+        "chaitanya.malle@cloudfuze.com",
+    }
 
 # Developer emails to exclude from dashboard statistics
 # Can be overridden via EXCLUDED_DEVELOPER_EMAILS environment variable (comma-separated)
-import os
 _excluded_devs_env = os.getenv("EXCLUDED_DEVELOPER_EMAILS", "")
 if _excluded_devs_env:
     EXCLUDED_DEVELOPER_EMAILS: Set[str] = {

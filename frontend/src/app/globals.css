@@ -526,6 +526,23 @@ header img {
   z-index: 1;
 }
 
+/* Admin User Management page – matches chatbot palette (sidebar unchanged) */
+.admin-users-page {
+  font-family: inherit;
+}
+.admin-users-page table tbody tr:hover {
+  background-color: #f9fafb;
+}
+.admin-users-page button[aria-label="Edit user"]:hover,
+.admin-users-page button[aria-label="Activate user"]:hover {
+  background-color: #f3f4f6;
+  color: #374151;
+}
+.admin-users-page button[aria-label="Deactivate user"]:hover {
+  background-color: #fef2f2;
+  color: #b91c1c;
+}
+
 .main-content {
   display: flex;
   flex-direction: column;

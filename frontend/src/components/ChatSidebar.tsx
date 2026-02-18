@@ -960,6 +960,29 @@ export default function ChatSidebar({
                         e.preventDefault();
                         e.stopPropagation();
                         e.nativeEvent.stopImmediatePropagation();
+                        console.log('[Admin Nav] User Management clicked - mousedown');
+                        handleAdminNavigation('/admin/users', e);
+                      }}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.nativeEvent.stopImmediatePropagation();
+                        console.log('[Admin Nav] User Management clicked - click');
+                        handleAdminNavigation('/admin/users', e);
+                      }}
+                      style={{ cursor: 'pointer', pointerEvents: 'auto', position: 'relative', zIndex: 10000 }}
+                    >
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" />
+                      </svg>
+                      <span>User Management</span>
+                    </div>
+                    <div 
+                      className="dropdown-item admin-item" 
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.nativeEvent.stopImmediatePropagation();
                         console.log('[Admin Nav] Team Leaderboard clicked - mousedown');
                         handleAdminNavigation('/admin/teams-dashboard', e);
                       }}

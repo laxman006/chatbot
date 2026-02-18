@@ -12,6 +12,7 @@ import asyncio
 import re
 import logging
 from datetime import datetime, timezone
+from pymongo.errors import DuplicateKeyError
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -40,7 +41,8 @@ from app.mongodb_memory import (
     clear_user_chat_history, save_session, get_all_sessions, get_user_sessions, 
     get_session_by_id, create_shared_chat, get_shared_chat,
     update_user_profile, get_user_profile, get_user_statistics, get_rankers_by_date,
-    save_message, get_last_messages
+    save_message, get_last_messages,
+    update_user_profile_by_email, set_user_active, insert_audit_log
 )
 from app.helpers import strip_markdown, preserve_markdown
 from app.langfuse_integration import langfuse_tracker
@@ -7113,25 +7115,29 @@ async def get_most_asked_questions(
 @router.get("/admin/users/summary")
 async def get_admin_users_summary(
     exclude_users: Optional[str] = Query(None, description="Comma-separated list of user emails/names to exclude"),
+    include_inactive: bool = Query(False, description="If true, include users with is_active=False (e.g. for User Management list)"),
     current_user: dict = Depends(require_admin)
 ):
     """
     Get ALL-TIME user statistics from user_activity collection.
-    Returns pre-calculated lifetime metrics (no date filtering).
-    
-    This endpoint is used by the admin dashboard for the "All Time" view.
+    Returns pre-calculated lifetime metrics (no date filtering), one logical user per email.
+    Includes role, team_name, manager_name, is_active when present.
+
+    This endpoint is used by the admin dashboard and by the User Management page.
     """
     try:
         # Parse exclude_users if provided
         exclude_list = None
         if exclude_users:
             exclude_list = [u.strip() for u in exclude_users.split(",") if u.strip()]
+
+        # Get statistics from MongoDB (deduped by user_email, optional include_inactive)
+        users = await get_user_statistics(exclude_users=exclude_list, include_inactive=include_inactive)
         
-        # Get statistics from MongoDB
-        users = await get_user_statistics(exclude_users=exclude_list)
-        
+        total = len(users)
         return {
-            "total_users": len(users),
+            "total_users": total,
+            "total_count": total,
             "users": users,
             "generated_at": datetime.utcnow().isoformat(),
             "data_source": "user_activity",
@@ -7146,6 +7152,398 @@ async def get_admin_users_summary(
             status_code=500,
             detail=f"Failed to retrieve user statistics: {str(e)}"
         )
+
+
+# ---------------- Admin User Management (read-only) ----------------
+
+@router.get("/admin/users/{email}")
+async def get_admin_user_by_email(
+    email: str,
+    current_user: dict = Depends(require_restricted_admin)
+):
+    """
+    Get a single user's profile by email (admin only).
+    Returns user_activity profile including is_active; 404 if not found.
+    """
+    try:
+        await mongodb_memory.connect()
+        ua = mongodb_memory.database["user_activity"]
+        email_lower = email.strip().lower()
+        if not email_lower:
+            raise HTTPException(status_code=400, detail="Email required")
+        # Case-insensitive email match (same as deactivate/team update)
+        email_regex = {"$regex": f"^{re.escape(email_lower)}$", "$options": "i"}
+        doc = await ua.find_one(
+            {"$or": [{"user_email": email_regex}, {"user_id": email_lower}]},
+            {
+                "user_id": 1, "user_email": 1, "user_name": 1,
+                "team_name": 1, "manager_email": 1, "manager_name": 1, "role": 1,
+                "is_active": 1, "last_modified_by": 1, "last_modified_at": 1,
+                "total_messages": 1, "last_active": 1
+            }
+        )
+        if not doc:
+            raise HTTPException(status_code=404, detail="User not found")
+        if "_id" in doc:
+            doc["_id"] = str(doc["_id"])
+        return doc
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting admin user by email: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/admin/teams")
+async def get_admin_teams_list(
+    current_user: dict = Depends(require_restricted_admin)
+):
+    """
+    Get list of all teams (from teams collection + member counts from user_activity).
+    Admin only (allowlist).
+    """
+    try:
+        from app.teams_repository import get_all_teams, get_team_member_count
+        all_teams = get_all_teams()
+        teams_list = []
+        for team_name, info in all_teams.items():
+            count = get_team_member_count(team_name)
+            teams_list.append({
+                "team_name": team_name,
+                "lead": info.get("lead"),
+                "lead_email": info.get("lead_email"),
+                "color": info.get("color", "#6B7280"),
+                "description": info.get("description", ""),
+                "member_count": count,
+            })
+        return {"teams": teams_list, "total": len(teams_list)}
+    except Exception as e:
+        logger.error(f"Error getting admin teams list: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------- Admin User Management (mutations) ----------------
+
+class AdminChangeTeamBody(BaseModel):
+    team_name: str
+
+
+class AdminUpdateProfileBody(BaseModel):
+    role: Optional[str] = None
+    team_name: Optional[str] = None
+
+
+class AdminChangeLeadBody(BaseModel):
+    lead_email: str
+    lead_name: Optional[str] = None
+
+
+class AdminCreateTeamBody(BaseModel):
+    team_name: str
+    lead_email: str
+    lead_name: Optional[str] = None
+    color: Optional[str] = None
+    description: Optional[str] = None
+
+
+class AdminCreateUserBody(BaseModel):
+    email: str
+    user_name: Optional[str] = None
+    team_name: str
+
+
+@router.post("/admin/teams")
+async def admin_create_team(
+    body: AdminCreateTeamBody,
+    current_user: dict = Depends(require_restricted_admin)
+):
+    """Create a new team. Fails if team_name already exists."""
+    actor_email = (current_user.get("email") or "").strip().lower()
+    team_name = (body.team_name or "").strip()
+    if not team_name:
+        raise HTTPException(status_code=400, detail="team_name required")
+    lead_email = (body.lead_email or "").strip()
+    if not lead_email:
+        raise HTTPException(status_code=400, detail="lead_email required")
+    lead_name = (body.lead_name or lead_email or "").strip()
+    color = (body.color or "#6B7280").strip()
+    description = (body.description or "").strip()
+    from app.teams_repository import get_team_by_name
+    if get_team_by_name(team_name):
+        raise HTTPException(status_code=400, detail=f"Team '{team_name}' already exists")
+    try:
+        await mongodb_memory.connect()
+        teams_coll = mongodb_memory.database["teams"]
+        await teams_coll.insert_one({
+            "team_name": team_name,
+            "lead": lead_name,
+            "lead_email": lead_email,
+            "color": color,
+            "description": description,
+        })
+        await insert_audit_log(
+            "team.create",
+            actor_email,
+            "team",
+            team_name,
+            {"team_name": team_name, "lead_email": lead_email, "lead_name": lead_name}
+        )
+        return {"success": True, "message": "Team created", "team_name": team_name}
+    except DuplicateKeyError:
+        raise HTTPException(status_code=400, detail=f"Team '{team_name}' already exists")
+    except Exception as e:
+        logger.error(f"Error creating team: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/admin/users")
+async def admin_create_user(
+    body: AdminCreateUserBody,
+    current_user: dict = Depends(require_restricted_admin)
+):
+    """Create a new user and assign them to a team. Fails if user (email) already exists in user_activity."""
+    actor_email = (current_user.get("email") or "").strip().lower()
+    email_raw = (body.email or "").strip()
+    if not email_raw:
+        raise HTTPException(status_code=400, detail="email required")
+    email_lower = email_raw.lower()
+    team_name = (body.team_name or "").strip()
+    if not team_name:
+        raise HTTPException(status_code=400, detail="team_name required")
+    user_name = (body.user_name or "").strip() or email_raw.split("@")[0]
+    from app.teams_repository import get_team_by_name
+    team_info = get_team_by_name(team_name)
+    if not team_info:
+        raise HTTPException(status_code=404, detail=f"Team '{team_name}' not found")
+    manager_email = (team_info.get("lead_email") or "").strip()
+    manager_name = (team_info.get("lead") or "").strip()
+    try:
+        await mongodb_memory.connect()
+        ua = mongodb_memory.database["user_activity"]
+        email_regex = {"$regex": f"^{re.escape(email_lower)}$", "$options": "i"}
+        existing = await ua.find_one({"$or": [{"user_email": email_regex}, {"user_id": email_lower}]})
+        if existing:
+            raise HTTPException(status_code=400, detail=f"User with email '{email_raw}' already exists")
+        now = datetime.now(timezone.utc)
+        new_doc = {
+            "user_id": email_lower,
+            "user_email": email_raw,
+            "user_name": user_name,
+            "team_name": team_name,
+            "manager_email": manager_email,
+            "manager_name": manager_name,
+            "is_active": True,
+            "sessions": [],
+            "total_messages": 0,
+            "total_sessions": 0,
+            "avg_messages_per_session": 0.0,
+            "created_at": now,
+            "last_modified_by": actor_email,
+            "last_modified_at": now,
+        }
+        await ua.insert_one(new_doc)
+        await insert_audit_log(
+            "user.create",
+            actor_email,
+            "user",
+            email_lower,
+            {"email": email_raw, "team_name": team_name}
+        )
+        return {"success": True, "message": "User created", "email": email_raw, "team_name": team_name}
+    except HTTPException:
+        raise
+    except DuplicateKeyError:
+        raise HTTPException(status_code=400, detail=f"User with email '{email_raw}' already exists")
+    except Exception as e:
+        logger.error(f"Error creating user: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/admin/users/{email}/team")
+async def admin_change_user_team(
+    email: str,
+    body: AdminChangeTeamBody,
+    current_user: dict = Depends(require_restricted_admin)
+):
+    """Change a user's team. Updates user_activity and audit log."""
+    actor_email = (current_user.get("email") or "").strip().lower()
+    target_lower = (email or "").strip().lower()
+    if not target_lower:
+        raise HTTPException(status_code=400, detail="Email required")
+    team_name = (body.team_name or "").strip()
+    if not team_name:
+        raise HTTPException(status_code=400, detail="team_name required")
+    from app.teams_repository import get_team_by_name
+    if not get_team_by_name(team_name):
+        raise HTTPException(status_code=400, detail=f"Team '{team_name}' not found")
+    try:
+        await mongodb_memory.connect()
+        ua = mongodb_memory.database["user_activity"]
+        old_doc = await ua.find_one(
+            {"$or": [{"user_email": target_lower}, {"user_id": target_lower}]},
+            {"team_name": 1}
+        )
+        if not old_doc:
+            raise HTTPException(status_code=404, detail="User not found")
+        old_team = old_doc.get("team_name")
+        success = await update_user_profile_by_email(actor_email, email, team_name=team_name, role=None)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to update user team")
+        await insert_audit_log(
+            "user.change_team",
+            actor_email,
+            "user",
+            target_lower,
+            {"team_name": {"old": old_team, "new": team_name}}
+        )
+        return {"success": True, "message": "Team updated", "team_name": team_name}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error changing user team: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/admin/users/{email}/profile")
+async def admin_update_user_profile(
+    email: str,
+    body: AdminUpdateProfileBody,
+    current_user: dict = Depends(require_restricted_admin)
+):
+    """Update a user's profile (role and/or team). Role is free-text. Validates team. Prevents self-demotion."""
+    actor_email = (current_user.get("email") or "").strip().lower()
+    target_lower = (email or "").strip().lower()
+    if not target_lower:
+        raise HTTPException(status_code=400, detail="Email required")
+    if body.role is None and body.team_name is None:
+        raise HTTPException(status_code=400, detail="At least one of role or team_name required")
+    team_name = (body.team_name or "").strip() or None
+    role_raw = body.role.strip() if body.role is not None else None
+    if actor_email == target_lower and role_raw is not None and role_raw.strip().lower() != "admin":
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot remove your own admin role"
+        )
+    role = role_raw
+    try:
+        from app.teams_repository import get_team_by_name
+        if team_name is not None and not get_team_by_name(team_name):
+            raise HTTPException(status_code=404, detail=f"Team '{team_name}' not found")
+        success = await update_user_profile_by_email(actor_email, email, team_name=team_name, role=role)
+        if not success:
+            raise HTTPException(status_code=404, detail="User not found")
+        await insert_audit_log(
+            "user.update_profile",
+            actor_email,
+            "user",
+            target_lower,
+            {"role": body.role, "team_name": body.team_name}
+        )
+        return {"success": True, "message": "Profile updated"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating user profile: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/admin/teams/{team_name}/lead")
+async def admin_change_team_lead(
+    team_name: str,
+    body: AdminChangeLeadBody,
+    current_user: dict = Depends(require_restricted_admin)
+):
+    """Change a team's lead. Updates teams collection and all user_activity with that team."""
+    actor_email = (current_user.get("email") or "").strip().lower()
+    lead_email = (body.lead_email or "").strip()
+    lead_name = (body.lead_name or body.lead_email or "").strip()
+    if not lead_email:
+        raise HTTPException(status_code=400, detail="lead_email required")
+    try:
+        from app.teams_repository import get_team_by_name
+        team_info = get_team_by_name(team_name)
+        if not team_info:
+            raise HTTPException(status_code=404, detail="Team not found")
+        old_lead = team_info.get("lead_email")
+        old_lead_name = team_info.get("lead")
+        await mongodb_memory.connect()
+        teams_coll = mongodb_memory.database["teams"]
+        await teams_coll.update_one(
+            {"team_name": team_name},
+            {"$set": {"lead": lead_name, "lead_email": lead_email}}
+        )
+        ua = mongodb_memory.database["user_activity"]
+        from datetime import datetime, timezone
+        r = await ua.update_many(
+            {"team_name": team_name},
+            {"$set": {"manager_email": lead_email, "manager_name": lead_name, "last_modified_by": actor_email, "last_modified_at": datetime.now(timezone.utc)}}
+        )
+        await insert_audit_log(
+            "team.change_lead",
+            actor_email,
+            "team",
+            team_name,
+            {"lead_email": {"old": old_lead, "new": lead_email}, "lead_name": {"old": old_lead_name, "new": lead_name}}
+        )
+        return {"success": True, "message": "Lead updated", "updated_users": r.modified_count}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error changing team lead: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/admin/users/{email}/deactivate")
+async def admin_deactivate_user(
+    email: str,
+    current_user: dict = Depends(require_restricted_admin)
+):
+    """Deactivate a user (soft delete). Reject if email == current user."""
+    actor_email = (current_user.get("email") or "").strip().lower()
+    target_lower = (email or "").strip().lower()
+    if actor_email and target_lower and actor_email == target_lower:
+        raise HTTPException(status_code=400, detail="You cannot deactivate yourself")
+    result = await set_user_active(actor_email, target_lower, False)
+    if result is None:
+        raise HTTPException(status_code=400, detail="You cannot deactivate yourself")
+    if not result:
+        raise HTTPException(status_code=404, detail="User not found or already deactivated")
+    await insert_audit_log("user.deactivate", actor_email, "user", target_lower, {"is_active": {"old": True, "new": False}})
+    return {"success": True, "message": "User deactivated"}
+
+
+@router.put("/admin/users/{email}/activate")
+async def admin_activate_user(
+    email: str,
+    current_user: dict = Depends(require_restricted_admin)
+):
+    """Activate a user."""
+    actor_email = (current_user.get("email") or "").strip().lower()
+    target_lower = (email or "").strip().lower()
+    result = await set_user_active(actor_email, target_lower, True)
+    if result is False:
+        raise HTTPException(status_code=404, detail="User not found")
+    await insert_audit_log("user.activate", actor_email, "user", target_lower, {"is_active": {"old": False, "new": True}})
+    return {"success": True, "message": "User activated"}
+
+
+@router.delete("/admin/users/{email}")
+async def admin_remove_user(
+    email: str,
+    current_user: dict = Depends(require_restricted_admin)
+):
+    """Remove user (soft delete: set is_active = false). Reject if email == current user."""
+    actor_email = (current_user.get("email") or "").strip().lower()
+    target_lower = (email or "").strip().lower()
+    if actor_email and target_lower and actor_email == target_lower:
+        raise HTTPException(status_code=400, detail="You cannot deactivate yourself")
+    result = await set_user_active(actor_email, target_lower, False)
+    if result is None:
+        raise HTTPException(status_code=400, detail="You cannot deactivate yourself")
+    if not result:
+        raise HTTPException(status_code=404, detail="User not found or already removed")
+    await insert_audit_log("user.remove", actor_email, "user", target_lower, {"is_active": {"old": True, "new": False}})
+    return {"success": True, "message": "User removed"}
 
 
 @router.get("/admin/rankers")
@@ -7495,31 +7893,48 @@ async def get_teams_summary_mongodb(
                 user_id = user_msg.get("user_id")  # This is the GUID (e.g., "aad-12345")
                 user_email = (user_msg.get("user_email") or "").lower()
                 total_messages = user_msg.get("total_messages", 0)
+                user_name = ""
                 
-                # Try to get team_name from user_activity first
-                # user_activity uses user_id (GUID) as the key, but also has user_email field
+                # Try to get team_name from user_activity first (active users only)
                 team_name = None
                 user_doc = None
                 
-                # Try lookup by user_id (GUID) first
                 if user_id:
                     user_doc = await user_activity_collection.find_one(
-                        {"user_id": user_id},
-                        {"team_name": 1, "user_email": 1, "user_name": 1}
+                        {"user_id": user_id, "is_active": {"$ne": False}},
+                        {"team_name": 1, "user_email": 1, "user_name": 1, "is_active": 1}
                     )
                 
-                # If not found by user_id, try by user_email
                 if not user_doc and user_email:
+                    email_regex = {"$regex": f"^{re.escape(user_email)}$", "$options": "i"}
                     user_doc = await user_activity_collection.find_one(
-                        {"user_email": user_email},
-                        {"team_name": 1, "user_email": 1, "user_name": 1}
+                        {"user_email": email_regex, "is_active": {"$ne": False}},
+                        {"team_name": 1, "user_email": 1, "user_name": 1, "is_active": 1}
                     )
                 
                 if user_doc:
                     team_name = user_doc.get("team_name")
                     user_name = user_doc.get("user_name", "")
                 
-                # Fallback to teams.py if not found in user_activity
+                # If not found as active, check if user exists but is deactivated — then skip (don't count in any team)
+                if not user_doc and (user_id or user_email):
+                    deactivated_doc = None
+                    if user_id:
+                        deactivated_doc = await user_activity_collection.find_one(
+                            {"user_id": user_id},
+                            {"is_active": 1}
+                        )
+                    if not deactivated_doc and user_email:
+                        email_regex = {"$regex": f"^{re.escape(user_email)}$", "$options": "i"}
+                        deactivated_doc = await user_activity_collection.find_one(
+                            {"$or": [{"user_email": email_regex}, {"user_id": user_email}]},
+                            {"is_active": 1}
+                        )
+                    if deactivated_doc and deactivated_doc.get("is_active") is False:
+                        logger.debug(f"[TEAMS] Skipping deactivated user {user_email} (ID: {user_id})")
+                        continue
+                
+                # Fallback to teams.py only if no user_activity doc at all (legacy users)
                 if not team_name or team_name.strip() == "":
                     if user_email:
                         team_name = get_team_by_member_email(user_email)
@@ -7554,12 +7969,11 @@ async def get_teams_summary_mongodb(
             data_source = "message_events"
             time_range = f"{from_date or 'all'} to {to_date or 'all'}" if from_date or to_date else "all"
         else:
-            # All-time: Use user_activity collection
+            # All-time: Use user_activity collection (active users only)
             logger.info(f"[TEAMS] All-time query from user_activity")
             user_activity_collection = mongodb_memory.database["user_activity"]
             
-            # Get all user_activity documents
-            cursor = user_activity_collection.find({})
+            cursor = user_activity_collection.find({"is_active": {"$ne": False}})
             all_users = await cursor.to_list(length=None)
             
             logger.info(f"[TEAMS] Found {len(all_users)} users in user_activity collection")

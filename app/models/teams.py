@@ -358,82 +358,39 @@ TEAMS_STRUCTURE = {
 
 
 def get_all_teams() -> Dict[str, dict]:
-    """Get all teams."""
-    return TEAMS_STRUCTURE
+    """Get all teams. Delegates to teams_repository (MongoDB with fallback to TEAMS_STRUCTURE)."""
+    from app.teams_repository import get_all_teams as _get_all_teams
+    return _get_all_teams()
 
 
 def get_team_by_name(team_name: str) -> dict:
     """Get a specific team by name."""
-    return TEAMS_STRUCTURE.get(team_name)
+    from app.teams_repository import get_team_by_name as _get_team_by_name
+    return _get_team_by_name(team_name) or {}
 
 
 def get_team_by_member_email(email: str) -> str:
-    """Find which team a member belongs to by email.
-    
-    This function handles:
-    - Direct email matches (exact email in team)
-    - Case-insensitive matching
-    - Whitespace normalization
-    - Returns "Unassigned" if not found
-    """
-    if not email:
-        return "Unassigned"
-    
-    email_lower = str(email).lower().strip()
-    
-    # First pass: Direct email match (most efficient)
-    for team_name, team_info in TEAMS_STRUCTURE.items():
-        # Check if it's the lead
-        lead_email = team_info.get("lead_email")
-        if lead_email and str(lead_email).lower().strip() == email_lower:
-            return team_name
-        
-        # Check if it's a member
-        for member in team_info.get("members", []):
-            member_email = member.get("email", "").lower().strip()
-            if member_email == email_lower:
-                return team_name
-    
-    return "Unassigned"
+    """Find which team a member belongs to by email. Source of truth: user_activity.team_name."""
+    from app.teams_repository import get_team_by_member_email as _get_team_by_member_email
+    return _get_team_by_member_email(email)
 
 
 def get_all_team_members_emails() -> Dict[str, List[str]]:
-    """Get all emails organized by team."""
-    result = {}
-    
-    for team_name, team_info in TEAMS_STRUCTURE.items():
-        emails = []
-        
-        # Add lead
-        if team_info.get("lead_email"):
-            emails.append(team_info["lead_email"].lower())
-        
-        # Add members
-        for member in team_info.get("members", []):
-            emails.append(member.get("email", "").lower())
-        
-        result[team_name] = emails
-    
-    return result
+    """Get all emails organized by team. Derived from user_activity."""
+    from app.teams_repository import get_all_team_members_emails as _get_all_team_members_emails
+    return _get_all_team_members_emails()
 
 
 def get_team_member_count(team_name: str) -> int:
     """Get total members in a team (including lead)."""
-    team = TEAMS_STRUCTURE.get(team_name)
-    if not team:
-        return 0
-    
-    count = len(team.get("members", []))
-    if team.get("lead_email"):
-        count += 1
-    
-    return count
+    from app.teams_repository import get_team_member_count as _get_team_member_count
+    return _get_team_member_count(team_name)
 
 
 def get_team_color(team_name: str) -> str:
     """Get the color code for a team."""
-    team = TEAMS_STRUCTURE.get(team_name)
-    return team.get("color", "#6B7280") if team else "#6B7280"
+    from app.teams_repository import get_team_color as _get_team_color
+    return _get_team_color(team_name)
 
 
 def normalize_email(email: str) -> str:
@@ -469,22 +426,17 @@ def get_exclusion_list() -> set:
 
 
 def get_team_by_member_name(member_name: str) -> str:
-    """Find which team a member belongs to by name."""
+    """Find which team a member belongs to by name. Uses get_all_teams() for consistency."""
     if not member_name:
         return "Unassigned"
-    
     member_lower = member_name.lower().strip()
-    
-    for team_name, team_info in TEAMS_STRUCTURE.items():
-        # Check if it's the lead
-        if team_info.get("lead", "").lower() == member_lower:
+    all_teams = get_all_teams()
+    for team_name, team_info in all_teams.items():
+        if (team_info.get("lead") or "").lower().strip() == member_lower:
             return team_name
-        
-        # Check if it's a member
         for member in team_info.get("members", []):
-            if member.get("name", "").lower() == member_lower:
+            if (member.get("name") or "").lower().strip() == member_lower:
                 return team_name
-    
     return "Unassigned"
 
 
@@ -503,48 +455,21 @@ def get_team_for_member(member_name: str) -> str:
 
 
 def get_all_email_to_team_mapping() -> Dict[str, str]:
-    """Get a flat mapping of all emails to their teams.
-    
-    This creates a dictionary for fast O(1) lookups instead of O(n) iteration.
-    Useful for batch processing and analytics.
-    
-    Returns:
-    {
-        "email@domain.com": "Team Name",
-        ...
-    }
-    """
+    """Get a flat mapping of all emails to their teams. Built from get_all_team_members_emails()."""
     mapping = {}
-    
-    for team_name, team_info in TEAMS_STRUCTURE.items():
-        # Add lead
-        if team_info.get("lead_email"):
-            email_lower = team_info["lead_email"].lower().strip()
-            if email_lower:
-                mapping[email_lower] = team_name
-        
-        # Add members
-        for member in team_info.get("members", []):
-            email = member.get("email", "").lower().strip()
-            if email:
-                mapping[email] = team_name
-    
+    by_team = get_all_team_members_emails()
+    for team_name, emails in by_team.items():
+        for e in (emails or []):
+            if e:
+                mapping[e.lower().strip()] = team_name
     return mapping
 
 
 def validate_team_emails() -> Dict[str, Any]:
-    """Validate team email structure and return diagnostic information.
-    
-    This function checks:
-    - Empty emails
-    - Duplicate emails across teams
-    - Invalid email format
-    - Missing team members
-    
-    Returns diagnostic data for debugging.
-    """
+    """Validate team email structure and return diagnostic information. Uses get_all_teams()."""
+    all_teams = get_all_teams()
     diagnostics = {
-        "total_teams": len(TEAMS_STRUCTURE),
+        "total_teams": len(all_teams),
         "total_members": 0,
         "total_leads": 0,
         "empty_emails": [],
@@ -553,53 +478,28 @@ def validate_team_emails() -> Dict[str, Any]:
         "teams_with_no_members": [],
         "email_count": 0
     }
-    
-    email_to_teams = {}  # Track which teams have each email
-    
-    for team_name, team_info in TEAMS_STRUCTURE.items():
-        # Check lead
+    email_to_teams = {}
+    for team_name, team_info in all_teams.items():
         if team_info.get("lead_email"):
             lead_email = team_info.get("lead_email", "").lower().strip()
             diagnostics["total_leads"] += 1
-            
             if not lead_email:
-                diagnostics["empty_emails"].append({
-                    "team": team_name,
-                    "type": "lead",
-                    "value": team_info.get("lead_email")
-                })
+                diagnostics["empty_emails"].append({"team": team_name, "type": "lead", "value": team_info.get("lead_email")})
             else:
                 diagnostics["email_count"] += 1
-                if lead_email not in email_to_teams:
-                    email_to_teams[lead_email] = []
-                email_to_teams[lead_email].append(team_name)
-        
-        # Check members
+                email_to_teams.setdefault(lead_email, []).append(team_name)
         members = team_info.get("members", [])
         diagnostics["total_members"] += len(members)
-        
-        if not members:
+        if not members and not team_info.get("lead_email"):
             diagnostics["teams_with_no_members"].append(team_name)
-        
         for member in members:
-            member_email = member.get("email", "").lower().strip()
-            
+            member_email = (member.get("email") or "").lower().strip()
             if not member_email:
-                diagnostics["empty_emails"].append({
-                    "team": team_name,
-                    "type": "member",
-                    "name": member.get("name"),
-                    "value": member.get("email")
-                })
+                diagnostics["empty_emails"].append({"team": team_name, "type": "member", "name": member.get("name"), "value": member.get("email")})
             else:
                 diagnostics["email_count"] += 1
-                if member_email not in email_to_teams:
-                    email_to_teams[member_email] = []
-                email_to_teams[member_email].append(team_name)
-    
-    # Find duplicates (same email in multiple teams)
+                email_to_teams.setdefault(member_email, []).append(team_name)
     for email, teams in email_to_teams.items():
         if len(teams) > 1:
             diagnostics["duplicate_emails"][email] = teams
-    
     return diagnostics
