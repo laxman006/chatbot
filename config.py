@@ -426,6 +426,13 @@ SHAREPOINT_LIMITATIONS_SITE_URL = os.getenv("SHAREPOINT_LIMITATIONS_SITE_URL", "
 SHAREPOINT_LIMITATIONS_FOLDER_PATH = os.getenv("SHAREPOINT_LIMITATIONS_FOLDER_PATH", "Neutara Labs/Limitations and features")
 SHAREPOINT_LIMITATIONS_MAX_DEPTH = int(os.getenv("SHAREPOINT_LIMITATIONS_MAX_DEPTH", "999"))
 
+# Capabilities ChromaDB (dedicated DB for message + content migration capabilities/limitations/out-of-scope from 2 Excels)
+# Ingest: scripts/ingest_capability_limitations.py (uses content Excel + message/limitations Excel)
+CHROMA_CAPABILITIES_DB_PATH = os.getenv("CHROMA_CAPABILITIES_DB_PATH", "./data/chroma_capabilities_db")
+ENABLE_CAPABILITY_FROM_SHAREPOINT = os.getenv("ENABLE_CAPABILITY_FROM_SHAREPOINT", "false").lower() == "true"
+CONTENT_MIGRATION_EXCEL_PATH = os.getenv("CONTENT_MIGRATION_EXCEL_PATH", "")
+MESSAGE_LIMITATIONS_EXCEL_PATH = os.getenv("MESSAGE_LIMITATIONS_EXCEL_PATH", "")
+
 # PPTX Extraction Pipeline
 # Extract PPTX files and add to vectorstore (production-ready)
 ENABLE_PPTX_PIPELINE = os.getenv("ENABLE_PPTX_PIPELINE", "false").lower() == "true"

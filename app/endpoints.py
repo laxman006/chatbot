@@ -3278,6 +3278,8 @@ def intelligent_route_and_retrieve(
             all_candidates.append((doc, 0.2))  # low distance = high relevance
         if capability_docs:
             print(f"[RETRIEVAL] ✓ Retrieved {len(capability_docs)} docs from capabilities ChromaDB")
+        else:
+            print(f"[RETRIEVAL] Capabilities ChromaDB returned 0 docs (query_type={query_type!r}) — check ingest or migration_display in DB")
     
     if not all_candidates:
         print("[WARN] No candidates retrieved")

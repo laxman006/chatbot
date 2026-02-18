@@ -250,6 +250,10 @@ def get_capability_docs(query: str, k: int = 15, force: bool = False) -> List:
             else:
                 where = {"migration_display": {"$in": mentioned}}
             docs_with_scores = vs.similarity_search_with_score(query, k=k, filter=where)
+            # If filter returns 0 (e.g. no chunks for "Meta to Gchat" in DB), fall back to unfiltered so we still return some capability docs
+            if not docs_with_scores:
+                print(f"[capabilities_vectorstore] Filtered search returned 0 docs for migration_display={mentioned}, falling back to unfiltered")
+                docs_with_scores = vs.similarity_search_with_score(query, k=k)
         else:
             docs_with_scores = vs.similarity_search_with_score(query, k=k)
         return [doc for doc, _ in docs_with_scores]

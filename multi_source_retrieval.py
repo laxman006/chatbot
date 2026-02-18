@@ -115,6 +115,9 @@ def retrieve_from_source(
                     print(f"[RETRIEVAL] ✗ Strategy {i+1} returned 0 documents, trying next...")
                     
             except Exception as strategy_error:
+                # Note: This is the MAIN vectorstore (blog/sharepoint/pdfs), not capabilities ChromaDB.
+                # "Error finding id" / "Internal error" can occur with some Chroma versions when using
+                # metadata filters; fallback (unfiltered + post-filter) still returns docs.
                 print(f"[RETRIEVAL] ✗ Strategy {i+1} failed with error: {strategy_error}, trying next...")
                 continue
         
