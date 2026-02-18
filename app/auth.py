@@ -35,6 +35,8 @@ if _admin_emails_env:
 else:
     ADMIN_EMAILS: Set[str] = {
         "chaitanya.malle@cloudfuze.com",
+        "laxman.kadari@cloudfuze.com",
+        "nirosh.reddy@cloudfuze.com",
     }
 
 # Developer emails to exclude from dashboard statistics
