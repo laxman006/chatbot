@@ -4720,10 +4720,8 @@ Answer clearly and correctly based on the provided context and knowledge base.""
                 await asyncio.sleep(0.05)
                 
                 # ====== 2-STAGE RETRIEVAL: STAGE 1 PREPARATION ======
-                # Check if query is support question (for Stage 2 decision)
+                # Support-question detection (for logging; limitations now retrieved in single pass when router allocates)
                 is_support_q = is_support_question(enhanced_query)
-                if is_support_q:
-                    print(f"[2-STAGE] ✓ Support question detected - Stage 2 will verify after draft")
                 
                 # ====== INTELLIGENT ROUTING OR PERPLEXITY-STYLE RAG ======
                 
@@ -5360,15 +5358,39 @@ Answer clearly and correctly based on the provided context and knowledge base.""
                 for doc in final_docs
             )
             
-            # ====== 2-STAGE RETRIEVAL: GUARDRAILS ONLY IN STAGE 2 ======
-            # Stage 1: No limitations guardrails (keeps answers process-focused)
-            # Stage 2: Add guardrails only when verifying support claims
-            
-            # Base system prompt (no limitations guardrail in Stage 1)
+            # ====== SINGLE RETRIEVAL: LIMITATIONS VIA ROUTER (like Jira) ======
+            # Add limitations guardrail when context contains limitations docs (router allocated or from any path)
             enhanced_system_prompt = SYSTEM_PROMPT
-            
-            # Note: Limitations guardrail will be added in Stage 2 if needed
-            print("[GUARDRAIL] Stage 1: No limitations guardrail (process-focused answers)")
+            has_limitations_docs = any(
+                doc.metadata.get("source_type") == "sharepoint_limitations"
+                or doc.metadata.get("doc_type") == "limitations"
+                or doc.metadata.get("is_limitations_doc") is True
+                for doc in (final_docs or [])
+            )
+            if has_limitations_docs:
+                limitations_guardrail = """
+
+CRITICAL - LIMITATIONS & SUPPORTED FEATURES DOCUMENT (SOURCE OF TRUTH):
+- You have access to the Limitations & Supported Features document (sharepoint_limitations source) when it appears in the context.
+- This document is the DEFINITIVE source of truth for:
+  * What features ARE supported
+  * What features are NOT supported
+  * Migration capabilities and limitations
+  * Workarounds for unsupported features
+- **ALWAYS prioritize information from limitations documents over other sources**
+- If limitations document says "NOT SUPPORTED", you MUST answer that it's not supported
+- If limitations document says "SUPPORTED", you can confidently say it's supported
+- If other sources conflict with limitations document, the limitations document WINS
+- When answering about support/limitations, use this CLEAR format:
+  ✅ Start with direct answer: "Yes, [feature] is supported" OR "No, [feature] is not supported"
+  ✅ If there's a reason, add it naturally: "No, [feature] is not supported because [reason from limitations doc]"
+  ✅ If not supported and workaround exists: "No, [feature] is not supported. However, [workaround from limitations doc]"
+  ✅ Keep it conversational and clear - no need to mention "Source: Limitations document"
+  ✅ If limitations document doesn't mention a feature, say "The limitations document does not specify support for this feature" rather than guessing
+- NEVER say a feature is supported if limitations document says it's NOT SUPPORTED
+- **If you claim 'supported/not supported', you MUST cite limitations doc snippet. If no evidence, say 'The limitations document does not specify support for this feature.'**"""
+                enhanced_system_prompt = enhanced_system_prompt + limitations_guardrail
+                print("[GUARDRAIL] Limitations guardrail added (limitations docs in context)")
 
             if has_transcript_sources:
                 guardrail_instruction = """
@@ -5465,145 +5487,24 @@ User Question:
                 except Exception as e:
                     print(f"[WARNING] Failed to start synthesis: {e}")
             
-            # ====== 2-STAGE RETRIEVAL: STAGE 1 - GENERATE DRAFT ANSWER ======
-            # Store Stage 1 docs for potential Stage 2 merge
-            stage1_docs_with_scores = doc_results if doc_results else []
-            stage1_docs = final_docs if final_docs else []
-            
-            # ✅ CHECK 3: Generate Stage-1 draft first (collect, don't stream yet)
-            # This ensures we only stream the final verified answer
-            print(f"[2-STAGE] Generating Stage-1 draft answer...")
+            # ====== SINGLE LLM: Generate answer (context already includes limitations when router allocated) ======
+            print(f"[RAG] Generating answer...")
             draft_response = llm.invoke(messages)
             draft_answer = draft_response.content if hasattr(draft_response, 'content') else str(draft_response)
             
             # Record LLM generation time
             llm_time_ms = int((time.time() - llm_start_time) * 1000)
             
-            # ====== 2-STAGE RETRIEVAL: STAGE 2 - VERIFY IF NEEDED ======
-            # ✅ CHECK 1: Prevent infinite loop - only run Stage-2 once
-            stage2_verifying = False  # Flag to prevent re-triggering
+            # ====== SINGLE RETRIEVAL: One LLM answer (limitations included in retrieval when router allocates) ======
+            full_response = draft_answer
             
-            # Check if Stage 2 verification is needed
-            need_verify = (is_support_q or has_support_claim(draft_answer)) and not stage2_verifying
-            
-            if need_verify:
-                stage2_verifying = True  # Set flag to prevent re-triggering
-                print(f"[2-STAGE] ⚠️ Stage 2 verification triggered (support_q={is_support_q}, has_claim={has_support_claim(draft_answer)})")
-                print(f"[2-STAGE] Retrieving limitations documents for verification...")
-                
-                try:
-                    # ✅ CHECK 2: Retrieve limitations documents with strongest filter
-                    # Use source_type filter first (most reliable)
-                    print(f"[2-STAGE] Retrieving limitations documents (using strongest filter)...")
-                    limitations_docs = retrieve_limitations_documents(vectorstore, enhanced_query, k=4)
-                    
-                    if limitations_docs:
-                        print(f"[2-STAGE] ✓ Retrieved {len(limitations_docs)} limitations documents")
-                        
-                        # Merge Stage 1 docs with limitations docs
-                        merged_docs_with_scores = merge_stage1_with_limitations(
-                            stage1_docs_with_scores,
-                            limitations_docs,
-                            max_limitations=3
-                        )
-                        merged_docs = [doc for doc, score in merged_docs_with_scores]
-                        
-                        # Update final_docs for context formatting
-                        final_docs = merged_docs
-                        doc_results = merged_docs_with_scores
-                        
-                        # Re-format context with merged docs
-                        from app.llm import format_docs
-                        formatted_docs = format_docs(merged_docs)
-                        context_text_stage2 = "\n\n".join([f"Document {i+1}:\n{formatted_doc}" for i, formatted_doc in enumerate(formatted_docs)])
-                        
-                        # Build enhanced prompt with limitations guardrail (ONLY in Stage 2)
-                        limitations_guardrail_enhanced = """
-
-CRITICAL - LIMITATIONS & SUPPORTED FEATURES DOCUMENT (SOURCE OF TRUTH):
-- You have access to the Limitations & Supported Features document (sharepoint_limitations source)
-- This document is the DEFINITIVE source of truth for:
-  * What features ARE supported
-  * What features are NOT supported
-  * Migration capabilities and limitations
-  * Workarounds for unsupported features
-- **ALWAYS prioritize information from limitations documents over other sources**
-- If limitations document says "NOT SUPPORTED", you MUST answer that it's not supported
-- If limitations document says "SUPPORTED", you can confidently say it's supported
-- If other sources conflict with limitations document, the limitations document WINS
-- When answering about support/limitations, use this CLEAR format:
-  ✅ Start with direct answer: "Yes, [feature] is supported" OR "No, [feature] is not supported"
-  ✅ If there's a reason, add it naturally: "No, [feature] is not supported because [reason from limitations doc]"
-  ✅ If not supported and workaround exists: "No, [feature] is not supported. However, [workaround from limitations doc]"
-  ✅ Keep it conversational and clear - no need to mention "Source: Limitations document"
-  ✅ If limitations document doesn't mention a feature, say "The limitations document does not specify support for this feature" rather than guessing
-- NEVER say a feature is supported if limitations document says it's NOT SUPPORTED
-- **If you claim 'supported/not supported', you MUST cite limitations doc snippet. If no evidence, say 'The limitations document does not specify support for this feature.'**"""
-                        
-                        enhanced_system_prompt_stage2 = SYSTEM_PROMPT + limitations_guardrail_enhanced
-                        
-                        # Re-generate answer with Stage 2 context and guardrail
-                        print(f"[2-STAGE] Regenerating answer with limitations guardrail...")
-                        
-                        # Build messages for Stage 2
-                        stage2_messages = [SystemMessage(content=enhanced_system_prompt_stage2)]
-                        
-                        # Add conversation history if available
-                        if conversation_history:
-                            for msg in conversation_history:
-                                if msg["role"] == "user":
-                                    stage2_messages.append(HumanMessage(content=msg["content"]))
-                                elif msg["role"] == "assistant":
-                                    stage2_messages.append(AIMessage(content=msg["content"]))
-                        
-                        # Add context and query
-                        if forced_no_context:
-                            stage2_messages.append(HumanMessage(content=f"Question: {enhanced_query}"))
-                        else:
-                            stage2_messages.append(HumanMessage(content=f"""Use the following context to answer.
-
-<context>
-{context_text_stage2}
-</context>
-
-User Question:
-{enhanced_query}
-""".strip()))
-                        
-                        # Generate Stage 2 answer (non-streaming)
-                        stage2_llm = get_llm(streaming=False, temperature=0.1, max_tokens=1500)
-                        stage2_response = stage2_llm.invoke(stage2_messages)
-                        full_response = stage2_response.content if hasattr(stage2_response, 'content') else str(stage2_response)
-                        
-                        print(f"[2-STAGE] ✓ Stage 2 answer generated (length: {len(full_response)} chars)")
-                        
-                        # ✅ CHECK 1: Ensure Stage-2 answer doesn't re-trigger (shouldn't happen, but safety check)
-                        if has_support_claim(full_response):
-                            print(f"[2-STAGE] ⚠️ Stage-2 answer contains support claims (expected - this is the verified answer)")
-                        
-                    else:
-                        # ✅ CHECK 2: If limitations docs not found, keep Stage-1 answer
-                        print(f"[2-STAGE] ⚠️ No limitations documents found - keeping Stage-1 answer")
-                        full_response = draft_answer
-                        
-                except Exception as e:
-                    print(f"[2-STAGE] ✗ Stage 2 verification failed: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    print(f"[2-STAGE] Keeping Stage 1 answer")
-                    full_response = draft_answer
-            else:
-                # No Stage-2 needed, use Stage-1 draft
-                full_response = draft_answer
-                print(f"[2-STAGE] ✓ Stage 1 answer sufficient (no support question/claims detected)")
-            
-            # ✅ CHECK 3: Stream only the final verified answer
+            # ✅ Stream the final answer
             # Now stream the final answer (either Stage-1 draft or Stage-2 verified)
             streaming_time_ms = 0
             stream_start_time = time.time()
             for char in full_response:
                 yield f"data: {json.dumps({'token': char, 'type': 'token'})}\n\n"
-                await asyncio.sleep(0.01)  # Small delay for smooth streaming
+                await asyncio.sleep(0.003)  # ~3ms per char for faster streaming (was 10ms)
             streaming_time_ms = int((time.time() - stream_start_time) * 1000)
             
             # Update LLM time to include streaming

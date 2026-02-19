@@ -23,7 +23,7 @@ TEAMS_STRUCTURE = {
             {"name": "Ravi Srivastava", "email": "ravi.srivastava@cloudfuze.com"},
             {"name": "Vishal Kumar", "email": "Vishal.Kumar@cloudfuze.com"},
             {"name": "Jaswanth Adari", "email": "jaswanth.adari@cloudfuze.com"},
-            {"name" : " laxman janakwade", "email": "Laxman.Janakwade@cloudfuze.com"},
+            {"name" : "laxman janakwade", "email": "Laxman.Janakwade@cloudfuze.com"},
             {"name" : "Soubhagya Behera", "email": "Soubhagya.Behera@cloudfuze.com"},
         ],
         "color": "#3B82F6",  # Blue
@@ -252,7 +252,6 @@ TEAMS_STRUCTURE = {
         "lead": "Varsha Nallashami",
         "lead_email": "Varsha.Nallashami@cloudfuze.com",
         "members": [
-            {"name": "Karthik Brahmakal", "email": "karthik.brahmakal@cloudfuze.com"},
             {"name": "Pruthvi Raygol", "email": "Pruthvi.Raygol@cloudfuze.com"},
             {"name": "Vijay Kumar", "email": "Vijay.Kumar@cloudfuze.com"},
             {"name": "Craig Fernandez", "email": "craig.fernandez@cloudfuze.com"},
@@ -352,6 +351,8 @@ TEAMS_STRUCTURE = {
         "color": "#F59E0B",  # Amber
         "description": "Customer Success"
     },
+
+
     
 }
 
