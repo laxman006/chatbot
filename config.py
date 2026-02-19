@@ -328,6 +328,8 @@ Structure:
 
 If the message contains a refinement instruction followed by an email body, apply ONLY that refinement.
 
+If the user input does not contain enough information to construct a meaningful email (e.g. only a greeting, only an email address, or no subject/body), do NOT fabricate subject or body. Instead, politely ask for clarification (recipient, subject, message).
+
 Output only the email.
 Do NOT use citations or external sources.
 """

@@ -1502,7 +1502,7 @@ export function initializeChatApp(options: InitOptions = {}) {
             </button>
             ` : ''}
             ${!isReadOnly && !isEmailDraft ? `
-            <button class="retry-button" data-action="retry-message" title="Regenerate response" data-trace-id="${msg.traceId || ''}">
+            <button class="retry-button" data-action="retry-message" title="Regenerate response" data-trace-id="${(msg as { traceId?: string }).traceId || ''}">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M1 8a7 7 0 0 1 7-7v2M15 8a7 7 0 0 1-7 7v-2M8 1l2 2-2 2M8 15l-2-2 2-2"/>
               </svg>
@@ -1533,6 +1533,10 @@ export function initializeChatApp(options: InitOptions = {}) {
           </div>
           ${recommendedQuestionsHTML}
         `;
+        // Re-set email draft raw content so refinement buttons have it after restore (survives innerHTML)
+        if (isEmailDraft && emailContentRaw) {
+          div.dataset.emailContent = String(emailContentRaw);
+        }
         messagesDiv!.appendChild(div);
         
         // Check version metadata and load correct current version before displaying
@@ -2666,7 +2670,12 @@ export function initializeChatApp(options: InitOptions = {}) {
     await sendMessageText(question);
   }
 
-  async function sendMessageText(question: string) {
+  type SendMessageOptions = {
+    refine_action?: string;
+    last_email_content?: string;
+  };
+
+  async function sendMessageText(question: string, options?: SendMessageOptions) {
     if (!question) {
       console.warn('[SEND] No question provided');
       return;
@@ -2761,7 +2770,7 @@ export function initializeChatApp(options: InitOptions = {}) {
       
       // ✅ FIX 2: Session-based auth - no token validation needed
       // Session is validated automatically by backend via session_id cookie
-      const requestBody: { question: string; session_id: string; ui_mode?: string } = {
+      const requestBody: { question: string; session_id: string; ui_mode?: string; refine_action?: string; last_email_content?: string } = {
         question,
         session_id: sessionId
       };
@@ -2773,6 +2782,11 @@ export function initializeChatApp(options: InitOptions = {}) {
         requestBody.ui_mode = 'email';
       } else if (emailModeFromData || emailModeActive) {
         requestBody.ui_mode = 'email';
+      }
+      // UI-triggered refinement: tell backend so it bypasses pending/CloudFuze/follow-up
+      if (options?.refine_action != null && options?.last_email_content != null) {
+        requestBody.refine_action = options.refine_action;
+        requestBody.last_email_content = options.last_email_content;
       }
       
       // ✅ Session-based auth - session_id cookie sent automatically via proxy
@@ -3025,6 +3039,11 @@ export function initializeChatApp(options: InitOptions = {}) {
                   </div>
                   ${recommendedQuestionsHTML}
                 `;
+                
+                // Re-set email draft raw content so refinement buttons always have it (survives innerHTML)
+                if (responseIntent === 'email_draft' && fullResponse) {
+                  botDiv.dataset.emailContent = fullResponse;
+                }
                 
                 // Propagate trace_id to feedback buttons so click handlers always have access
                 if (traceId) {
@@ -5540,7 +5559,12 @@ export function initializeChatApp(options: InitOptions = {}) {
         case 'email-refinement': {
           const refinement = button.getAttribute('data-refinement');
           const msgDiv = button.closest('.message.bot') as HTMLElement | null;
-          const emailContent = msgDiv?.dataset?.emailContent;
+          // Prefer dataset (set when draft completed); fallback to visible body (e.g. after restore)
+          let emailContent = msgDiv?.dataset?.emailContent;
+          if (!emailContent && msgDiv) {
+            const bodyEl = msgDiv.querySelector('.email-draft-body .message-content');
+            emailContent = (bodyEl as HTMLElement)?.innerText?.trim() || (bodyEl as HTMLElement)?.textContent?.trim() || '';
+          }
           if (!refinement || !emailContent || typeof sendMessageText !== 'function') break;
           // Remove refinement options (behave like follow-up: options disappear after click)
           const refinementContainer = button.closest('.email-refinement-buttons');
@@ -5548,7 +5572,8 @@ export function initializeChatApp(options: InitOptions = {}) {
           // Show clicked option as user message (like recommended question)
           const label = (button.textContent ?? refinement).trim();
           addMessage(label, 'user');
-          sendMessageText(refinement + '\n\n' + emailContent);
+          // Send as refinement action so backend bypasses pending/CloudFuze/follow-up
+          sendMessageText(refinement, { refine_action: refinement, last_email_content: emailContent });
           break;
         }
       }

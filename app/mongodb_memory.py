@@ -141,6 +141,11 @@ class MongoDBMemoryManager:
             await chat_messages_collection.create_index([("session_id", 1), ("created_at", -1)])
             await chat_messages_collection.create_index("created_at")
             
+            # Email pending state (conversational carry-over for CloudFuze clarification)
+            email_pending_collection = self.database["email_pending_state"]
+            await email_pending_collection.create_index("session_id", unique=True)
+            await email_pending_collection.create_index("created_at")
+            
             # Teams collection (user management)
             teams_collection = self.database["teams"]
             await teams_collection.create_index("team_name", unique=True)
@@ -687,6 +692,50 @@ class MongoDBMemoryManager:
         except Exception as e:
             logger.error(f"Error deleting session {session_id}: {e}")
             raise e
+    
+    async def set_pending_email_topic(self, session_id: str, user_id: str, topic: str, mode: str = "cloudfuze_clarification") -> None:
+        """Store pending email topic for conversational follow-up (e.g. after CloudFuze clarification)."""
+        await self.connect()
+        try:
+            coll = self.database["email_pending_state"]
+            await coll.update_one(
+                {"session_id": session_id},
+                {"$set": {
+                    "session_id": session_id,
+                    "user_id": user_id,
+                    "topic": topic,
+                    "mode": mode,
+                    "created_at": datetime.now(timezone.utc),
+                }},
+                upsert=True,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to set pending email topic for session {session_id}: {e}")
+    
+    async def get_pending_email_topic(self, session_id: str) -> Optional[Dict]:
+        """Return pending email topic for session, or None."""
+        await self.connect()
+        try:
+            coll = self.database["email_pending_state"]
+            doc = await coll.find_one({"session_id": session_id})
+            if not doc:
+                return None
+            return {
+                "topic": doc.get("topic", ""),
+                "mode": doc.get("mode", "cloudfuze_clarification"),
+            }
+        except Exception as e:
+            logger.warning(f"Failed to get pending email topic for session {session_id}: {e}")
+            return None
+    
+    async def clear_pending_email_topic(self, session_id: str) -> None:
+        """Clear pending email topic for session (after draft or when follow-up is unrelated)."""
+        await self.connect()
+        try:
+            coll = self.database["email_pending_state"]
+            await coll.delete_one({"session_id": session_id})
+        except Exception as e:
+            logger.warning(f"Failed to clear pending email topic for session {session_id}: {e}")
     
     async def create_shared_chat(self, session_id: str, user_email: str, share_token: str) -> Dict:
         """Create a shareable link for a chat session."""
@@ -1472,7 +1521,9 @@ class MongoDBMemoryManager:
         parent_trace_id: str = None,
         model_used: str = None,
         is_current: bool = True,
-        retry_attempt: int = None
+        retry_attempt: int = None,
+        intent: str = None,
+        email_content: str = None
     ):
         """
         Save a message to the chat_messages collection with optional versioning support.
@@ -1486,6 +1537,8 @@ class MongoDBMemoryManager:
             model_used: Model name used ("gpt-4o-mini" or "gpt-4o")
             is_current: Whether this is the currently active version
             retry_attempt: Retry attempt number (None for initial response)
+            intent: Optional intent (e.g. "email_draft") for assistant messages — used for implicit refinement
+            email_content: Optional raw email body for email_draft — used for refinement
         """
         await self.connect()
         
@@ -1509,6 +1562,10 @@ class MongoDBMemoryManager:
                 message_doc["is_current"] = is_current
                 if retry_attempt is not None:
                     message_doc["retry_attempt"] = retry_attempt
+                if intent:
+                    message_doc["intent"] = intent
+                if email_content is not None:
+                    message_doc["email_content"] = email_content
             
             await chat_messages_collection.insert_one(message_doc)
             logger.debug(f"Saved {role} message (version {response_version}) for session {session_id[:8]}...")
@@ -1565,6 +1622,30 @@ class MongoDBMemoryManager:
         except Exception as e:
             logger.error(f"Error getting last messages for session {session_id}: {e}")
             return []
+    
+    async def get_last_assistant_message(self, session_id: str) -> Optional[Dict]:
+        """
+        Get the most recent assistant message for a session (for implicit refinement detection).
+        Returns dict with content, intent (if stored), email_content (if stored), or None if none.
+        """
+        await self.connect()
+        try:
+            chat_messages_collection = self.database["chat_messages"]
+            doc = await chat_messages_collection.find_one(
+                {"session_id": session_id, "role": "assistant"},
+                {"_id": 0, "content": 1, "intent": 1, "email_content": 1},
+                sort=[("created_at", -1)]
+            )
+            if not doc:
+                return None
+            return {
+                "content": doc.get("content", ""),
+                "intent": doc.get("intent"),
+                "email_content": doc.get("email_content"),
+            }
+        except Exception as e:
+            logger.warning(f"Failed to get last assistant message for session {session_id}: {e}")
+            return None
     
     async def get_response_versions(self, parent_trace_id: str) -> List[Dict]:
         """
@@ -1754,6 +1835,18 @@ async def delete_session(session_id: str, user_id: str) -> bool:
     """Delete a chat session (soft delete)."""
     return await mongodb_memory.delete_session(session_id, user_id)
 
+async def set_pending_email_topic(session_id: str, user_id: str, topic: str, mode: str = "cloudfuze_clarification") -> None:
+    """Store pending email topic for conversational follow-up (e.g. after CloudFuze clarification)."""
+    return await mongodb_memory.set_pending_email_topic(session_id, user_id, topic, mode)
+
+async def get_pending_email_topic(session_id: str) -> Optional[Dict]:
+    """Return pending email topic for session, or None."""
+    return await mongodb_memory.get_pending_email_topic(session_id)
+
+async def clear_pending_email_topic(session_id: str) -> None:
+    """Clear pending email topic for session."""
+    return await mongodb_memory.clear_pending_email_topic(session_id)
+
 async def create_shared_chat(session_id: str, user_email: str, share_token: str) -> Dict:
     """Create a shareable link for a chat session."""
     return await mongodb_memory.create_shared_chat(session_id, user_email, share_token)
@@ -1915,13 +2008,20 @@ async def save_message(
     parent_trace_id: str = None,
     model_used: str = None,
     is_current: bool = True,
-    retry_attempt: int = None
+    retry_attempt: int = None,
+    intent: str = None,
+    email_content: str = None
 ):
     """Save a message to the chat_messages collection with optional versioning support."""
     await mongodb_memory.save_message(
         session_id, role, content, response_version, parent_trace_id, 
-        model_used, is_current, retry_attempt
+        model_used, is_current, retry_attempt, intent=intent, email_content=email_content
     )
+
+
+async def get_last_assistant_message(session_id: str) -> Optional[Dict]:
+    """Get the most recent assistant message (content, intent, email_content) for implicit refinement."""
+    return await mongodb_memory.get_last_assistant_message(session_id)
 
 async def get_response_versions(parent_trace_id: str) -> List[Dict]:
     """Get all response versions for a given parent_trace_id."""

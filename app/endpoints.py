@@ -41,7 +41,8 @@ from app.mongodb_memory import (
     clear_user_chat_history, save_session, get_all_sessions, get_user_sessions, 
     get_session_by_id, create_shared_chat, get_shared_chat,
     update_user_profile, get_user_profile, get_user_statistics, get_rankers_by_date,
-    save_message, get_last_messages,
+    save_message, get_last_messages, get_last_assistant_message,
+    get_pending_email_topic, set_pending_email_topic, clear_pending_email_topic,
     update_user_profile_by_email, set_user_active, insert_audit_log
 )
 from app.helpers import strip_markdown, preserve_markdown
@@ -3801,6 +3802,181 @@ EMAIL_DRAFT_TRIGGERS = [
     "include a request for confirmation", "include a contact for support",
 ]
 
+# Email mode: greeting-only inputs → email_related_incomplete with greeting-led clarification
+EMAIL_GREETING_ONLY = frozenset([
+    "hi", "hello", "hey", "good morning", "good afternoon", "good evening", "greetings",
+    "hi there", "hello there", "hey there", "good day", "howdy",
+])
+
+# Non-email phrases (user in email mode but asking something else) → not_email_related
+EMAIL_NON_EMAIL_PATTERNS = [
+    r"\bwhat is\b", r"\bhow does\b", r"\bhow do\b", r"\bmigration\s+strateg", r"\bslack\s+api(s)?\b",
+    r"\bpricing\b", r"\bhow much\b", r"\bcloudfuze\b", r"\bmigration\s+tool", r"\bhow long\b",
+]
+
+# Clarification messages (normal assistant response, not email_draft intent)
+EMAIL_CLARIFICATION_NOT_RELATED = (
+    "It appears your request is not related to drafting an email. "
+    "The Email functionality is designed to generate professional email drafts. "
+    "Could you please provide the details for the email you would like to create?"
+)
+EMAIL_CLARIFICATION_INCOMPLETE = (
+    "I'd be happy to help draft your email. Could you please provide the recipient, subject (if any), "
+    "and the main message you'd like to convey? Once I have that, I'll prepare a polished email for you."
+)
+EMAIL_CLARIFICATION_GREETING = (
+    "Hi there! I'd be happy to help you draft an email. Could you please share who the email is for, "
+    "the subject (if any), and what you'd like to communicate? Once I have that, I'll prepare a polished email for you."
+)
+# CloudFuze-related query in email mode: offer to draft about topic (products, migration, pricing, etc.)
+EMAIL_CLARIFICATION_CLOUDFUZE = (
+    "I see you're referring to CloudFuze. Would you like to draft an email regarding this topic? "
+    "If so, should I use this as the subject line, and what details would you like included in the message? "
+    "Please share the recipient and key points, and I'll prepare a professional draft."
+)
+
+# Regex: input is only an email address (no subject/body)
+EMAIL_ONLY_ADDRESS_RE = re.compile(r"^\s*[\w.\-+]+@[\w.\-]+\.[a-zA-Z]{2,}\s*$")
+
+
+def contains_cloudfuze(text: str) -> bool:
+    """True if the text mentions CloudFuze (product, company, or any CloudFuze-related topic)."""
+    if not text:
+        return False
+    t = text.strip().lower()
+    return "cloudfuze" in t or "cloud fuze" in t
+
+
+def _classify_email_mode_input_heuristic(question: str) -> Tuple[Optional[str], bool]:
+    """
+    Fast heuristic pre-check for email mode input.
+    Returns (classification, greeting_only) or (None, False) if borderline (need LLM).
+    classification: "not_email_related" | "email_related_incomplete" | "email_related_complete"
+    """
+    if not question or not question.strip():
+        return "email_related_incomplete", False
+    q = question.strip().lower()
+    # Greeting only → incomplete, greeting_only=True
+    if q in EMAIL_GREETING_ONLY or (len(q) <= 20 and q.replace(" ", "") in {"hi", "hello", "hey", "goodmorning", "goodafternoon", "goodevening"}):
+        return "email_related_incomplete", True
+    # Single email address only → incomplete
+    if EMAIL_ONLY_ADDRESS_RE.match(question.strip()):
+        return "email_related_incomplete", False
+    # Very short and no clear email draft content → incomplete
+    if len(q) <= 25 and not any(t in q for t in EMAIL_DRAFT_TRIGGERS):
+        # Could be "slack apis", "need to send something" etc.
+        if any(re.search(p, q) for p in EMAIL_NON_EMAIL_PATTERNS):
+            return "not_email_related", False
+        return "email_related_incomplete", False
+    # Clear non-email question (longer phrases)
+    if any(re.search(p, q) for p in EMAIL_NON_EMAIL_PATTERNS) and "draft" not in q and "email" not in q:
+        return "not_email_related", False
+    # Borderline: has some length and might be complete draft or incomplete
+    return None, False
+
+
+async def classify_email_mode_input(question: str) -> Tuple[str, bool]:
+    """
+    Classify user input when email mode is ON.
+    Returns (classification, greeting_only).
+    classification: "not_email_related" | "email_related_incomplete" | "email_related_complete"
+    """
+    heuristic_result, greeting_only = _classify_email_mode_input_heuristic(question)
+    if heuristic_result is not None:
+        return heuristic_result, greeting_only
+    # Borderline: use LLM
+    try:
+        llm = get_llm(temperature=0, max_tokens=50)
+        prompt = """Classify the user input into exactly one label. The user is in "email drafting" mode.
+
+Labels:
+- email_complete: clear request to draft/write an email with enough context (recipient and/or subject and/or message).
+- email_incomplete: email-related but missing recipient, subject, or message; or vague (e.g. "need to send something").
+- not_email: not about drafting an email (e.g. product question, migration, pricing, how-to).
+
+User input: """
+        response = await asyncio.to_thread(
+            llm.invoke,
+            [HumanMessage(content=prompt + (question or "").strip())]
+        )
+        text = (response.content if hasattr(response, "content") else str(response)).strip().lower()
+        if "email_complete" in text:
+            return "email_related_complete", False
+        if "not_email" in text:
+            return "not_email_related", False
+        # default: incomplete
+        return "email_related_incomplete", False
+    except Exception as e:
+        logger.warning(f"[EMAIL CLASSIFY] LLM fallback failed: {e}, treating as incomplete")
+        return "email_related_incomplete", False
+
+
+async def classify_email_followup(previous_user_message: str, current_message: str) -> str:
+    """
+    Classify the user's follow-up reply after a CloudFuze clarification (no keyword matching).
+    Returns: "confirm_or_continue" | "provide_details" | "unrelated"
+    """
+    if not (previous_user_message or "").strip() or not (current_message or "").strip():
+        return "unrelated"
+    try:
+        llm = get_llm(temperature=0, max_tokens=30)
+        prompt = """The assistant previously asked whether the user wants to draft an email about CloudFuze (or a CloudFuze-related topic). The user had said: "{prev}". The user has now replied: "{cur}".
+
+Classify the current reply into exactly one label:
+- confirm_or_continue: the user confirms they want to draft the email, or says to go ahead (e.g. yes, okay do that, go ahead, please draft it).
+- provide_details: the user adds recipient, subject, or message details for the email.
+- unrelated: the user is asking or talking about something else (e.g. a different topic, a new question). Do not treat short replies like "yes" as unrelated if they clearly refer to the previous email question.
+
+Return only the label, nothing else.""".format(
+            prev=(previous_user_message or "").strip()[:500],
+            cur=(current_message or "").strip()[:500],
+        )
+        response = await asyncio.to_thread(llm.invoke, [HumanMessage(content=prompt)])
+        text = (response.content if hasattr(response, "content") else str(response)).strip().lower().replace(" ", "")
+        if "confirm_or_continue" in text:
+            return "confirm_or_continue"
+        if "provide_details" in text:
+            return "provide_details"
+        return "unrelated"
+    except Exception as e:
+        logger.warning(f"[EMAIL FOLLOWUP CLASSIFY] LLM failed: {e}, treating as unrelated")
+        return "unrelated"
+
+
+def get_email_clarification_message(classification: str, greeting_only: bool) -> str:
+    """Return the clarification message for email mode (not_email_related or email_related_incomplete)."""
+    if classification == "not_email_related":
+        return EMAIL_CLARIFICATION_NOT_RELATED
+    if greeting_only:
+        return EMAIL_CLARIFICATION_GREETING
+    return EMAIL_CLARIFICATION_INCOMPLETE
+
+
+async def classify_refinement_intent(last_email_content: str, question: str) -> bool:
+    """
+    Classify whether the user is asking to refine/rewrite/modify the previous email draft (no keyword matching).
+    Returns True only when the LLM answers YES.
+    """
+    if not (last_email_content or "").strip() or not (question or "").strip():
+        return False
+    try:
+        llm = get_llm(temperature=0, max_tokens=20)
+        prompt = """The assistant previously generated a polished email draft. The user now says: "{cur}"
+
+Determine whether the user is asking to refine, rewrite, or modify that previously generated email (e.g. make it more formal, shorter, add a deadline, improve tone).
+
+Answer only:
+YES
+or
+NO""".format(cur=(question or "").strip()[:400])
+        response = await asyncio.to_thread(llm.invoke, [HumanMessage(content=prompt)])
+        text = (response.content if hasattr(response, "content") else str(response)).strip().upper()
+        return "YES" in text
+    except Exception as e:
+        logger.warning(f"[EMAIL REFINEMENT CLASSIFY] LLM failed: {e}, treating as not refinement")
+        return False
+
+
 @router.post("/chat/stream")
 async def chat_stream(request: Request, auth_user: dict = Depends(require_auth)):
     """Streaming chat endpoint. PROTECTED - requires valid authentication."""
@@ -3808,6 +3984,8 @@ async def chat_stream(request: Request, auth_user: dict = Depends(require_auth))
     question = data.get("question", "")
     session_id = data.get("session_id", str(uuid.uuid4()))
     ui_mode = data.get("ui_mode")  # optional: "email" when Email Drafting toggle is ON
+    refine_action = data.get("refine_action")  # UI-triggered refinement (e.g. "Make the tone more formal")
+    last_email_content = data.get("last_email_content")  # draft to refine when refine_action is set
     
     # Use VERIFIED user info from auth token, NOT from request body
     user_id = auth_user["user_id"]
@@ -3836,7 +4014,231 @@ Answer clearly and correctly based on the provided context and knowledge base.""
 
     async def generate_stream():
         try:
-            # EMAIL DRAFT MODE: User toggled Email Drafting or query matches triggers (no RAG)
+            # EMAIL MODE: When user toggled Email Drafting, classify first (don't assume every input is a draft request)
+            if ui_mode == "email":
+                # 1. Refinement action (UI button): transform last draft only — bypass pending, CloudFuze, follow-up
+                if refine_action and last_email_content:
+                    refinement_input = (refine_action or "").strip() + "\n\n" + (last_email_content or "").strip()
+                    logger.info(f"[EMAIL MODE] refinement action for user {user_email}: {refine_action[:50]}...")
+                    yield f"data: {json.dumps({'type': 'thinking_complete'})}\n\n"
+                    llm = get_llm(temperature=0.2, max_tokens=1500)
+                    messages = [SystemMessage(content=EMAIL_DRAFT_SYSTEM_PROMPT), HumanMessage(content=refinement_input)]
+                    full_response = ""
+                    async for chunk in llm.astream(messages):
+                        if hasattr(chunk, "content") and chunk.content:
+                            token = chunk.content
+                            full_response += token
+                            yield f"data: {json.dumps({'token': token, 'type': 'token'})}\n\n"
+                            await asyncio.sleep(0.01)
+                    try:
+                        await save_message(session_id, "user", question)
+                        await save_message(session_id, "assistant", full_response, intent="email_draft", email_content=full_response)
+                    except Exception as e:
+                        logger.warning(f"Failed to save email refinement messages: {e}")
+                    await add_to_conversation(conversation_id, "user", question)
+                    await add_to_conversation(conversation_id, "assistant", full_response)
+                    trace_id = None
+                    try:
+                        trace_id = langfuse_tracker.create_trace(
+                            user_id=conversation_id, question=question, answer=full_response,
+                            session_id=session_id, user_name=user_name, user_email=user_email,
+                            metadata={"intent": "email_draft", "endpoint": "/chat/stream", "refinement": True}
+                        )
+                    except Exception as e:
+                        print(f"Warning: Langfuse logging failed: {e}")
+                    yield f"data: {json.dumps({'type': 'done', 'full_response': full_response, 'trace_id': trace_id, 'recommended_questions': [], 'intent': 'email_draft'})}\n\n"
+                    return
+                # 2. Implicit refinement (user typed e.g. "make it more formal" — no button): only when last message was email_draft
+                last_assistant = await get_last_assistant_message(session_id)
+                if last_assistant and last_assistant.get("intent") == "email_draft":
+                    last_email_body = (last_assistant.get("email_content") or last_assistant.get("content") or "").strip()
+                    if last_email_body:
+                        is_refinement = await classify_refinement_intent(last_email_body, question)
+                        if is_refinement:
+                            refinement_input = (question or "").strip() + "\n\n" + last_email_body
+                            logger.info(f"[EMAIL MODE] implicit refinement for user {user_email}")
+                            yield f"data: {json.dumps({'type': 'thinking_complete'})}\n\n"
+                            llm = get_llm(temperature=0.2, max_tokens=1500)
+                            messages = [SystemMessage(content=EMAIL_DRAFT_SYSTEM_PROMPT), HumanMessage(content=refinement_input)]
+                            full_response = ""
+                            async for chunk in llm.astream(messages):
+                                if hasattr(chunk, "content") and chunk.content:
+                                    token = chunk.content
+                                    full_response += token
+                                    yield f"data: {json.dumps({'token': token, 'type': 'token'})}\n\n"
+                                    await asyncio.sleep(0.01)
+                            try:
+                                await save_message(session_id, "user", question)
+                                await save_message(session_id, "assistant", full_response, intent="email_draft", email_content=full_response)
+                            except Exception as e:
+                                logger.warning(f"Failed to save implicit refinement messages: {e}")
+                            await add_to_conversation(conversation_id, "user", question)
+                            await add_to_conversation(conversation_id, "assistant", full_response)
+                            trace_id = None
+                            try:
+                                trace_id = langfuse_tracker.create_trace(
+                                    user_id=conversation_id, question=question, answer=full_response,
+                                    session_id=session_id, user_name=user_name, user_email=user_email,
+                                    metadata={"intent": "email_draft", "endpoint": "/chat/stream", "refinement": True, "implicit": True}
+                                )
+                            except Exception as e:
+                                print(f"Warning: Langfuse logging failed: {e}")
+                            yield f"data: {json.dumps({'type': 'done', 'full_response': full_response, 'trace_id': trace_id, 'recommended_questions': [], 'intent': 'email_draft'})}\n\n"
+                            return
+                # 3. Pending CloudFuze clarification: re-evaluate with conversational context (no hardcoded "yes")
+                pending = await get_pending_email_topic(session_id)
+                if pending:
+                    followup_label = await classify_email_followup(pending["topic"], question)
+                    logger.info(f"[EMAIL MODE] pending followup_label={followup_label} for user {user_email}")
+                    if followup_label == "unrelated":
+                        await clear_pending_email_topic(session_id)
+                        # Fall through to treat current message as fresh (CloudFuze check / classification below)
+                    else:
+                        # confirm_or_continue or provide_details: combine and re-classify
+                        combined_input = (pending["topic"] or "").strip() + "\n\n" + (question or "").strip()
+                        classification, greeting_only = await classify_email_mode_input(combined_input)
+                        if classification == "email_related_complete":
+                            await clear_pending_email_topic(session_id)
+                            logger.info(f"[EMAIL MODE] drafting from combined (confirmed) for user {user_email}")
+                            yield f"data: {json.dumps({'type': 'thinking_complete'})}\n\n"
+                            llm = get_llm(temperature=0.2, max_tokens=1500)
+                            messages = [SystemMessage(content=EMAIL_DRAFT_SYSTEM_PROMPT), HumanMessage(content=combined_input)]
+                            full_response = ""
+                            async for chunk in llm.astream(messages):
+                                if hasattr(chunk, "content") and chunk.content:
+                                    token = chunk.content
+                                    full_response += token
+                                    yield f"data: {json.dumps({'token': token, 'type': 'token'})}\n\n"
+                                    await asyncio.sleep(0.01)
+                            try:
+                                await save_message(session_id, "user", question)
+                                await save_message(session_id, "assistant", full_response, intent="email_draft", email_content=full_response)
+                            except Exception as e:
+                                logger.warning(f"Failed to save email draft messages: {e}")
+                            await add_to_conversation(conversation_id, "user", question)
+                            await add_to_conversation(conversation_id, "assistant", full_response)
+                            trace_id = None
+                            try:
+                                trace_id = langfuse_tracker.create_trace(
+                                    user_id=conversation_id, question=question, answer=full_response,
+                                    session_id=session_id, user_name=user_name, user_email=user_email,
+                                    metadata={"intent": "email_draft", "endpoint": "/chat/stream", "from_pending": True}
+                                )
+                            except Exception as e:
+                                print(f"Warning: Langfuse logging failed: {e}")
+                            yield f"data: {json.dumps({'type': 'done', 'full_response': full_response, 'trace_id': trace_id, 'recommended_questions': [], 'intent': 'email_draft'})}\n\n"
+                            return
+                        else:
+                            await clear_pending_email_topic(session_id)
+                            full_response = get_email_clarification_message(classification, greeting_only)
+                            yield f"data: {json.dumps({'type': 'thinking_complete'})}\n\n"
+                            for i, char in enumerate(full_response):
+                                yield f"data: {json.dumps({'token': char, 'type': 'token'})}\n\n"
+                                if i % 5 == 0:
+                                    await asyncio.sleep(0.01)
+                            try:
+                                await save_message(session_id, "user", question)
+                                await save_message(session_id, "assistant", full_response)
+                            except Exception as e:
+                                logger.warning(f"Failed to save email clarification messages: {e}")
+                            await add_to_conversation(conversation_id, "user", question)
+                            await add_to_conversation(conversation_id, "assistant", full_response)
+                            trace_id = None
+                            try:
+                                trace_id = langfuse_tracker.create_trace(
+                                    user_id=conversation_id, question=question, answer=full_response,
+                                    session_id=session_id, user_name=user_name, user_email=user_email,
+                                    metadata={"intent": "email_clarification", "endpoint": "/chat/stream"}
+                                )
+                            except Exception as e:
+                                print(f"Warning: Langfuse logging failed: {e}")
+                            yield f"data: {json.dumps({'type': 'done', 'full_response': full_response, 'trace_id': trace_id, 'recommended_questions': [], 'intent': None})}\n\n"
+                            return
+
+                # No pending, or pending was unrelated (cleared above): normal flow
+                # CloudFuze-related (products, migration, pricing, etc.): offer to draft about topic — exclude pure email addresses (e.g. user@cloudfuze.com)
+                if contains_cloudfuze(question) and not EMAIL_ONLY_ADDRESS_RE.fullmatch((question or "").strip()):
+                    full_response = EMAIL_CLARIFICATION_CLOUDFUZE
+                    logger.info(f"[EMAIL MODE] CloudFuze-related query for user {user_email}")
+                    yield f"data: {json.dumps({'type': 'thinking_complete'})}\n\n"
+                    for i, char in enumerate(full_response):
+                        yield f"data: {json.dumps({'token': char, 'type': 'token'})}\n\n"
+                        if i % 5 == 0:
+                            await asyncio.sleep(0.01)
+                    try:
+                        await save_message(session_id, "user", question)
+                        await save_message(session_id, "assistant", full_response)
+                    except Exception as e:
+                        logger.warning(f"Failed to save email clarification messages: {e}")
+                    await add_to_conversation(conversation_id, "user", question)
+                    await add_to_conversation(conversation_id, "assistant", full_response)
+                    await set_pending_email_topic(session_id, user_id, question, mode="cloudfuze_clarification")
+                    trace_id = None
+                    try:
+                        trace_id = langfuse_tracker.create_trace(
+                            user_id=conversation_id, question=question, answer=full_response,
+                            session_id=session_id, user_name=user_name, user_email=user_email,
+                            metadata={"intent": "email_clarification_cloudfuze", "endpoint": "/chat/stream"}
+                        )
+                    except Exception as e:
+                        print(f"Warning: Langfuse logging failed: {e}")
+                    yield f"data: {json.dumps({'type': 'done', 'full_response': full_response, 'trace_id': trace_id, 'recommended_questions': [], 'intent': None})}\n\n"
+                    return
+                classification, greeting_only = await classify_email_mode_input(question)
+                logger.info(f"[EMAIL MODE] classification={classification} greeting_only={greeting_only} for user {user_email}")
+                if classification == "not_email_related":
+                    full_response = get_email_clarification_message(classification, False)
+                    yield f"data: {json.dumps({'type': 'thinking_complete'})}\n\n"
+                    for i, char in enumerate(full_response):
+                        yield f"data: {json.dumps({'token': char, 'type': 'token'})}\n\n"
+                        if i % 5 == 0:
+                            await asyncio.sleep(0.01)
+                    try:
+                        await save_message(session_id, "user", question)
+                        await save_message(session_id, "assistant", full_response)
+                    except Exception as e:
+                        logger.warning(f"Failed to save email clarification messages: {e}")
+                    await add_to_conversation(conversation_id, "user", question)
+                    await add_to_conversation(conversation_id, "assistant", full_response)
+                    trace_id = None
+                    try:
+                        trace_id = langfuse_tracker.create_trace(
+                            user_id=conversation_id, question=question, answer=full_response,
+                            session_id=session_id, user_name=user_name, user_email=user_email,
+                            metadata={"intent": "email_clarification", "endpoint": "/chat/stream"}
+                        )
+                    except Exception as e:
+                        print(f"Warning: Langfuse logging failed: {e}")
+                    yield f"data: {json.dumps({'type': 'done', 'full_response': full_response, 'trace_id': trace_id, 'recommended_questions': [], 'intent': None})}\n\n"
+                    return
+                if classification == "email_related_incomplete":
+                    full_response = get_email_clarification_message(classification, greeting_only)
+                    yield f"data: {json.dumps({'type': 'thinking_complete'})}\n\n"
+                    for i, char in enumerate(full_response):
+                        yield f"data: {json.dumps({'token': char, 'type': 'token'})}\n\n"
+                        if i % 5 == 0:
+                            await asyncio.sleep(0.01)
+                    try:
+                        await save_message(session_id, "user", question)
+                        await save_message(session_id, "assistant", full_response)
+                    except Exception as e:
+                        logger.warning(f"Failed to save email clarification messages: {e}")
+                    await add_to_conversation(conversation_id, "user", question)
+                    await add_to_conversation(conversation_id, "assistant", full_response)
+                    trace_id = None
+                    try:
+                        trace_id = langfuse_tracker.create_trace(
+                            user_id=conversation_id, question=question, answer=full_response,
+                            session_id=session_id, user_name=user_name, user_email=user_email,
+                            metadata={"intent": "email_clarification", "endpoint": "/chat/stream"}
+                        )
+                    except Exception as e:
+                        print(f"Warning: Langfuse logging failed: {e}")
+                    yield f"data: {json.dumps({'type': 'done', 'full_response': full_response, 'trace_id': trace_id, 'recommended_questions': [], 'intent': None})}\n\n"
+                    return
+                # email_related_complete → fall through to draft below
+
+            # EMAIL DRAFT: User toggled Email Drafting (and input is complete) or query matches triggers (no RAG)
             is_email_draft = (ui_mode == "email") or any(
                 trigger in (question or "").strip().lower() for trigger in EMAIL_DRAFT_TRIGGERS
             )
@@ -3854,7 +4256,7 @@ Answer clearly and correctly based on the provided context and knowledge base.""
                         await asyncio.sleep(0.01)
                 try:
                     await save_message(session_id, "user", question)
-                    await save_message(session_id, "assistant", full_response)
+                    await save_message(session_id, "assistant", full_response, intent="email_draft", email_content=full_response)
                 except Exception as e:
                     logger.warning(f"Failed to save email draft messages: {e}")
                 await add_to_conversation(conversation_id, "user", question)
@@ -5551,6 +5953,8 @@ async def chat_retry_stream(request: Request, auth_user: dict = Depends(require_
     previous_trace_id = data.get("previous_trace_id", "")
     retry_attempt = data.get("retry_attempt", 1)
     ui_mode = data.get("ui_mode")  # optional: "email" when Email Drafting toggle is ON
+    refine_action = data.get("refine_action")
+    last_email_content = data.get("last_email_content")
     
     # Use VERIFIED user info from auth token
     user_id = auth_user["user_id"]
@@ -5576,7 +5980,213 @@ Answer clearly and correctly based on the provided context and knowledge base.""
     
     async def generate_retry_stream():
         try:
-            # EMAIL DRAFT MODE: Regenerate polished email (no RAG)
+            # EMAIL MODE (retry): Same classification as main chat — don't regenerate draft for incomplete/non-email
+            if ui_mode == "email":
+                # 1. Refinement action: bypass pending, CloudFuze, follow-up
+                if refine_action and last_email_content:
+                    refinement_input = (refine_action or "").strip() + "\n\n" + (last_email_content or "").strip()
+                    logger.info(f"[EMAIL MODE RETRY] refinement action for user {user_email}")
+                    yield f"data: {json.dumps({'type': 'thinking_complete'})}\n\n"
+                    llm = get_llm(temperature=0.2, max_tokens=1500)
+                    messages = [SystemMessage(content=EMAIL_DRAFT_SYSTEM_PROMPT), HumanMessage(content=refinement_input)]
+                    full_response = ""
+                    async for chunk in llm.astream(messages):
+                        if hasattr(chunk, "content") and chunk.content:
+                            token = chunk.content
+                            full_response += token
+                            yield f"data: {json.dumps({'token': token, 'type': 'token'})}\n\n"
+                            await asyncio.sleep(0.01)
+                    try:
+                        await save_message(session_id, "user", question)
+                        await save_message(session_id, "assistant", full_response, intent="email_draft", email_content=full_response)
+                    except Exception as e:
+                        logger.warning(f"Failed to save retry email refinement messages: {e}")
+                    trace_id = None
+                    try:
+                        trace_id = langfuse_tracker.create_trace(
+                            user_id=conversation_id, question=question, answer=full_response,
+                            session_id=session_id, user_name=user_name, user_email=user_email,
+                            metadata={"intent": "email_draft", "endpoint": "/chat/retry/stream", "retry_attempt": retry_attempt, "refinement": True}
+                        )
+                    except Exception as e:
+                        print(f"Warning: Langfuse logging failed: {e}")
+                    yield f"data: {json.dumps({'type': 'done', 'full_response': full_response, 'trace_id': trace_id, 'recommended_questions': [], 'intent': 'email_draft'})}\n\n"
+                    return
+                # 2. Implicit refinement (typed refinement, no button): same as main chat
+                last_assistant = await get_last_assistant_message(session_id)
+                if last_assistant and last_assistant.get("intent") == "email_draft":
+                    last_email_body = (last_assistant.get("email_content") or last_assistant.get("content") or "").strip()
+                    if last_email_body:
+                        is_refinement = await classify_refinement_intent(last_email_body, question)
+                        if is_refinement:
+                            refinement_input = (question or "").strip() + "\n\n" + last_email_body
+                            logger.info(f"[EMAIL MODE RETRY] implicit refinement for user {user_email}")
+                            yield f"data: {json.dumps({'type': 'thinking_complete'})}\n\n"
+                            llm = get_llm(temperature=0.2, max_tokens=1500)
+                            messages = [SystemMessage(content=EMAIL_DRAFT_SYSTEM_PROMPT), HumanMessage(content=refinement_input)]
+                            full_response = ""
+                            async for chunk in llm.astream(messages):
+                                if hasattr(chunk, "content") and chunk.content:
+                                    token = chunk.content
+                                    full_response += token
+                                    yield f"data: {json.dumps({'token': token, 'type': 'token'})}\n\n"
+                                    await asyncio.sleep(0.01)
+                            try:
+                                await save_message(session_id, "user", question)
+                                await save_message(session_id, "assistant", full_response, intent="email_draft", email_content=full_response)
+                            except Exception as e:
+                                logger.warning(f"Failed to save retry implicit refinement messages: {e}")
+                            trace_id = None
+                            try:
+                                trace_id = langfuse_tracker.create_trace(
+                                    user_id=conversation_id, question=question, answer=full_response,
+                                    session_id=session_id, user_name=user_name, user_email=user_email,
+                                    metadata={"intent": "email_draft", "endpoint": "/chat/retry/stream", "retry_attempt": retry_attempt, "refinement": True, "implicit": True}
+                                )
+                            except Exception as e:
+                                print(f"Warning: Langfuse logging failed: {e}")
+                            yield f"data: {json.dumps({'type': 'done', 'full_response': full_response, 'trace_id': trace_id, 'recommended_questions': [], 'intent': 'email_draft'})}\n\n"
+                            return
+                # 3. Pending CloudFuze clarification: same context-aware follow-up as main chat
+                pending = await get_pending_email_topic(session_id)
+                if pending:
+                    followup_label = await classify_email_followup(pending["topic"], question)
+                    logger.info(f"[EMAIL MODE RETRY] pending followup_label={followup_label} for user {user_email}")
+                    if followup_label == "unrelated":
+                        await clear_pending_email_topic(session_id)
+                    else:
+                        combined_input = (pending["topic"] or "").strip() + "\n\n" + (question or "").strip()
+                        classification, greeting_only = await classify_email_mode_input(combined_input)
+                        if classification == "email_related_complete":
+                            await clear_pending_email_topic(session_id)
+                            yield f"data: {json.dumps({'type': 'thinking_complete'})}\n\n"
+                            llm = get_llm(temperature=0.2, max_tokens=1500)
+                            messages = [SystemMessage(content=EMAIL_DRAFT_SYSTEM_PROMPT), HumanMessage(content=combined_input)]
+                            full_response = ""
+                            async for chunk in llm.astream(messages):
+                                if hasattr(chunk, "content") and chunk.content:
+                                    token = chunk.content
+                                    full_response += token
+                                    yield f"data: {json.dumps({'token': token, 'type': 'token'})}\n\n"
+                                    await asyncio.sleep(0.01)
+                            try:
+                                await save_message(session_id, "user", question)
+                                await save_message(session_id, "assistant", full_response, intent="email_draft", email_content=full_response)
+                            except Exception as e:
+                                logger.warning(f"Failed to save retry email draft messages: {e}")
+                            trace_id = None
+                            try:
+                                trace_id = langfuse_tracker.create_trace(
+                                    user_id=conversation_id, question=question, answer=full_response,
+                                    session_id=session_id, user_name=user_name, user_email=user_email,
+                                    metadata={"intent": "email_draft", "endpoint": "/chat/retry/stream", "retry_attempt": retry_attempt, "from_pending": True}
+                                )
+                            except Exception as e:
+                                print(f"Warning: Langfuse logging failed: {e}")
+                            yield f"data: {json.dumps({'type': 'done', 'full_response': full_response, 'trace_id': trace_id, 'recommended_questions': [], 'intent': 'email_draft'})}\n\n"
+                            return
+                        else:
+                            await clear_pending_email_topic(session_id)
+                            full_response = get_email_clarification_message(classification, greeting_only)
+                            yield f"data: {json.dumps({'type': 'thinking_complete'})}\n\n"
+                            for i, char in enumerate(full_response):
+                                yield f"data: {json.dumps({'token': char, 'type': 'token'})}\n\n"
+                                if i % 5 == 0:
+                                    await asyncio.sleep(0.01)
+                            try:
+                                await save_message(session_id, "user", question)
+                                await save_message(session_id, "assistant", full_response)
+                            except Exception as e:
+                                logger.warning(f"Failed to save retry email clarification messages: {e}")
+                            trace_id = None
+                            try:
+                                trace_id = langfuse_tracker.create_trace(
+                                    user_id=conversation_id, question=question, answer=full_response,
+                                    session_id=session_id, user_name=user_name, user_email=user_email,
+                                    metadata={"intent": "email_clarification", "endpoint": "/chat/retry/stream", "retry_attempt": retry_attempt}
+                                )
+                            except Exception as e:
+                                print(f"Warning: Langfuse logging failed: {e}")
+                            yield f"data: {json.dumps({'type': 'done', 'full_response': full_response, 'trace_id': trace_id, 'recommended_questions': [], 'intent': None})}\n\n"
+                            return
+
+                # No pending or pending was unrelated
+                # CloudFuze-related: offer to draft about topic — exclude pure email addresses (e.g. user@cloudfuze.com)
+                if contains_cloudfuze(question) and not EMAIL_ONLY_ADDRESS_RE.fullmatch((question or "").strip()):
+                    full_response = EMAIL_CLARIFICATION_CLOUDFUZE
+                    logger.info(f"[EMAIL MODE RETRY] CloudFuze-related query for user {user_email}")
+                    yield f"data: {json.dumps({'type': 'thinking_complete'})}\n\n"
+                    for i, char in enumerate(full_response):
+                        yield f"data: {json.dumps({'token': char, 'type': 'token'})}\n\n"
+                        if i % 5 == 0:
+                            await asyncio.sleep(0.01)
+                    try:
+                        await save_message(session_id, "user", question)
+                        await save_message(session_id, "assistant", full_response)
+                    except Exception as e:
+                        logger.warning(f"Failed to save retry email clarification messages: {e}")
+                    trace_id = None
+                    try:
+                        trace_id = langfuse_tracker.create_trace(
+                            user_id=conversation_id, question=question, answer=full_response,
+                            session_id=session_id, user_name=user_name, user_email=user_email,
+                            metadata={"intent": "email_clarification_cloudfuze", "endpoint": "/chat/retry/stream", "retry_attempt": retry_attempt}
+                        )
+                    except Exception as e:
+                        print(f"Warning: Langfuse logging failed: {e}")
+                    yield f"data: {json.dumps({'type': 'done', 'full_response': full_response, 'trace_id': trace_id, 'recommended_questions': [], 'intent': None})}\n\n"
+                    return
+                classification, greeting_only = await classify_email_mode_input(question)
+                logger.info(f"[EMAIL MODE RETRY] classification={classification} greeting_only={greeting_only} for user {user_email}")
+                if classification == "not_email_related":
+                    full_response = get_email_clarification_message(classification, False)
+                    yield f"data: {json.dumps({'type': 'thinking_complete'})}\n\n"
+                    for i, char in enumerate(full_response):
+                        yield f"data: {json.dumps({'token': char, 'type': 'token'})}\n\n"
+                        if i % 5 == 0:
+                            await asyncio.sleep(0.01)
+                    try:
+                        await save_message(session_id, "user", question)
+                        await save_message(session_id, "assistant", full_response)
+                    except Exception as e:
+                        logger.warning(f"Failed to save retry email clarification messages: {e}")
+                    trace_id = None
+                    try:
+                        trace_id = langfuse_tracker.create_trace(
+                            user_id=conversation_id, question=question, answer=full_response,
+                            session_id=session_id, user_name=user_name, user_email=user_email,
+                            metadata={"intent": "email_clarification", "endpoint": "/chat/retry/stream", "retry_attempt": retry_attempt}
+                        )
+                    except Exception as e:
+                        print(f"Warning: Langfuse logging failed: {e}")
+                    yield f"data: {json.dumps({'type': 'done', 'full_response': full_response, 'trace_id': trace_id, 'recommended_questions': [], 'intent': None})}\n\n"
+                    return
+                if classification == "email_related_incomplete":
+                    full_response = get_email_clarification_message(classification, greeting_only)
+                    yield f"data: {json.dumps({'type': 'thinking_complete'})}\n\n"
+                    for i, char in enumerate(full_response):
+                        yield f"data: {json.dumps({'token': char, 'type': 'token'})}\n\n"
+                        if i % 5 == 0:
+                            await asyncio.sleep(0.01)
+                    try:
+                        await save_message(session_id, "user", question)
+                        await save_message(session_id, "assistant", full_response)
+                    except Exception as e:
+                        logger.warning(f"Failed to save retry email clarification messages: {e}")
+                    trace_id = None
+                    try:
+                        trace_id = langfuse_tracker.create_trace(
+                            user_id=conversation_id, question=question, answer=full_response,
+                            session_id=session_id, user_name=user_name, user_email=user_email,
+                            metadata={"intent": "email_clarification", "endpoint": "/chat/retry/stream", "retry_attempt": retry_attempt}
+                        )
+                    except Exception as e:
+                        print(f"Warning: Langfuse logging failed: {e}")
+                    yield f"data: {json.dumps({'type': 'done', 'full_response': full_response, 'trace_id': trace_id, 'recommended_questions': [], 'intent': None})}\n\n"
+                    return
+                # email_related_complete → fall through to draft below
+
+            # EMAIL DRAFT RETRY: Regenerate polished email (no RAG)
             if ui_mode == "email" or any(trigger in (question or "").strip().lower() for trigger in EMAIL_DRAFT_TRIGGERS):
                 logger.info(f"[EMAIL DRAFT RETRY] Regenerating email draft for user {user_email}")
                 yield f"data: {json.dumps({'type': 'thinking_complete'})}\n\n"
@@ -5591,7 +6201,7 @@ Answer clearly and correctly based on the provided context and knowledge base.""
                         await asyncio.sleep(0.01)
                 try:
                     await save_message(session_id, "user", question)
-                    await save_message(session_id, "assistant", full_response)
+                    await save_message(session_id, "assistant", full_response, intent="email_draft", email_content=full_response)
                 except Exception as e:
                     logger.warning(f"Failed to save retry email draft messages: {e}")
                 trace_id = None
