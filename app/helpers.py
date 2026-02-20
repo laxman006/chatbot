@@ -1,4 +1,5 @@
 import os
+import re
 import requests
 import json
 import markdown
@@ -752,6 +753,60 @@ User question:
     except Exception as e:
         print(f"[RELATED DOCS] LLM fallback failed: {e}")
     return (None, None)
+
+
+# Procedural vs capability query/doc classification for RAG retrieval balancing
+_PROCEDURAL_PATTERNS = re.compile(
+    r"\b(how\s+(does|do|to|can|is|are|would)|"
+    r"what\s+is\s+the\s+(process|procedure|steps?|workflow)|"
+    r"explain\s+(the\s+)?(process|procedure|steps?)|"
+    r"walk\s+(me\s+)?through|step\s*[- ]?by\s*[- ]?step|"
+    r"guide\s+to|instructions?\s+for|"
+    r"how\s+to\s+(migrate|export|transfer|upload))\b",
+    re.IGNORECASE,
+)
+
+
+def is_procedural_query(query: str) -> bool:
+    """
+    Detect if the user is asking 'how does X work' (procedural) vs 'what is supported' (capability).
+    Procedural queries need migration guides, JSON export docs, step-by-step content.
+    """
+    if not (query or "").strip():
+        return False
+    return bool(_PROCEDURAL_PATTERNS.search(query.strip()))
+
+
+def is_capability_doc(doc) -> bool:
+    """True if doc is from capabilities ChromaDB (message_limitations) - feature/status table rows."""
+    meta = getattr(doc, "metadata", None) or {}
+    return (meta.get("source_type") or "").lower() == "message_limitations"
+
+
+def is_procedural_doc(doc) -> bool:
+    """
+    True if doc is procedural content: migration guides, JSON export docs, FAQs.
+    These contain step-by-step instructions and often file URLs.
+    Excludes capability table rows (message_limitations, sharepoint_limitations).
+    """
+    meta = getattr(doc, "metadata", None) or {}
+    source_type = (meta.get("source_type") or "").lower()
+    tag = (meta.get("tag") or "").lower()
+    # Capability table rows are never procedural
+    if source_type == "message_limitations" or tag == "message_limitations":
+        return False
+    if "sharepoint_limitations" in source_type or "sharepoint_limitations" in tag:
+        return False
+    source = (meta.get("source") or "").lower()
+    title = (meta.get("title") or "").lower()
+    content = (getattr(doc, "page_content", "") or "").lower()
+    combined = f"{tag} {source} {title}"
+    return (
+        ("migration" in combined or "migration guide" in combined)
+        and ("sharepoint" in tag or "sharepoint" in source_type)
+    ) or (
+        "json export" in combined or "faq" in combined
+    )
 
 
 def build_vectorstore(url: str):

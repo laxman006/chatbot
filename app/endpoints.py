@@ -45,7 +45,7 @@ from app.mongodb_memory import (
     get_pending_email_topic, set_pending_email_topic, clear_pending_email_topic,
     update_user_profile_by_email, set_user_active, insert_audit_log
 )
-from app.helpers import strip_markdown, preserve_markdown, extract_combination_llm_fallback
+from app.helpers import strip_markdown, preserve_markdown, extract_combination_llm_fallback, is_procedural_query, is_capability_doc, is_procedural_doc
 from app.langfuse_integration import langfuse_tracker
 from app.auth import verify_user_access, require_admin, require_restricted_admin, get_current_user
 from app.user_data import get_user_job_title
@@ -2014,7 +2014,8 @@ def pack_context_by_direction(
 
 
 def apply_section_boosts(
-    reranked_results: List[Tuple[Document, float]]
+    reranked_results: List[Tuple[Document, float]],
+    query: str = None,
 ) -> List[Tuple[Document, float]]:
     """
     Apply section-based boosting to already-reranked results.
@@ -2027,7 +2028,8 @@ def apply_section_boosts(
     4. summary (high) → low boost
     5. comment (medium) → no boost
     
-    This ensures fixes beat symptoms in final context.
+    When query is procedural ("how does X work"), procedural docs (migration guides,
+    JSON export docs) get +12% boost so they aren't crowded out by capability table rows.
     """
     if not reranked_results:
         return []
@@ -2051,6 +2053,9 @@ def apply_section_boosts(
         "web": 0.90,            # -10% (if tag is blog)
     }
     
+    # Procedural doc boost: when user asks "how does X work", migration guides beat capability table
+    procedural_boost = 1.12 if query and is_procedural_query(query) else 1.0
+    
     boosted_results = []
     for doc, score in reranked_results:
         meta = doc.metadata or {}
@@ -2073,6 +2078,10 @@ def apply_section_boosts(
             source_mult = SOURCE_MULT["blog"]
         elif source_type == "web":
             source_mult = SOURCE_MULT["web"]
+        
+        # Procedural doc boost: migration guides, JSON export docs for "how does X work" queries
+        if procedural_boost > 1.0 and is_procedural_doc(doc):
+            source_mult *= procedural_boost
         
         # Apply both boosts
         boosted_score = score * section_mult * source_mult
@@ -2116,8 +2125,8 @@ def apply_section_based_reranking(
     # Get base reranker scores
     reranked_base = cross_reranker.rerank(query, candidates, top_k=len(candidates))
     
-    # Apply section-based boosting using dedicated function
-    boosted_results = apply_section_boosts(reranked_base)
+    # Apply section-based boosting using dedicated function (pass query for procedural boost)
+    boosted_results = apply_section_boosts(reranked_base, query=query)
     
     # Extract Jira and SharePoint docs from boosted results for troubleshooting queries
     jira_docs = []
@@ -2173,6 +2182,18 @@ def apply_section_based_reranking(
         final_results.sort(key=lambda x: x[1], reverse=True)
         print(f"[RERANK] Troubleshooting query: Guaranteed {len([d for d, _ in final_results if 'jira' in d.metadata.get('source_type', '').lower() or 'jira' in d.metadata.get('tag', '').lower()])} Jira + {len([d for d, _ in final_results if 'sharepoint' in d.metadata.get('source_type', '').lower() or 'sharepoint' in d.metadata.get('tag', '').lower()])} SharePoint docs")
         return final_results[:top_k]
+    
+    # Procedural query ("how does X work"): cap capability table docs so procedural guides (Migration Guide, JSON Export) get in
+    if is_procedural_query(query):
+        capability_docs = [(d, s) for d, s in boosted_results if is_capability_doc(d)]
+        non_capability = [(d, s) for d, s in boosted_results if not is_capability_doc(d)]
+        if capability_docs and non_capability:
+            MAX_CAPABILITY_FOR_PROCEDURAL = 4
+            capped_capability = capability_docs[:MAX_CAPABILITY_FOR_PROCEDURAL]
+            merged = capped_capability + non_capability
+            merged.sort(key=lambda x: x[1], reverse=True)
+            print(f"[RERANK] Procedural query: Capped capability docs at {len(capped_capability)}, {len(non_capability)} procedural/other")
+            return merged[:top_k]
     
     return boosted_results[:top_k]
 
@@ -2644,8 +2665,17 @@ def extract_used_doc_chunks(doc_results: List[Tuple[Document, float]]) -> List[T
             meta.get("webUrl") or
             ""
         )
-        # Get chunk_id
+        # Get chunk_id; for capability docs (message_limitations) use fallback when missing
         chunk_id = meta.get("chunk_id") or ""
+        if not chunk_id and doc_id:
+            # Capability docs from ChromaDB often lack chunk_id; use migration+feature or content hash
+            migration = meta.get("migration_display") or ""
+            feature = meta.get("feature") or ""
+            if migration or feature:
+                chunk_id = f"{migration}|{feature}".strip("|") or "0"
+            else:
+                content_preview = (getattr(doc, "page_content", "") or "")[:80]
+                chunk_id = str(hash(content_preview)) if content_preview else "0"
         
         if doc_id and chunk_id:
             used_chunks.append((str(doc_id), str(chunk_id)))
