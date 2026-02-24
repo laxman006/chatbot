@@ -2,10 +2,10 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { getCurrentUser } from '@/lib/session-utils';
 import { apiFetch } from '@/lib/api';
-import { isAdminEmail } from '@/constants/admins';
 import { User } from '@/types/chat';
+import AdminGuard from '@/components/AdminGuard';
+import { useAuth } from '@/context/AuthContext';
 
 interface BlogStatus {
   polling_enabled: boolean;
@@ -35,9 +35,9 @@ interface BlogStats {
   vectorstore_build_date?: string | null;
 }
 
-export default function AdminBlogPage() {
+function AdminBlogContent() {
   const router = useRouter();
-  const [authUser, setAuthUser] = useState<User | null>(null);
+  const { user: authUser } = useAuth();
   const [loading, setLoading] = useState<boolean>(true);
   const [fetching, setFetching] = useState<boolean>(false);
   const [polling, setPolling] = useState<boolean>(false);
@@ -46,23 +46,9 @@ export default function AdminBlogPage() {
   const [status, setStatus] = useState<BlogStatus | null>(null);
   const [stats, setStats] = useState<BlogStats | null>(null);
 
-  // Verify admin access on mount
   useEffect(() => {
-    const user = getCurrentUser();
-
-    if (!user) {
-      router.replace('/login?error=admin_only');
-      return;
-    }
-
-    if (!isAdminEmail(user.email)) {
-      router.replace('/login?error=admin_only');
-      return;
-    }
-
-    setAuthUser(user);
     setLoading(false);
-  }, [router]);
+  }, []);
 
   // Fetch status and stats
   const fetchData = useCallback(async () => {
@@ -519,5 +505,13 @@ export default function AdminBlogPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function AdminBlogPage() {
+  return (
+    <AdminGuard>
+      <AdminBlogContent />
+    </AdminGuard>
   );
 }

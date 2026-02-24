@@ -2,10 +2,10 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { getCurrentUser } from '@/lib/session-utils';
 import { getApiBase } from '@/lib/api';
-import { isAdminEmail } from '@/constants/admins';
 import { colorPalette } from '@/constants/colors';
+import AdminGuard from '@/components/AdminGuard';
+import { useAuth } from '@/context/AuthContext';
 
 interface UserAnalytics {
   user_id: string;
@@ -51,12 +51,12 @@ const TIME_FILTERS: { value: TimeFilter; label: string }[] = [
 type DashboardTab = 'overview' | 'users' | 'questions';
 const TAB_OPTIONS: DashboardTab[] = ['overview', 'users', 'questions'];
 
-export default function AdminLangfuseAnalyticsPage() {
+function AdminLangfuseAnalyticsContent() {
   const router = useRouter();
+  const { user: authUser } = useAuth();
   const [loading, setLoading] = useState<boolean>(true);
   const [fetching, setFetching] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  
   const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('today');
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
@@ -65,24 +65,9 @@ export default function AdminLangfuseAnalyticsPage() {
   const [mostActiveUsers, setMostActiveUsers] = useState<MostActiveUser[]>([]);
   const [lastFetchTime, setLastFetchTime] = useState<number | null>(null);
 
-  // Check admin access on mount
   useEffect(() => {
-    function checkAuth() {
-      try {
-        const user = getCurrentUser(); // NOT async!
-        if (!user || !isAdminEmail(user.email)) {
-          router.push('/login');
-          return;
-        }
-      } catch (err) {
-        console.error('Auth check failed:', err);
-        router.push('/login');
-      } finally {
-        setLoading(false);
-      }
-    }
-    checkAuth();
-  }, [router]);
+    setLoading(false);
+  }, []);
 
   // Fetch all analytics data
   const fetchAnalytics = useCallback(
@@ -91,7 +76,7 @@ export default function AdminLangfuseAnalyticsPage() {
       setError(null);
 
       try {
-        const user = getCurrentUser(); // NOT async!
+        const user = authUser;
         if (!user) {
           setError('Not authenticated');
           console.error('[Analytics] No user found in localStorage');
@@ -485,5 +470,13 @@ export default function AdminLangfuseAnalyticsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function AdminLangfuseAnalyticsPage() {
+  return (
+    <AdminGuard>
+      <AdminLangfuseAnalyticsContent />
+    </AdminGuard>
   );
 }

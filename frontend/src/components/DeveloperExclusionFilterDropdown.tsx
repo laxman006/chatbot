@@ -1,22 +1,22 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { ADMIN_EMAILS } from '@/constants/admins';
 
 interface DeveloperExclusionFilterDropdownProps {
+  /** List of developer emails that can be excluded (from backend; only set for admins). */
+  developerEmails: string[];
   onExclusionChange: (excludedUsers: string[]) => void;
   initialExcluded?: string[];
 }
 
 export default function DeveloperExclusionFilterDropdown({
+  developerEmails,
   onExclusionChange,
   initialExcluded = [] // Default: no exclusions (opt-in filtering)
 }: DeveloperExclusionFilterDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [excludedUsers, setExcludedUsers] = useState<string[]>(initialExcluded);
   const dropdownRef = useRef<HTMLDivElement>(null);
-
-  const developerEmails = ADMIN_EMAILS;
 
   useEffect(() => {
     onExclusionChange(excludedUsers);

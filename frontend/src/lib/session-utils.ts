@@ -1,12 +1,17 @@
 import { ChatSession, User, OtherUserChat } from '@/types/chat';
 import { apiFetch } from '@/lib/api';
 
-// Get user-specific localStorage key
+// In-memory current user only (set by AuthContext from backend). No identity in localStorage.
+let _currentUser: User | null = null;
+
+export function setCurrentUser(u: User | null): void {
+  _currentUser = u;
+}
+
+// Get user-specific localStorage key (uses in-memory user id from AuthContext)
 export function getUserStorageKey(key: string): string {
   if (typeof window === 'undefined') return key;
-  
-  const user = JSON.parse(localStorage.getItem('user') || 'null');
-  const userId = user?.id || 'anonymous';
+  const userId = _currentUser?.id || 'anonymous';
   return `${key}_${userId}`;
 }
 
@@ -455,93 +460,42 @@ export async function loadOthersSession(
   }
 }
 
-// ✅ NEW: Get current user from localStorage (no tokens stored)
-// User info (id, name, email) is stored for UI display only
-// Session is managed via httpOnly cookie (session_id)
+// Get current user from in-memory only (set by AuthContext from backend). No localStorage.
 export function getCurrentUser(): User | null {
   if (typeof window === 'undefined') return null;
-  
-  try {
-    const userStr = localStorage.getItem('user');
-    if (!userStr) return null;
-    const user = JSON.parse(userStr);
-    // Remove any legacy token fields if they exist
-    delete user.access_token;
-    delete user.refresh_token;
-    delete user.token_expires_at;
-    delete user.token_issued_at;
-    return user;
-  } catch (e) {
-    console.error('[USER] Failed to parse user:', e);
-    return null;
-  }
+  return _currentUser;
 }
 
-// ✅ Hydrate user from backend when session exists but localStorage.user is missing
+// Hydrate in-memory user from backend (no localStorage). AuthContext is the primary source; this is for legacy/callback paths.
 export async function hydrateUserFromBackend(): Promise<boolean> {
   try {
-    console.log('[AUTH] Hydrating user from backend...');
-
-    // ✅ Use existing endpoint (recommended)
     const res = await apiFetch('/user/profile', { method: 'GET' });
-
-    if (res.status !== 200) {
-      console.warn('[AUTH] Failed to hydrate user, status:', res.status);
-      return false;
-    }
-
+    if (res.status !== 200) return false;
     const data = await res.json();
-
-    // ✅ Normalize possible backend response structures
-    const user = {
+    const user: User = {
       id: data.user_id || data.id || data.email,
       name: data.user_name || data.name || 'User',
-      email: data.user_email || data.email
+      email: data.user_email || data.email,
+      is_admin: !!data.is_admin,
+      excludable_developer_emails: Array.isArray(data.excludable_developer_emails) ? data.excludable_developer_emails : undefined,
     };
-
-    if (!user?.id || !user?.email) {
-      console.warn('[AUTH] Hydration failed: Invalid user data:', data);
-      return false;
-    }
-
-    localStorage.setItem('user', JSON.stringify(user));
-
-    console.log('[AUTH] ✅ User hydrated successfully:', user.email);
+    if (!user?.id || !user?.email) return false;
+    setCurrentUser(user);
     return true;
-  } catch (err) {
-    console.error('[AUTH] hydrateUserFromBackend error:', err);
+  } catch {
     return false;
   }
 }
 
-// ✅ SIMPLE SESSION CHECK (ONLY SOURCE OF TRUTH)
-// This is the ONLY function that should be used to check authentication
-// Now also ensures user is hydrated when session is valid
+// Session check: validate cookie only. Identity comes from AuthContext (backend).
 export async function checkSession(): Promise<boolean> {
   try {
-    const response = await apiFetch('/chat/sessions/all?limit=1', {
-      method: 'GET'
-    });
-
+    const response = await apiFetch('/chat/sessions/all?limit=1', { method: 'GET' });
     if (response.status !== 200) {
       console.log('[SESSION] No valid cookie session:', response.status);
       return false;
     }
-
-    // ✅ Cookie session valid → now ensure localStorage user exists
-    const currentUser = getCurrentUser();
-
-    if (!currentUser) {
-      console.warn('[AUTH] Session valid but localStorage user missing → Hydrating...');
-
-      const hydrated = await hydrateUserFromBackend();
-
-      if (!hydrated) {
-        console.warn('[AUTH] Hydration failed even though session exists');
-        return false;
-      }
-    }
-
+    if (!getCurrentUser()) await hydrateUserFromBackend();
     return true;
   } catch (error) {
     console.error('[SESSION] checkSession failed:', error);
@@ -587,6 +541,7 @@ export function clearUserLocalStorage(userId?: string): void {
   );
   sectionKeys.forEach(key => localStorage.removeItem(key));
   
+  setCurrentUser(null);
   console.log(`[LOGOUT] ✅ Cleared all localStorage data for user: ${userId}`);
 }
 
@@ -625,7 +580,7 @@ export async function refreshSession(): Promise<boolean> {
       return true;
     } else if (response.status === 401) {
       console.warn('[AUTH] Session expired');
-      localStorage.removeItem('user');
+      setCurrentUser(null);
       window.location.href = '/login?error=session_expired';
       return false;
     } else {

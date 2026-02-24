@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { ADMIN_EMAILS } from '@/constants/admins';
 import { apiFetch } from '@/lib/api';
 
 interface Team {
@@ -13,6 +12,8 @@ interface Team {
 }
 
 interface CombinedExclusionFilterDropdownProps {
+  /** List of developer emails that can be excluded (from backend; only set for admins). */
+  developerEmails: string[];
   onDeveloperExclusionChange: (excludedUsers: string[]) => void;
   onTeamExclusionChange: (excludedTeams: string[]) => void;
   initialExcludedUsers?: string[];
@@ -20,6 +21,7 @@ interface CombinedExclusionFilterDropdownProps {
 }
 
 export default function CombinedExclusionFilterDropdown({
+  developerEmails,
   onDeveloperExclusionChange,
   onTeamExclusionChange,
   initialExcludedUsers = [],
@@ -31,8 +33,6 @@ export default function CombinedExclusionFilterDropdown({
   const [teams, setTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const dropdownRef = useRef<HTMLDivElement>(null);
-
-  const developerEmails = ADMIN_EMAILS;
 
   // Load teams list on mount
   useEffect(() => {

@@ -4,8 +4,10 @@ export interface User {
   id: string;
   name: string;
   email: string;
-  // ✅ FIX 2: Removed token fields - session-based auth uses httpOnly cookies
-  // access_token, refresh_token, token_expires_at removed
+  /** Server-computed; never trust client for authorization. Used only for UI (e.g. showing Admin link). */
+  is_admin?: boolean;
+  /** Only set for admins; list of emails that can be excluded from dashboard stats. From backend only. */
+  excludable_developer_emails?: string[];
   // Session is managed by backend via session_id cookie
 }
 

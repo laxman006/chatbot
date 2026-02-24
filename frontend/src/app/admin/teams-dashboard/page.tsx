@@ -3,11 +3,11 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
-import { getCurrentUser } from '@/lib/session-utils';
-import { isAdminEmail, ADMIN_EMAILS } from '@/constants/admins';
-import { User } from '@/types/chat';
+import type { User } from '@/types/chat';
 import DateRangeFilterDropdown, { DateRange } from '@/components/DateRangeFilterDropdown';
 import CombinedExclusionFilterDropdown from '@/components/CombinedExclusionFilterDropdown';
+import AdminGuard from '@/components/AdminGuard';
+import { useAuth } from '@/context/AuthContext';
 import {
   PieChart,
   Pie,
@@ -44,38 +44,22 @@ type TeamsStatsResponse = {
 
 const COLORS = ['#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#6366f1', '#ef4444', '#14b8a6', '#f97316', '#06b6d4'];
 
-export default function TeamsDashboardPage() {
+function TeamsDashboardContent() {
   const router = useRouter();
-  const [authUser, setAuthUser] = useState<User | null>(null);
+  const { user: authUser } = useAuth();
   const [loading, setLoading] = useState<boolean>(true);
   const [fetching, setFetching] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [teamStats, setTeamStats] = useState<TeamStat[]>([]);
   const [totalTeams, setTotalTeams] = useState<number>(0);
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
-  
-  // Filter states
   const [dateRange, setDateRange] = useState<DateRange>({ startDate: null, endDate: null });
   const [excludedUsers, setExcludedUsers] = useState<string[]>([]);
   const [excludedTeams, setExcludedTeams] = useState<string[]>([]);
 
-  // Verify admin access on mount
   useEffect(() => {
-    const user = getCurrentUser();
-
-    if (!user) {
-      router.replace('/login?error=admin_only');
-      return;
-    }
-
-    if (!isAdminEmail(user.email)) {
-      router.replace('/login?error=admin_only');
-      return;
-    }
-
-    setAuthUser(user);
     setLoading(false);
-  }, [router]);
+  }, []);
 
   const fetchTeamStats = useCallback(async (user: User, startDate?: string | null, endDate?: string | null, excludeUsers?: string[]) => {
     setFetching(true);
@@ -250,7 +234,8 @@ export default function TeamsDashboardPage() {
           </div>
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             <DateRangeFilterDropdown onFilterChange={setDateRange} />
-            <CombinedExclusionFilterDropdown 
+            <CombinedExclusionFilterDropdown
+              developerEmails={authUser?.excludable_developer_emails ?? []}
               onDeveloperExclusionChange={setExcludedUsers}
               onTeamExclusionChange={setExcludedTeams}
             />
@@ -544,3 +529,10 @@ export default function TeamsDashboardPage() {
   );
 }
 
+export default function TeamsDashboardPage() {
+  return (
+    <AdminGuard>
+      <TeamsDashboardContent />
+    </AdminGuard>
+  );
+}

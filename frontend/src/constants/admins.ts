@@ -1,12 +1,9 @@
-export const ADMIN_EMAILS = [
-  'chaitanya.malle@cloudfuze.com',
-  'laxman.kadari@cloudfuze.com',
-  'nirosh.reddy@cloudfuze.com',
-].map((email) => email.toLowerCase());
+import type { User } from '@/types/chat';
 
-export function isAdminEmail(email?: string | null): boolean {
-  if (!email) return false;
-  return ADMIN_EMAILS.includes(email.toLowerCase());
+/**
+ * Admin status comes from the backend only (GET /user/profile or OAuth callback).
+ * Never ship a list of admin emails to the client.
+ */
+export function isAdmin(user: User | null | undefined): boolean {
+  return !!user?.is_admin;
 }
-
-

@@ -2,10 +2,10 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { getCurrentUser } from '@/lib/session-utils';
 import { getApiBase } from '@/lib/api';
-import { isAdminEmail, ADMIN_EMAILS } from '@/constants/admins';
 import { User } from '@/types/chat';
+import AdminGuard from '@/components/AdminGuard';
+import { useAuth } from '@/context/AuthContext';
 
 type QuestionStat = {
   question: string;
@@ -13,9 +13,9 @@ type QuestionStat = {
   last_asked?: string;
 };
 
-export default function AdminTopQuestionsPage() {
+function AdminTopQuestionsContent() {
   const router = useRouter();
-  const [authUser, setAuthUser] = useState<User | null>(null);
+  const { user: authUser } = useAuth();
   const [loading, setLoading] = useState<boolean>(true);
   const [fetching, setFetching] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -25,23 +25,9 @@ export default function AdminTopQuestionsPage() {
   const [source, setSource] = useState<string>('auto');
   const [limit, setLimit] = useState<number>(15);
 
-  // Verify admin access on mount
   useEffect(() => {
-    const user = getCurrentUser();
-
-    if (!user) {
-      router.replace('/login?error=admin_only');
-      return;
-    }
-
-    if (!isAdminEmail(user.email)) {
-      router.replace('/login?error=admin_only');
-      return;
-    }
-
-    setAuthUser(user);
     setLoading(false);
-  }, [router]);
+  }, []);
 
   const fetchQuestions = useCallback(
     async (user: User, selectedSource?: string, selectedLimit?: number) => {
@@ -278,4 +264,11 @@ export default function AdminTopQuestionsPage() {
   );
 }
 
+export default function AdminTopQuestionsPage() {
+  return (
+    <AdminGuard>
+      <AdminTopQuestionsContent />
+    </AdminGuard>
+  );
+}
 

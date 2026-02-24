@@ -380,50 +380,30 @@ function initializeLoginPage(onShowOnboarding?: (email: string, name: string) =>
         
         sessionStorage.removeItem('code_verifier');
         sessionStorage.removeItem('login_in_progress');
-        
-        // ✅ Session-based auth - backend sets session_id cookie automatically
-        // Store ONLY UI info (id, name, email) - NO tokens
-        const user = {
-          id: data.user_id,
-          name: data.name,
-          email: data.email
-        };
-        
-        localStorage.setItem('user', JSON.stringify(user));
-        // Clear all session-related flags on successful login
         sessionStorage.removeItem('session_expired');
         sessionStorage.removeItem('manual_logout');
+        // No identity in localStorage - AuthProvider will load user from backend on next page
         console.log('[AUTH] ✅ Session created - session_id cookie set by backend');
-        console.log('[AUTH] User info stored:', { id: user.id, email: user.email });
-        
-        // ✅ Check if user needs onboarding
+
+        const userName = data.name || '';
+        const userEmail = data.email || data.user_id || '';
+
+        // Check if user needs onboarding (profile fetch for onboarding only)
         try {
-          const profileResponse = await apiFetch('/user/profile', {
-            method: 'GET'
-          });
-          
+          const profileResponse = await apiFetch('/user/profile', { method: 'GET' });
           if (profileResponse.ok) {
             const profileData = await profileResponse.json();
-            console.log('[AUTH] User profile:', profileData);
-            
             if (profileData.needs_onboarding && onShowOnboarding) {
-              // Hide loading indicator before showing onboarding modal
               hideLoadingIndicator();
               const loginContainer = document.querySelector('.login-container') as HTMLElement;
-              if (loginContainer) {
-                loginContainer.style.display = 'none';
-              }
-              
-              // Show onboarding modal
+              if (loginContainer) loginContainer.style.display = 'none';
               console.log('[AUTH] User needs onboarding, showing modal');
-              onShowOnboarding(user.email, user.name);
-              // Don't redirect yet - wait for onboarding completion
+              onShowOnboarding(userEmail, userName);
               return;
             }
           }
         } catch (profileError) {
           console.error('[AUTH] Error checking user profile:', profileError);
-          // Continue with normal redirect if profile check fails
         }
         
         // Get redirect URL from sessionStorage (saved before OAuth)

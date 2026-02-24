@@ -6,9 +6,9 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { getApiBase, apiFetch } from '@/lib/api';
-import { getCurrentUser } from '@/lib/session-utils';
-import { isAdminEmail, ADMIN_EMAILS } from '@/constants/admins';
 import { User } from '@/types/chat';
+import AdminGuard from '@/components/AdminGuard';
+import { useAuth } from '@/context/AuthContext';
 import DateRangeFilterDropdown, { DateRange } from '@/components/DateRangeFilterDropdown';
 import DeveloperExclusionFilterDropdown from '@/components/DeveloperExclusionFilterDropdown';
 import {
@@ -63,44 +63,26 @@ type RankersResponse = {
 
 const COLORS = ['#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#6366f1', '#ef4444', '#14b8a6', '#f97316', '#06b6d4'];
 
-export default function AdminDashboardPage() {
+function AdminDashboardContent() {
   const router = useRouter();
-  const [authUser, setAuthUser] = useState<User | null>(null);
+  const { user: authUser } = useAuth();
   const [loading, setLoading] = useState<boolean>(true);
   const [fetching, setFetching] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [userStats, setUserStats] = useState<UserStat[]>([]);
   const [totalUsers, setTotalUsers] = useState<number>(0);
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
-  
-  // Filter states
   const [dateRange, setDateRange] = useState<DateRange>({ startDate: null, endDate: null });
-  const [excludedUsers, setExcludedUsers] = useState<string[]>([]); // Default: no exclusions (opt-in)
-
-  // Jira sync states
+  const [excludedUsers, setExcludedUsers] = useState<string[]>([]);
   const [jiraSyncing, setJiraSyncing] = useState<boolean>(false);
   const [jiraSyncMessage, setJiraSyncMessage] = useState<{
     type: "success" | "error" | "info";
     text: string;
   } | null>(null);
 
-  // Verify admin access on mount
   useEffect(() => {
-    const user = getCurrentUser();
-
-    if (!user) {
-      router.replace('/login?error=admin_only');
-      return;
-    }
-
-    if (!isAdminEmail(user.email)) {
-      router.replace('/login?error=admin_only');
-      return;
-    }
-
-    setAuthUser(user);
     setLoading(false);
-  }, [router]);
+  }, []);
 
   const fetchUserStats = useCallback(async (user: User, startDate?: string | null, endDate?: string | null, excludeUsers?: string[]) => {
     setFetching(true);
@@ -424,7 +406,10 @@ export default function AdminDashboardPage() {
           </div>
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             <DateRangeFilterDropdown onFilterChange={setDateRange} />
-            <DeveloperExclusionFilterDropdown onExclusionChange={setExcludedUsers} />
+            <DeveloperExclusionFilterDropdown
+              developerEmails={authUser?.excludable_developer_emails ?? []}
+              onExclusionChange={setExcludedUsers}
+            />
             <button
               onClick={() => router.push('/admin/jira')}
               style={{
@@ -853,5 +838,13 @@ export default function AdminDashboardPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function AdminDashboardPage() {
+  return (
+    <AdminGuard>
+      <AdminDashboardContent />
+    </AdminGuard>
   );
 }

@@ -4,10 +4,10 @@ import { useEffect, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
-import { getCurrentUser } from '@/lib/session-utils';
-import { isAdminEmail } from '@/constants/admins';
 import { User } from '@/types/chat';
 import ChatSidebar from '@/components/ChatSidebar';
+import AdminGuard from '@/components/AdminGuard';
+import { useAuth } from '@/context/AuthContext';
 
 type UserSummary = {
   user_id: string;
@@ -69,9 +69,9 @@ function getRoleBadgeStyle(role: string | null | undefined): { background: strin
   return { background: bg, border, color };
 }
 
-export default function AdminUsersPage() {
+function AdminUsersContent() {
   const router = useRouter();
-  const [authUser, setAuthUser] = useState<User | null>(null);
+  const { user: authUser } = useAuth();
   const [loading, setLoading] = useState(true);
   const [fetching, setFetching] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -93,18 +93,8 @@ export default function AdminUsersPage() {
   const [assignLeadHoverKey, setAssignLeadHoverKey] = useState<string | null>(null);
 
   useEffect(() => {
-    const user = getCurrentUser();
-    if (!user) {
-      router.replace('/login?error=admin_only');
-      return;
-    }
-    if (!isAdminEmail(user.email)) {
-      router.replace('/login?error=admin_only');
-      return;
-    }
-    setAuthUser(user);
     setLoading(false);
-  }, [router]);
+  }, []);
 
   const fetchUsers = useCallback(async () => {
     if (!authUser) return;
@@ -892,5 +882,13 @@ export default function AdminUsersPage() {
         document.body
       )}
     </>
+  );
+}
+
+export default function AdminUsersPage() {
+  return (
+    <AdminGuard>
+      <AdminUsersContent />
+    </AdminGuard>
   );
 }

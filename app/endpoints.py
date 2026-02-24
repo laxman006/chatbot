@@ -47,7 +47,7 @@ from app.mongodb_memory import (
 )
 from app.helpers import strip_markdown, preserve_markdown
 from app.langfuse_integration import langfuse_tracker
-from app.auth import verify_user_access, require_admin, require_restricted_admin, get_current_user
+from app.auth import verify_user_access, require_admin, require_restricted_admin, get_current_user, is_admin_email, EXCLUDED_DEVELOPER_EMAILS
 from app.user_data import get_user_job_title
 from app.models.teams import TEAMS_STRUCTURE, get_team_by_name
 from config import (
@@ -6971,30 +6971,41 @@ async def get_user_profile_endpoint(
         
         if not profile:
             # User doesn't have profile yet - return empty structure
-            return {
+            user_email = auth_user.get("email", "")
+            is_admin = is_admin_email(user_email)
+            out = {
                 "user_id": user_id,
-                "user_email": auth_user.get("email", ""),
+                "user_email": user_email,
                 "user_name": auth_user.get("name", ""),
                 "team_name": None,
                 "manager_email": None,
                 "manager_name": None,
                 "role": None,
-                "needs_onboarding": True
+                "needs_onboarding": True,
+                "is_admin": is_admin,
             }
-        
+            if is_admin:
+                out["excludable_developer_emails"] = sorted(EXCLUDED_DEVELOPER_EMAILS)
+            return out
+
         # Check if onboarding is needed
         needs_onboarding = not profile.get("team_name") or not profile.get("role")
-        
-        return {
+        user_email = profile.get("user_email", auth_user.get("email", ""))
+        is_admin = is_admin_email(user_email)
+        out = {
             "user_id": profile.get("user_id", user_id),
-            "user_email": profile.get("user_email", auth_user.get("email", "")),
+            "user_email": user_email,
             "user_name": profile.get("user_name", auth_user.get("name", "")),
             "team_name": profile.get("team_name"),
             "manager_email": profile.get("manager_email"),
             "manager_name": profile.get("manager_name"),
             "role": profile.get("role"),
-            "needs_onboarding": needs_onboarding
+            "needs_onboarding": needs_onboarding,
+            "is_admin": is_admin,
         }
+        if is_admin:
+            out["excludable_developer_emails"] = sorted(EXCLUDED_DEVELOPER_EMAILS)
+        return out
         
     except HTTPException:
         raise
@@ -7746,7 +7757,7 @@ async def get_most_asked_questions(
 async def get_admin_users_summary(
     exclude_users: Optional[str] = Query(None, description="Comma-separated list of user emails/names to exclude"),
     include_inactive: bool = Query(False, description="If true, include users with is_active=False (e.g. for User Management list)"),
-    current_user: dict = Depends(require_admin)
+    current_user: dict = Depends(require_restricted_admin)
 ):
     """
     Get ALL-TIME user statistics from user_activity collection.
@@ -8182,7 +8193,7 @@ async def get_admin_rankers(
     to_date: Optional[str] = Query(None, description="End date in YYYY-MM-DD format"),
     exclude_users: Optional[str] = Query(None, description="Comma-separated list of user emails/names to exclude"),
     limit: int = Query(100, ge=1, le=500, description="Maximum number of rankers to return"),
-    current_user: dict = Depends(require_admin)
+    current_user: dict = Depends(require_restricted_admin)
 ):
     """
     Get date-based user rankers from message_events collection.
@@ -8247,7 +8258,7 @@ async def get_admin_rankers(
 
 @router.post("/admin/blog/poll")
 async def trigger_blog_poll(
-    current_user: dict = Depends(require_admin)
+    current_user: dict = Depends(require_restricted_admin)
 ):
     """
     Manually trigger a blog poll to check for new posts and add them to vectorstore.
@@ -8280,7 +8291,7 @@ async def trigger_blog_poll(
 
 @router.get("/admin/blog/status")
 async def get_blog_poll_status(
-    current_user: dict = Depends(require_admin)
+    current_user: dict = Depends(require_restricted_admin)
 ):
     """
     Get blog polling status including last poll time and configuration.
@@ -8322,7 +8333,7 @@ async def get_blog_poll_status(
 
 @router.get("/admin/blog/stats")
 async def get_blog_stats(
-    current_user: dict = Depends(require_admin)
+    current_user: dict = Depends(require_restricted_admin)
 ):
     """
     Get blog statistics including total posts, last update, and polling information.
@@ -8409,7 +8420,7 @@ async def get_teams_summary_mongodb(
     from_date: Optional[str] = Query(None, description="Start date in YYYY-MM-DD format"),
     to_date: Optional[str] = Query(None, description="End date in YYYY-MM-DD format"),
     exclude_users: Optional[str] = Query(None, description="Comma-separated list of user emails/names to exclude"),
-    current_user: dict = Depends(require_admin)
+    current_user: dict = Depends(require_restricted_admin)
 ):
     """
     Get team-wise statistics from MongoDB.
@@ -8720,7 +8731,7 @@ async def get_teams_summary_mongodb(
 
 
 @router.get("/dataset/corrected-responses")
-async def get_corrected_responses(current_user: dict = Depends(require_admin)):
+async def get_corrected_responses(current_user: dict = Depends(require_restricted_admin)):
     """Get all corrected responses from the dataset. Requires admin access."""
     try:
         dataset_file = "./data/corrected_responses/corrected_responses.json"
@@ -8740,7 +8751,7 @@ async def get_corrected_responses(current_user: dict = Depends(require_admin)):
         return {"error": f"Failed to load corrected responses: {str(e)}"}
 
 @router.delete("/dataset/corrected-responses")
-async def clear_corrected_responses(current_user: dict = Depends(require_admin)):
+async def clear_corrected_responses(current_user: dict = Depends(require_restricted_admin)):
     """Clear all corrected responses from the dataset. Requires admin access."""
     try:
         dataset_file = "./data/corrected_responses/corrected_responses.json"
@@ -10081,7 +10092,7 @@ async def get_top_questions_global(
 # ---------------- Manual Fine-Tuning System ----------------
 
 @router.post("/fine-tuning/trigger")
-async def trigger_manual_fine_tuning(current_user: dict = Depends(require_admin)):
+async def trigger_manual_fine_tuning(current_user: dict = Depends(require_restricted_admin)):
     """Manually trigger fine-tuning when needed. Requires admin access."""
     try:
         # Check if we have enough data for fine-tuning
@@ -10108,7 +10119,7 @@ async def trigger_manual_fine_tuning(current_user: dict = Depends(require_admin)
         return {"error": f"Failed to trigger fine-tuning: {str(e)}"}
 
 @router.get("/fine-tuning/status")
-async def get_fine_tuning_status(current_user: dict = Depends(require_admin)):
+async def get_fine_tuning_status(current_user: dict = Depends(require_restricted_admin)):
     """Get the status of fine-tuning process. Requires admin access."""
     try:
         # Check dataset quality
@@ -10816,12 +10827,17 @@ async def microsoft_oauth_callback(
             
             # 🔥 CRITICAL: Create JSONResponse FIRST, then set cookie on it
             # ✅ Return only user info (no tokens - session managed via cookie)
+            # is_admin and excludable_developer_emails from server only (no client-side list)
+            is_admin = is_admin_email(user_email)
             result = {
                 "user_id": user_id,
                 "name": user_name,
-                "email": user_email
+                "email": user_email,
+                "is_admin": is_admin,
             }
-            
+            if is_admin:
+                result["excludable_developer_emails"] = sorted(EXCLUDED_DEVELOPER_EMAILS)
+
             response = JSONResponse(content=result)
             
             # 🔥 CRITICAL: Set cookie using FastAPI's set_cookie() method

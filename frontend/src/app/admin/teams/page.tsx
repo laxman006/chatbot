@@ -2,11 +2,11 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { getCurrentUser } from '@/lib/session-utils';
 import { getApiBase } from '@/lib/api';
-import { isAdminEmail } from '@/constants/admins';
 import { colorPalette } from '@/constants/colors';
 import CombinedExclusionFilterDropdown from '@/components/CombinedExclusionFilterDropdown';
+import AdminGuard from '@/components/AdminGuard';
+import { useAuth } from '@/context/AuthContext';
 
 interface TeamStats {
   team_name: string;
@@ -96,40 +96,24 @@ const PieDonut = ({
   );
 };
 
-export default function TeamsAnalyticsPage() {
+function TeamsAnalyticsContent() {
   const router = useRouter();
+  const { user: authUser } = useAuth();
   const [loading, setLoading] = useState<boolean>(true);
   const [fetching, setFetching] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-
   const [teams, setTeams] = useState<TeamStats[]>([]);
   const [selectedTeamDetails, setSelectedTeamDetails] = useState<TeamDetails | null>(null);
   const [showTeamDetails, setShowTeamDetails] = useState<boolean>(false);
-
-  const [selectedFilter, setSelectedFilter] = useState<string>('this_week'); // Filter selected by user
-  const [appliedFilter, setAppliedFilter] = useState<string>('this_week'); // Filter actually applied/fetched
+  const [selectedFilter, setSelectedFilter] = useState<string>('this_week');
+  const [appliedFilter, setAppliedFilter] = useState<string>('this_week');
   const [lastFetchTime, setLastFetchTime] = useState<number | null>(null);
   const [excludedUsers, setExcludedUsers] = useState<string[]>([]);
   const [excludedTeams, setExcludedTeams] = useState<string[]>([]);
 
-  // Check admin access on mount
   useEffect(() => {
-    function checkAuth() {
-      try {
-        const user = getCurrentUser(); // NOT async!
-        if (!user || !isAdminEmail(user.email)) {
-          router.push('/login');
-          return;
-        }
-      } catch (err) {
-        console.error('Auth check failed:', err);
-        router.push('/login');
-      } finally {
-        setLoading(false);
-      }
-    }
-    checkAuth();
-  }, [router]);
+    setLoading(false);
+  }, []);
 
   // Fetch teams analytics
   const fetchTeamsAnalytics = useCallback(async (
@@ -143,7 +127,7 @@ export default function TeamsAnalyticsPage() {
 
       console.log('[Teams Fetch] Starting fetch with filter:', filter);
       
-      const user = getCurrentUser(); // NOT async!
+      const user = authUser;
       console.log('[Teams Fetch] Got user:', user?.email);
       
       if (!user) {
@@ -259,7 +243,7 @@ export default function TeamsAnalyticsPage() {
   // Fetch team details
   const fetchTeamDetails = useCallback(async (teamName: string) => {
     try {
-      const user = getCurrentUser(); // NOT async!
+      const user = authUser;
       if (!user) return;
 
       const apiBase = getApiBase();
@@ -477,6 +461,7 @@ export default function TeamsAnalyticsPage() {
           {fetching ? 'Loading...' : 'Apply'}
         </button>
         <CombinedExclusionFilterDropdown
+          developerEmails={authUser?.excludable_developer_emails ?? []}
           onDeveloperExclusionChange={setExcludedUsers}
           onTeamExclusionChange={setExcludedTeams}
         />
@@ -1130,5 +1115,13 @@ export default function TeamsAnalyticsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function TeamsAnalyticsPage() {
+  return (
+    <AdminGuard>
+      <TeamsAnalyticsContent />
+    </AdminGuard>
   );
 }

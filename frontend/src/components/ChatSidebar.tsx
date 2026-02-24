@@ -7,13 +7,12 @@ import { ChatSession, OtherUserChat, User } from '@/types/chat';
 import {
   getAllSessions,
   fetchAllUsersChats,
-  getCurrentUser,
   deleteSession as deleteSessionUtil,
   saveAllSessions,
   setCurrentSessionId,
   clearUserLocalStorage
 } from '@/lib/session-utils';
-import { isAdminEmail } from '@/constants/admins';
+import { useAuth } from '@/context/AuthContext';
 import { apiFetch } from '@/lib/api';
 
 interface ChatSidebarProps {
@@ -32,25 +31,17 @@ export default function ChatSidebar({
   activeSessionId
 }: ChatSidebarProps) {
   const router = useRouter();
-  const [user, setUser] = useState<User | null>(null);
-  const [isAdmin, setIsAdmin] = useState<boolean>(false);
+  const { user, loading: authLoading } = useAuth();
   const [showLogoutModal, setShowLogoutModal] = useState<boolean>(false);
   const [adminSubmenuOpen, setAdminSubmenuOpen] = useState<boolean>(false);
   const hasRenderedHistoryRef = useRef(false);
   const adminSubmenuRef = useRef<HTMLDivElement>(null);
   
-  // API Research feature state
   const [apiResearchAccess, setApiResearchAccess] = useState({
     can_access: false,
     enabled: false
   });
   const [isTogglingApiResearch, setIsTogglingApiResearch] = useState(false);
-
-  useEffect(() => {
-    const currentUser = getCurrentUser();
-    setUser(currentUser);
-    setIsAdmin(isAdminEmail(currentUser?.email));
-  }, []);
   
   // Check API Research access on mount
   useEffect(() => {
@@ -546,11 +537,7 @@ export default function ChatSidebar({
   // ✅ NEW: Handle logout confirmation (session-based auth)
   const handleLogoutConfirm = async () => {
     try {
-      // ✅ Get user ID BEFORE removing user data (needed to clear user-specific keys)
-      const currentUser = getCurrentUser();
-      const userId = currentUser?.id;
-      
-      // ✅ Session-based auth - session_id cookie sent automatically via proxy
+      // Session-based auth - session_id cookie sent automatically via proxy
       const response = await apiFetch('/auth/logout', {
         method: 'POST'
       });
@@ -563,11 +550,8 @@ export default function ChatSidebar({
     } catch (error) {
       console.error('[AUTH] Logout error:', error);
     } finally {
-      // ✅ Clear all user-specific localStorage data (must be before removing 'user')
-      clearUserLocalStorage();
-      
-      // ✅ Always clear user data (must be last to allow clearUserLocalStorage to get userId)
-      localStorage.removeItem('user');
+      // Clear user-specific localStorage (pass id from AuthContext before clearing memory)
+      clearUserLocalStorage(user?.id); // pass id from AuthContext before clearing memory
       
       // 🔒 CRITICAL: Clear session expiration flag on manual logout
       // This prevents showing "session expired" error when user manually logs out
@@ -888,7 +872,7 @@ export default function ChatSidebar({
           </div>
           <div className="user-dropdown-sidebar" id="userDropdown">
             <div className="dropdown-item" id="userEmail">{user?.email || ''}</div>
-            {isAdmin && (
+            {user?.is_admin && (
               <>
                 <div 
                   className="dropdown-item admin-parent" 
