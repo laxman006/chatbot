@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { apiFetch } from "@/lib/api";
 
 interface SyncStatus {
   status: string;
@@ -42,12 +43,7 @@ export default function JiraSyncPanel() {
 
   const loadStatus = async () => {
     try {
-      const token = localStorage.getItem("authToken");
-      const response = await fetch("/api/proxy/api/jira/sync/status", {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      const response = await apiFetch("/api/jira/sync/status");
 
       if (!response.ok) throw new Error("Failed to load sync status");
 
@@ -65,12 +61,8 @@ export default function JiraSyncPanel() {
     setMessage(null);
 
     try {
-      const token = localStorage.getItem("authToken");
-      const response = await fetch("/api/proxy/api/jira/sync", {
+      const response = await apiFetch("/api/jira/sync", {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
       });
 
       if (!response.ok) throw new Error("Sync failed");

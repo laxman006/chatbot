@@ -43,11 +43,12 @@ from app.mongodb_memory import (
     update_user_profile, get_user_profile, get_user_statistics, get_rankers_by_date,
     save_message, get_last_messages, get_last_assistant_message,
     get_pending_email_topic, set_pending_email_topic, clear_pending_email_topic,
-    update_user_profile_by_email, set_user_active, insert_audit_log
+    update_user_profile_by_email, set_user_active, insert_audit_log,
+    get_api_research_preference, update_api_research_preference
 )
 from app.helpers import strip_markdown, preserve_markdown, extract_combination_llm_fallback, is_procedural_query, is_capability_doc, is_procedural_doc
 from app.langfuse_integration import langfuse_tracker
-from app.auth import verify_user_access, require_admin, require_restricted_admin, get_current_user, is_admin_email, EXCLUDED_DEVELOPER_EMAILS
+from app.auth import verify_user_access, require_admin, require_restricted_admin, get_current_user, is_admin_email, can_access_api_research, EXCLUDED_DEVELOPER_EMAILS
 from app.user_data import get_user_job_title
 from app.models.teams import TEAMS_STRUCTURE, get_team_by_name
 from config import (
@@ -6799,6 +6800,54 @@ async def get_user_profile_endpoint(
         raise HTTPException(status_code=500, detail=f"Error getting user profile: {str(e)}")
 
 
+# ---------------- API Research (Cloud API Research feature) ----------------
+
+@router.get("/user/api-research/access")
+async def get_api_research_access(
+    auth_user: dict = Depends(require_auth)
+):
+    """Get current user's API Research access and enabled state."""
+    try:
+        user_email = (auth_user.get("email") or "").strip()
+        if not user_email:
+            raise HTTPException(status_code=401, detail="User email not found")
+        can_access = can_access_api_research(user_email)
+        enabled = await get_api_research_preference(user_email) if can_access else False
+        return {"can_access": can_access, "enabled": enabled}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting API research access: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to get API research access")
+
+
+class ApiResearchToggleBody(BaseModel):
+    enabled: bool
+
+
+@router.post("/user/api-research/toggle")
+async def toggle_api_research(
+    body: ApiResearchToggleBody,
+    auth_user: dict = Depends(require_auth)
+):
+    """Toggle API Research on/off for the current user (if they have access)."""
+    try:
+        user_email = (auth_user.get("email") or "").strip()
+        if not user_email:
+            raise HTTPException(status_code=401, detail="User email not found")
+        if not can_access_api_research(user_email):
+            raise HTTPException(status_code=403, detail="API Research access not allowed")
+        ok = await update_api_research_preference(user_email, body.enabled)
+        if not ok:
+            raise HTTPException(status_code=500, detail="Failed to update preference")
+        return {"enabled": body.enabled}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error toggling API research: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to toggle API research")
+
+
 class UserProfileUpdate(BaseModel):
     team_name: str
     role: Optional[str] = None
@@ -10585,26 +10634,23 @@ async def microsoft_oauth_callback(
             from app.session_store import SESSION_EXPIRY_HOURS
             import os
             
-            # ✅ Cookie settings: Different for dev vs production
-            # Development (localhost): SameSite=lax, secure=False (works with Next.js proxy)
-            # Production (HTTPS): SameSite=None, secure=True (cross-origin)
-            
-            # Use http_request (FastAPI Request) to get URL, not request (Pydantic model)
+            # ✅ Cookie settings: Deployment requirements (httponly, secure, samesite)
+            # Development: SameSite=lax, secure=False (works with Next.js proxy)
+            # Production HTTPS: secure=True; SameSite=none if frontend/backend on different domains
+            #
+            # DEPLOYMENT: For cross-domain (e.g. frontend ai.cloudfuze.com, backend api.cloudfuze.com):
+            #   Set ENVIRONMENT=production and USE_CROSS_ORIGIN_COOKIES=true so cookie gets SameSite=None.
+            #   HTTPS is mandatory when cross-domain (browsers block secure cookies over HTTP).
+            #
             request_url = str(http_request.url)
             is_production = os.getenv("ENVIRONMENT", "development").lower() == "production"
             is_https = request_url.startswith("https://")
             is_localhost = "localhost" in request_url or "127.0.0.1" in request_url
             
-            # Determine cookie settings
-            # ✅ PRODUCTION READY: Automatically detects environment and sets correct cookie flags
             if is_production and is_https:
-                # Production HTTPS: Check if using proxy (same-origin) or direct (cross-origin)
-                # If frontend uses Next.js proxy, requests are same-origin → SameSite=Lax
-                # If frontend calls backend directly on different domain → SameSite=None
-                # Default to Lax (works with proxy), can be overridden via env var if needed
                 use_cross_origin = os.getenv("USE_CROSS_ORIGIN_COOKIES", "false").lower() == "true"
                 secure_cookie = True
-                samesite_setting = "none" if use_cross_origin else "lax"  # Lax for proxy, None for direct
+                samesite_setting = "none" if use_cross_origin else "lax"
             else:
                 # Development or HTTP: Same-origin cookies (via proxy)
                 secure_cookie = False

@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState } from 'react';
-import { getApiBase } from '@/lib/api';
+import { apiFetch } from '@/lib/api';
 import { setCurrentUser } from '@/lib/session-utils';
 import type { User } from '@/types/chat';
 
@@ -19,28 +19,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   async function loadUser() {
     try {
-      const base = getApiBase();
-      const res = await fetch(`${base}/user/profile`, {
-        credentials: 'include',
-      });
+      const res = await apiFetch('/user/profile');
 
       if (!res.ok) {
         setUser(null);
         setCurrentUser(null);
-      } else {
-        const data = await res.json();
-        const u: User = {
-          id: data.user_id || data.id || data.email,
-          name: data.user_name || data.name || 'User',
-          email: data.user_email || data.email,
-          is_admin: !!data.is_admin,
-          excludable_developer_emails: Array.isArray(data.excludable_developer_emails)
-            ? data.excludable_developer_emails
-            : undefined,
-        };
-        setUser(u);
-        setCurrentUser(u);
+        return;
       }
+
+      const contentType = res.headers.get('content-type') ?? '';
+      if (!contentType.includes('application/json')) {
+        setUser(null);
+        setCurrentUser(null);
+        return;
+      }
+
+      let data: Record<string, unknown>;
+      try {
+        data = await res.json();
+      } catch {
+        setUser(null);
+        setCurrentUser(null);
+        return;
+      }
+
+      const u: User = {
+        id: (data.user_id as string) || (data.id as string) || (data.email as string),
+        name: (data.user_name as string) || (data.name as string) || 'User',
+        email: (data.user_email as string) || (data.email as string),
+        is_admin: !!data.is_admin,
+        excludable_developer_emails: Array.isArray(data.excludable_developer_emails)
+          ? (data.excludable_developer_emails as string[])
+          : undefined,
+      };
+      setUser(u);
+      setCurrentUser(u);
     } catch {
       setUser(null);
       setCurrentUser(null);

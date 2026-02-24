@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { apiFetch } from "@/lib/api";
 
 interface JiraConfig {
   server: string;
@@ -44,12 +45,7 @@ export default function JiraConfigPanel() {
 
   const loadConfig = async () => {
     try {
-      const token = localStorage.getItem("authToken");
-      const response = await fetch("/api/proxy/api/jira/config", {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      const response = await apiFetch("/api/jira/config");
 
       if (!response.ok) throw new Error("Failed to load configuration");
 
@@ -88,13 +84,8 @@ export default function JiraConfigPanel() {
     setMessage(null);
 
     try {
-      const token = localStorage.getItem("authToken");
-      const response = await fetch("/api/proxy/api/jira/config/test", {
+      const response = await apiFetch("/api/jira/config/test", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
         body: JSON.stringify(config),
       });
 
@@ -126,13 +117,8 @@ export default function JiraConfigPanel() {
     setMessage(null);
 
     try {
-      const token = localStorage.getItem("authToken");
-      const response = await fetch("/api/proxy/api/jira/config", {
+      const response = await apiFetch("/api/jira/config", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
         body: JSON.stringify(config),
       });
 

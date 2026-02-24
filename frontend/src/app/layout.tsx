@@ -3,15 +3,19 @@ import './globals.css';
 import Script from 'next/script';
 import { AuthProvider } from '@/context/AuthContext';
 
+const baseUrl = process.env.NEXT_PUBLIC_BASE_URL?.trim();
+const metadataBaseUrl =
+  baseUrl && baseUrl.startsWith('http') ? baseUrl : 'https://ai.cloudfuze.com';
+
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.NEXT_PUBLIC_BASE_URL || 'https://ai.cloudfuze.com'),
+  metadataBase: new URL(metadataBaseUrl),
   title: 'CloudFuze AI Assistant - Smart Cloud Migration Assistant',
   description: 'Ask CloudFuze AI Assistant for migration-related queries and get instant, intelligent responses. Simplify cloud data migration with AI-powered assistance.',
   keywords: 'AI Chat Agent, AI assistant, cloud migration chatbot, CloudFuze AI, migrate data with AI',
   authors: [{ name: 'CloudFuze, Inc' }],
   robots: 'noindex, follow',
   icons: {
-    icon: '/images/CloudFuze-icon-64x64.png',
+    icon: '/images/CloudFuze Horizontal Logo.svg',
   },
   verification: {
     google: 'PhjlsaI1LwJ0elVNYMvimmGx_a_PXGb6XQZZSRWsm10',

@@ -47,7 +47,7 @@ export default function ChatSidebar({
   useEffect(() => {
     async function checkAccess() {
       try {
-        const response = await apiFetch('/api/user/api-research/access');
+        const response = await apiFetch('/user/api-research/access');
         if (response.ok) {
           const data = await response.json();
           setApiResearchAccess({
@@ -68,7 +68,7 @@ export default function ChatSidebar({
     setIsTogglingApiResearch(true);
     
     try {
-      const response = await apiFetch('/api/user/api-research/toggle', {
+      const response = await apiFetch('/user/api-research/toggle', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled: !apiResearchAccess.enabled })
@@ -762,7 +762,7 @@ export default function ChatSidebar({
               />
             ) : (
               <Image
-                src="/images/CloudFuze-icon-64x64.png"
+                src="/images/CloudFuze Horizontal Logo.svg"
                 alt="CloudFuze"
                 width={42}
                 height={42}

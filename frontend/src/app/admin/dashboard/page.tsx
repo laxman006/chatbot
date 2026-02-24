@@ -5,7 +5,7 @@
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { getApiBase, apiFetch } from '@/lib/api';
+import { apiFetch } from '@/lib/api';
 import { User } from '@/types/chat';
 import AdminGuard from '@/components/AdminGuard';
 import { useAuth } from '@/context/AuthContext';
@@ -339,12 +339,8 @@ function AdminDashboardContent() {
     setJiraSyncMessage(null);
 
     try {
-      const token = localStorage.getItem("authToken");
-      const response = await fetch("/api/proxy/api/jira/sync", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+      const response = await apiFetch('/api/jira/sync', {
+        method: 'POST',
       });
 
       if (!response.ok) {
