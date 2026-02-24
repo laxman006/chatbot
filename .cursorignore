@@ -182,7 +182,7 @@ frontend/public/images/backup/
 env.*.example
 
 # Server and service files
-server.py
+
 start_*.sh
 stop_*.sh
 restart_*.sh

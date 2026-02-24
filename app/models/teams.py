@@ -177,6 +177,7 @@ TEAMS_STRUCTURE = {
             {"name": "Siva Kota", "email": "siva.kota@cloudfuze.com"},
             {"name": "Vineetha Yenti", "email": "Vineetha.Yenti@cloudfuze.com"},
             {"name": "Ravi Hemanth", "email": "Ravi.Hemanth@cloudfuze.com"},
+            {"name": "Harika Velidi", "email": "Harika.Velidi@cloudfuze.com"},
         ],
         "color": "#F97316",  # Orange
         "description": "M2"

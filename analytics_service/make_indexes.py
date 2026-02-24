@@ -1,6 +1,17 @@
-"""Run once to create required indexes for the analytics collections."""
+"""Run once to create required indexes for the analytics collections.
+
+Loads MONGODB_URL from .env if present. Also run automatically at app startup.
+Standalone: python analytics_service/make_indexes.py (from project root).
+"""
 from pymongo import MongoClient
 import os
+
+# Load .env so MONGODB_URL is available when run as script or from deploy
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 # Use existing MONGODB_URL from .env (Atlas cluster); fallback to MONGO_URI or localhost
 MONGO_URI = os.getenv("MONGODB_URL") or os.getenv("MONGO_URI", "mongodb://localhost:27017")

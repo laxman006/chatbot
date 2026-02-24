@@ -91,6 +91,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"[STARTUP] ❌ Failed to initialize MongoDB memory storage: {e}", exc_info=True)
     
+    # Ensure analytics indexes exist (idempotent; runs once per deploy)
+    try:
+        from analytics_service.make_indexes import create_indexes
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, create_indexes)
+        logger.info("[STARTUP] Analytics indexes ensured")
+    except Exception as e:
+        logger.warning(f"[STARTUP] Analytics indexes not created (non-fatal): {e}")
+
     # Start blog polling service if enabled (teammate's feature)
     poller_task = None
     try:

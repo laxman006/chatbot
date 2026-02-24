@@ -10,6 +10,35 @@ import { apiFetch } from '@/lib/api';
 const MAX_PROMPT_LENGTH = 20000; // ~5K tokens (safe for RAG)
 const WARN_PROMPT_LENGTH = 10000; // ~2.5K tokens - warning threshold
 
+// Browser notifications when response is ready and user is on another page
+const NOTIFICATION_TITLE = 'CloudFuze AI';
+const NOTIFICATION_BODY = 'Your response is ready.';
+
+function requestNotificationPermissionIfNeeded(): void {
+  if (typeof window === 'undefined' || !('Notification' in window)) return;
+  if (Notification.permission === 'default') {
+    Notification.requestPermission().catch(() => {});
+  }
+}
+
+function showResponseReadyNotificationIfHidden(): void {
+  if (typeof window === 'undefined' || !('Notification' in window)) return;
+  if (!document.hidden) return; // User is on this tab, no need to notify
+  if (Notification.permission !== 'granted') return;
+  try {
+    const n = new Notification(NOTIFICATION_TITLE, {
+      body: NOTIFICATION_BODY,
+      icon: '/favicon.ico',
+    });
+    n.onclick = () => {
+      n.close();
+      window.focus();
+    };
+  } catch {
+    // Ignore notification errors (e.g. in iframe or unsupported context)
+  }
+}
+
 interface InitOptions {
   router?: AppRouterInstance;
   initialSessionId?: string | null;
@@ -2802,6 +2831,9 @@ export function initializeChatApp(options: InitOptions = {}) {
         requestBody.last_email_content = options.last_email_content;
       }
       
+      // Request notification permission when user sends (so we can notify if they leave the tab)
+      requestNotificationPermissionIfNeeded();
+      
       // ✅ Session-based auth - session_id cookie sent automatically via proxy
       const response = await apiFetch('/chat/stream', {
         method: "POST",
@@ -2925,6 +2957,9 @@ export function initializeChatApp(options: InitOptions = {}) {
                 if (!fullResponse || fullResponse.trim() === '') {
                   fullResponse = "I apologize, but I wasn't able to generate a response. Please try again.";
                 }
+                
+                // Notify user if they're on another tab so they know the response is ready
+                showResponseReadyNotificationIfHidden();
                 
                 // Save recommended questions to localStorage for persistence
                 if (recommendedQuestions && recommendedQuestions.length > 0) {
@@ -3422,6 +3457,7 @@ export function initializeChatApp(options: InitOptions = {}) {
                 }
                 
                 messageContent.innerHTML = renderMarkdown(fullResponse);
+                showResponseReadyNotificationIfHidden();
                 console.log('[RETRY] Retry completed successfully, version:', responseVersion);
               } else if (data.type === 'error') {
                 throw new Error(data.message || 'Retry failed');
