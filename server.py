@@ -5,6 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from app.endpoints import router as chat_router
 from app.routes.suggested_questions import router as questions_router
 from app.routes.jira_sync import router as jira_sync_router
+from analytics_service.app import router as analytics_router
 from app.mongodb_memory import close_mongodb_connection
 import uvicorn
 import asyncio
@@ -297,6 +298,7 @@ async def health_check():
 app.include_router(chat_router)
 app.include_router(questions_router)
 app.include_router(jira_sync_router)
+app.include_router(analytics_router, prefix="/api")
 
 # Mount static directories for images and other assets
 app.mount("/images", StaticFiles(directory="images"), name="images")
@@ -306,3 +308,4 @@ if os.path.exists("data"):
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8002)
+
