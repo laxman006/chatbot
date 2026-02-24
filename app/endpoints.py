@@ -45,7 +45,7 @@ from app.mongodb_memory import (
     get_pending_email_topic, set_pending_email_topic, clear_pending_email_topic,
     update_user_profile_by_email, set_user_active, insert_audit_log
 )
-from app.helpers import strip_markdown, preserve_markdown
+from app.helpers import strip_markdown, preserve_markdown, extract_combination_llm_fallback, is_procedural_query, is_capability_doc, is_procedural_doc
 from app.langfuse_integration import langfuse_tracker
 from app.auth import verify_user_access, require_admin, require_restricted_admin, get_current_user, is_admin_email, EXCLUDED_DEVELOPER_EMAILS
 from app.user_data import get_user_job_title
@@ -82,7 +82,7 @@ from collections import Counter, defaultdict
 # Intelligent Routing System
 from intelligent_router import IntelligentQueryRouter, get_routing_confidence
 from multi_source_retrieval import intelligent_multi_source_retrieve, normalize_scores, retrieve_limitations_documents
-from app.capabilities_vectorstore import get_capability_docs, get_migrations_mentioned_in_query
+from app.capabilities_vectorstore import get_capability_docs, get_migrations_mentioned_in_query, get_query_combination_canonical
 
 
 # ============================================================================
@@ -2014,7 +2014,8 @@ def pack_context_by_direction(
 
 
 def apply_section_boosts(
-    reranked_results: List[Tuple[Document, float]]
+    reranked_results: List[Tuple[Document, float]],
+    query: str = None,
 ) -> List[Tuple[Document, float]]:
     """
     Apply section-based boosting to already-reranked results.
@@ -2027,7 +2028,8 @@ def apply_section_boosts(
     4. summary (high) → low boost
     5. comment (medium) → no boost
     
-    This ensures fixes beat symptoms in final context.
+    When query is procedural ("how does X work"), procedural docs (migration guides,
+    JSON export docs) get +12% boost so they aren't crowded out by capability table rows.
     """
     if not reranked_results:
         return []
@@ -2051,6 +2053,9 @@ def apply_section_boosts(
         "web": 0.90,            # -10% (if tag is blog)
     }
     
+    # Procedural doc boost: when user asks "how does X work", migration guides beat capability table
+    procedural_boost = 1.12 if query and is_procedural_query(query) else 1.0
+    
     boosted_results = []
     for doc, score in reranked_results:
         meta = doc.metadata or {}
@@ -2073,6 +2078,10 @@ def apply_section_boosts(
             source_mult = SOURCE_MULT["blog"]
         elif source_type == "web":
             source_mult = SOURCE_MULT["web"]
+        
+        # Procedural doc boost: migration guides, JSON export docs for "how does X work" queries
+        if procedural_boost > 1.0 and is_procedural_doc(doc):
+            source_mult *= procedural_boost
         
         # Apply both boosts
         boosted_score = score * section_mult * source_mult
@@ -2116,8 +2125,8 @@ def apply_section_based_reranking(
     # Get base reranker scores
     reranked_base = cross_reranker.rerank(query, candidates, top_k=len(candidates))
     
-    # Apply section-based boosting using dedicated function
-    boosted_results = apply_section_boosts(reranked_base)
+    # Apply section-based boosting using dedicated function (pass query for procedural boost)
+    boosted_results = apply_section_boosts(reranked_base, query=query)
     
     # Extract Jira and SharePoint docs from boosted results for troubleshooting queries
     jira_docs = []
@@ -2173,6 +2182,18 @@ def apply_section_based_reranking(
         final_results.sort(key=lambda x: x[1], reverse=True)
         print(f"[RERANK] Troubleshooting query: Guaranteed {len([d for d, _ in final_results if 'jira' in d.metadata.get('source_type', '').lower() or 'jira' in d.metadata.get('tag', '').lower()])} Jira + {len([d for d, _ in final_results if 'sharepoint' in d.metadata.get('source_type', '').lower() or 'sharepoint' in d.metadata.get('tag', '').lower()])} SharePoint docs")
         return final_results[:top_k]
+    
+    # Procedural query ("how does X work"): cap capability table docs so procedural guides (Migration Guide, JSON Export) get in
+    if is_procedural_query(query):
+        capability_docs = [(d, s) for d, s in boosted_results if is_capability_doc(d)]
+        non_capability = [(d, s) for d, s in boosted_results if not is_capability_doc(d)]
+        if capability_docs and non_capability:
+            MAX_CAPABILITY_FOR_PROCEDURAL = 4
+            capped_capability = capability_docs[:MAX_CAPABILITY_FOR_PROCEDURAL]
+            merged = capped_capability + non_capability
+            merged.sort(key=lambda x: x[1], reverse=True)
+            print(f"[RERANK] Procedural query: Capped capability docs at {len(capped_capability)}, {len(non_capability)} procedural/other")
+            return merged[:top_k]
     
     return boosted_results[:top_k]
 
@@ -2644,8 +2665,17 @@ def extract_used_doc_chunks(doc_results: List[Tuple[Document, float]]) -> List[T
             meta.get("webUrl") or
             ""
         )
-        # Get chunk_id
+        # Get chunk_id; for capability docs (message_limitations) use fallback when missing
         chunk_id = meta.get("chunk_id") or ""
+        if not chunk_id and doc_id:
+            # Capability docs from ChromaDB often lack chunk_id; use migration+feature or content hash
+            migration = meta.get("migration_display") or ""
+            feature = meta.get("feature") or ""
+            if migration or feature:
+                chunk_id = f"{migration}|{feature}".strip("|") or "0"
+            else:
+                content_preview = (getattr(doc, "page_content", "") or "")[:80]
+                chunk_id = str(hash(content_preview)) if content_preview else "0"
         
         if doc_id and chunk_id:
             used_chunks.append((str(doc_id), str(chunk_id)))
@@ -3376,67 +3406,9 @@ Answer clearly and correctly based on the provided context and knowledge base.""
     # FIRST: Check if we have a corrected response for this question
     corrected_answer = find_similar_corrected_response(question)
     
-    # Check if user has API research enabled FIRST, then check if query is about APIs
-    should_do_api_research = False
-    from app.auth import can_access_api_research
-    from app.mongodb_memory import get_api_research_preference
-    from config import ENABLE_CLOUD_API_RESEARCH
-    
-    logger.info(f"[CLOUD RESEARCH CHECK] Checking for query: '{question}'")
-    logger.info(f"[CLOUD RESEARCH CHECK] Global flag: {ENABLE_CLOUD_API_RESEARCH}")
-    
-    # Check if user has feature enabled
-    if ENABLE_CLOUD_API_RESEARCH:
-        has_access = can_access_api_research(user_email)
-        logger.info(f"[CLOUD RESEARCH CHECK] User {user_email} has access: {has_access}")
-        
-        if has_access:
-            is_enabled = await get_api_research_preference(user_email)
-            logger.info(f"[CLOUD RESEARCH CHECK] User {user_email} has toggle enabled: {is_enabled}")
-            
-            if is_enabled:
-                # User has it enabled - ALWAYS do API research (no pattern check needed)
-                should_do_api_research = True
-                logger.info(f"[CLOUD RESEARCH] ✅ API research ENABLED for {user_email} (toggle is ON)")
-            else:
-                logger.info(f"[CLOUD RESEARCH] User has access but toggle is OFF")
-        else:
-            logger.info(f"[CLOUD RESEARCH] User doesn't have access")
-    else:
-        logger.info(f"[CLOUD RESEARCH] Feature disabled globally")
-    
     if corrected_answer:
         # Use the corrected response
         answer = corrected_answer
-    # Perform cloud API research if all conditions met
-    elif should_do_api_research:
-        from app.cloud_api_researcher import research_cloud_api
-        
-        cloud_name = extract_cloud_name_from_query(question)
-        
-        if cloud_name:
-            logger.info(f"[CLOUD RESEARCH] User {user_email} researching: {cloud_name}")
-            
-            try:
-                # Perform research
-                llm = get_llm()
-                results = research_cloud_api(
-                    cloud_name=cloud_name,
-                    user_email=user_email,
-                    force_refresh=False,
-                    llm=llm
-                )
-                
-                # Format results as markdown
-                from app.response_formatter import format_cloud_research_markdown
-                answer = format_cloud_research_markdown(results, cloud_name)
-                
-            except Exception as e:
-                logger.error(f"[ERROR] Cloud research failed: {e}")
-                answer = f"I encountered an error while researching {cloud_name}'s APIs. Please try again or contact support.\n\nError: {str(e)}"
-        else:
-            answer = "I couldn't identify which cloud you want to research. Please specify the cloud name clearly (e.g., 'Research APIs for Slack' or 'What APIs does Okta have?')."
-    # Check if this is a conversational query
     elif is_conversational_query(question):
         # Handle conversational queries directly without document retrieval
         from langchain_core.prompts import ChatPromptTemplate
@@ -4276,34 +4248,6 @@ Answer clearly and correctly based on the provided context and knowledge base.""
             # Check if we have a corrected response for this question
             corrected_answer = find_similar_corrected_response(question)
             
-            # Check if user has API research enabled FIRST
-            should_do_api_research = False
-            from app.auth import can_access_api_research
-            from app.mongodb_memory import get_api_research_preference
-            from config import ENABLE_CLOUD_API_RESEARCH
-            
-            logger.info(f"[CLOUD RESEARCH CHECK] Checking for query: '{question}'")
-            logger.info(f"[CLOUD RESEARCH CHECK] Global flag: {ENABLE_CLOUD_API_RESEARCH}")
-            
-            if ENABLE_CLOUD_API_RESEARCH:
-                has_access = can_access_api_research(user_email)
-                logger.info(f"[CLOUD RESEARCH CHECK] User {user_email} has access: {has_access}")
-                
-                if has_access:
-                    is_enabled = await get_api_research_preference(user_email)
-                    logger.info(f"[CLOUD RESEARCH CHECK] User {user_email} has toggle enabled: {is_enabled}")
-                    
-                    if is_enabled:
-                        # User has it enabled - ALWAYS do API research (no pattern check needed)
-                        should_do_api_research = True
-                        logger.info(f"[CLOUD RESEARCH] ✅ API research ENABLED for {user_email} (toggle is ON)")
-                    else:
-                        logger.info(f"[CLOUD RESEARCH] User has access but toggle is OFF")
-                else:
-                    logger.info(f"[CLOUD RESEARCH] User doesn't have access")
-            else:
-                logger.info(f"[CLOUD RESEARCH] Feature disabled globally")
-            
             if corrected_answer:
                 # Use the corrected response
                 yield f"data: {json.dumps({'type': 'thinking_complete'})}\n\n"
@@ -4375,66 +4319,6 @@ Answer clearly and correctly based on the provided context and knowledge base.""
                 
                 yield f"data: {json.dumps({'type': 'done', 'full_response': full_response, 'trace_id': trace_id, 'recommended_questions': recommended_questions})}\n\n"
                 return
-            
-            # Cloud API Research if enabled
-            elif should_do_api_research:
-                from app.cloud_api_researcher import research_cloud_api
-                
-                cloud_name = extract_cloud_name_from_query(question)
-                
-                if cloud_name:
-                    logger.info(f"[CLOUD RESEARCH] User {user_email} researching: {cloud_name}")
-                    
-                    yield f"data: {json.dumps({'type': 'thinking', 'message': f'Hold on tight — researching {cloud_name} APIs can take a moment...'})}\n\n"
-                    
-                    try:
-                        # Perform research
-                        llm = get_llm()
-                        results = research_cloud_api(
-                            cloud_name=cloud_name,
-                            user_email=user_email,
-                            force_refresh=False,
-                            llm=llm
-                        )
-                        
-                        # Format results as markdown
-                        from app.response_formatter import format_cloud_research_markdown
-                        full_response = format_cloud_research_markdown(results, cloud_name)
-                        
-                        yield f"data: {json.dumps({'type': 'thinking_complete'})}\n\n"
-                        
-                        # Stream the response
-                        for i, char in enumerate(full_response):
-                            yield f"data: {json.dumps({'token': char, 'type': 'token'})}\n\n"
-                            if i % 10 == 0:
-                                await asyncio.sleep(0.01)
-                        
-                        # Save messages
-                        try:
-                            await save_message(session_id, "user", question)
-                            await save_message(session_id, "assistant", full_response)
-                        except Exception as e:
-                            logger.warning(f"Failed to save messages: {e}")
-                        
-                        yield f"data: {json.dumps({'type': 'done', 'full_response': full_response})}\n\n"
-                        return
-                        
-                    except Exception as e:
-                        error_msg = f"I encountered an error while researching {cloud_name}'s APIs: {str(e)}"
-                        logger.error(f"[ERROR] Cloud research failed: {e}")
-                        yield f"data: {json.dumps({'type': 'thinking_complete'})}\n\n"
-                        for char in error_msg:
-                            yield f"data: {json.dumps({'token': char, 'type': 'token'})}\n\n"
-                        yield f"data: {json.dumps({'type': 'done', 'full_response': error_msg})}\n\n"
-                        return
-                else:
-                    error_msg = "I couldn't identify which cloud you want to research. Please specify the cloud name clearly."
-                    logger.info(f"[CLOUD RESEARCH] Could not extract cloud name from: {question}")
-                    yield f"data: {json.dumps({'type': 'thinking_complete'})}\n\n"
-                    for char in error_msg:
-                        yield f"data: {json.dumps({'token': char, 'type': 'token'})}\n\n"
-                    yield f"data: {json.dumps({'type': 'done', 'full_response': error_msg})}\n\n"
-                    return
             
             # ✅ MEMORY-ONLY QUESTION → do NOT run retrieval
             elif conversation_history and is_memory_only_question(question):
@@ -4720,10 +4604,8 @@ Answer clearly and correctly based on the provided context and knowledge base.""
                 await asyncio.sleep(0.05)
                 
                 # ====== 2-STAGE RETRIEVAL: STAGE 1 PREPARATION ======
-                # Check if query is support question (for Stage 2 decision)
+                # Support-question detection (for logging; limitations now retrieved in single pass when router allocates)
                 is_support_q = is_support_question(enhanced_query)
-                if is_support_q:
-                    print(f"[2-STAGE] ✓ Support question detected - Stage 2 will verify after draft")
                 
                 # ====== INTELLIGENT ROUTING OR PERPLEXITY-STYLE RAG ======
                 
@@ -5360,15 +5242,39 @@ Answer clearly and correctly based on the provided context and knowledge base.""
                 for doc in final_docs
             )
             
-            # ====== 2-STAGE RETRIEVAL: GUARDRAILS ONLY IN STAGE 2 ======
-            # Stage 1: No limitations guardrails (keeps answers process-focused)
-            # Stage 2: Add guardrails only when verifying support claims
-            
-            # Base system prompt (no limitations guardrail in Stage 1)
+            # ====== SINGLE RETRIEVAL: LIMITATIONS VIA ROUTER (like Jira) ======
+            # Add limitations guardrail when context contains limitations docs (router allocated or from any path)
             enhanced_system_prompt = SYSTEM_PROMPT
-            
-            # Note: Limitations guardrail will be added in Stage 2 if needed
-            print("[GUARDRAIL] Stage 1: No limitations guardrail (process-focused answers)")
+            has_limitations_docs = any(
+                doc.metadata.get("source_type") == "sharepoint_limitations"
+                or doc.metadata.get("doc_type") == "limitations"
+                or doc.metadata.get("is_limitations_doc") is True
+                for doc in (final_docs or [])
+            )
+            if has_limitations_docs:
+                limitations_guardrail = """
+
+CRITICAL - LIMITATIONS & SUPPORTED FEATURES DOCUMENT (SOURCE OF TRUTH):
+- You have access to the Limitations & Supported Features document (sharepoint_limitations source) when it appears in the context.
+- This document is the DEFINITIVE source of truth for:
+  * What features ARE supported
+  * What features are NOT supported
+  * Migration capabilities and limitations
+  * Workarounds for unsupported features
+- **ALWAYS prioritize information from limitations documents over other sources**
+- If limitations document says "NOT SUPPORTED", you MUST answer that it's not supported
+- If limitations document says "SUPPORTED", you can confidently say it's supported
+- If other sources conflict with limitations document, the limitations document WINS
+- When answering about support/limitations, use this CLEAR format:
+  ✅ Start with direct answer: "Yes, [feature] is supported" OR "No, [feature] is not supported"
+  ✅ If there's a reason, add it naturally: "No, [feature] is not supported because [reason from limitations doc]"
+  ✅ If not supported and workaround exists: "No, [feature] is not supported. However, [workaround from limitations doc]"
+  ✅ Keep it conversational and clear - no need to mention "Source: Limitations document"
+  ✅ If limitations document doesn't mention a feature, say "The limitations document does not specify support for this feature" rather than guessing
+- NEVER say a feature is supported if limitations document says it's NOT SUPPORTED
+- **If you claim 'supported/not supported', you MUST cite limitations doc snippet. If no evidence, say 'The limitations document does not specify support for this feature.'**"""
+                enhanced_system_prompt = enhanced_system_prompt + limitations_guardrail
+                print("[GUARDRAIL] Limitations guardrail added (limitations docs in context)")
 
             if has_transcript_sources:
                 guardrail_instruction = """
@@ -5465,145 +5371,24 @@ User Question:
                 except Exception as e:
                     print(f"[WARNING] Failed to start synthesis: {e}")
             
-            # ====== 2-STAGE RETRIEVAL: STAGE 1 - GENERATE DRAFT ANSWER ======
-            # Store Stage 1 docs for potential Stage 2 merge
-            stage1_docs_with_scores = doc_results if doc_results else []
-            stage1_docs = final_docs if final_docs else []
-            
-            # ✅ CHECK 3: Generate Stage-1 draft first (collect, don't stream yet)
-            # This ensures we only stream the final verified answer
-            print(f"[2-STAGE] Generating Stage-1 draft answer...")
+            # ====== SINGLE LLM: Generate answer (context already includes limitations when router allocated) ======
+            print(f"[RAG] Generating answer...")
             draft_response = llm.invoke(messages)
             draft_answer = draft_response.content if hasattr(draft_response, 'content') else str(draft_response)
             
             # Record LLM generation time
             llm_time_ms = int((time.time() - llm_start_time) * 1000)
             
-            # ====== 2-STAGE RETRIEVAL: STAGE 2 - VERIFY IF NEEDED ======
-            # ✅ CHECK 1: Prevent infinite loop - only run Stage-2 once
-            stage2_verifying = False  # Flag to prevent re-triggering
+            # ====== SINGLE RETRIEVAL: One LLM answer (limitations included in retrieval when router allocates) ======
+            full_response = draft_answer
             
-            # Check if Stage 2 verification is needed
-            need_verify = (is_support_q or has_support_claim(draft_answer)) and not stage2_verifying
-            
-            if need_verify:
-                stage2_verifying = True  # Set flag to prevent re-triggering
-                print(f"[2-STAGE] ⚠️ Stage 2 verification triggered (support_q={is_support_q}, has_claim={has_support_claim(draft_answer)})")
-                print(f"[2-STAGE] Retrieving limitations documents for verification...")
-                
-                try:
-                    # ✅ CHECK 2: Retrieve limitations documents with strongest filter
-                    # Use source_type filter first (most reliable)
-                    print(f"[2-STAGE] Retrieving limitations documents (using strongest filter)...")
-                    limitations_docs = retrieve_limitations_documents(vectorstore, enhanced_query, k=4)
-                    
-                    if limitations_docs:
-                        print(f"[2-STAGE] ✓ Retrieved {len(limitations_docs)} limitations documents")
-                        
-                        # Merge Stage 1 docs with limitations docs
-                        merged_docs_with_scores = merge_stage1_with_limitations(
-                            stage1_docs_with_scores,
-                            limitations_docs,
-                            max_limitations=3
-                        )
-                        merged_docs = [doc for doc, score in merged_docs_with_scores]
-                        
-                        # Update final_docs for context formatting
-                        final_docs = merged_docs
-                        doc_results = merged_docs_with_scores
-                        
-                        # Re-format context with merged docs
-                        from app.llm import format_docs
-                        formatted_docs = format_docs(merged_docs)
-                        context_text_stage2 = "\n\n".join([f"Document {i+1}:\n{formatted_doc}" for i, formatted_doc in enumerate(formatted_docs)])
-                        
-                        # Build enhanced prompt with limitations guardrail (ONLY in Stage 2)
-                        limitations_guardrail_enhanced = """
-
-CRITICAL - LIMITATIONS & SUPPORTED FEATURES DOCUMENT (SOURCE OF TRUTH):
-- You have access to the Limitations & Supported Features document (sharepoint_limitations source)
-- This document is the DEFINITIVE source of truth for:
-  * What features ARE supported
-  * What features are NOT supported
-  * Migration capabilities and limitations
-  * Workarounds for unsupported features
-- **ALWAYS prioritize information from limitations documents over other sources**
-- If limitations document says "NOT SUPPORTED", you MUST answer that it's not supported
-- If limitations document says "SUPPORTED", you can confidently say it's supported
-- If other sources conflict with limitations document, the limitations document WINS
-- When answering about support/limitations, use this CLEAR format:
-  ✅ Start with direct answer: "Yes, [feature] is supported" OR "No, [feature] is not supported"
-  ✅ If there's a reason, add it naturally: "No, [feature] is not supported because [reason from limitations doc]"
-  ✅ If not supported and workaround exists: "No, [feature] is not supported. However, [workaround from limitations doc]"
-  ✅ Keep it conversational and clear - no need to mention "Source: Limitations document"
-  ✅ If limitations document doesn't mention a feature, say "The limitations document does not specify support for this feature" rather than guessing
-- NEVER say a feature is supported if limitations document says it's NOT SUPPORTED
-- **If you claim 'supported/not supported', you MUST cite limitations doc snippet. If no evidence, say 'The limitations document does not specify support for this feature.'**"""
-                        
-                        enhanced_system_prompt_stage2 = SYSTEM_PROMPT + limitations_guardrail_enhanced
-                        
-                        # Re-generate answer with Stage 2 context and guardrail
-                        print(f"[2-STAGE] Regenerating answer with limitations guardrail...")
-                        
-                        # Build messages for Stage 2
-                        stage2_messages = [SystemMessage(content=enhanced_system_prompt_stage2)]
-                        
-                        # Add conversation history if available
-                        if conversation_history:
-                            for msg in conversation_history:
-                                if msg["role"] == "user":
-                                    stage2_messages.append(HumanMessage(content=msg["content"]))
-                                elif msg["role"] == "assistant":
-                                    stage2_messages.append(AIMessage(content=msg["content"]))
-                        
-                        # Add context and query
-                        if forced_no_context:
-                            stage2_messages.append(HumanMessage(content=f"Question: {enhanced_query}"))
-                        else:
-                            stage2_messages.append(HumanMessage(content=f"""Use the following context to answer.
-
-<context>
-{context_text_stage2}
-</context>
-
-User Question:
-{enhanced_query}
-""".strip()))
-                        
-                        # Generate Stage 2 answer (non-streaming)
-                        stage2_llm = get_llm(streaming=False, temperature=0.1, max_tokens=1500)
-                        stage2_response = stage2_llm.invoke(stage2_messages)
-                        full_response = stage2_response.content if hasattr(stage2_response, 'content') else str(stage2_response)
-                        
-                        print(f"[2-STAGE] ✓ Stage 2 answer generated (length: {len(full_response)} chars)")
-                        
-                        # ✅ CHECK 1: Ensure Stage-2 answer doesn't re-trigger (shouldn't happen, but safety check)
-                        if has_support_claim(full_response):
-                            print(f"[2-STAGE] ⚠️ Stage-2 answer contains support claims (expected - this is the verified answer)")
-                        
-                    else:
-                        # ✅ CHECK 2: If limitations docs not found, keep Stage-1 answer
-                        print(f"[2-STAGE] ⚠️ No limitations documents found - keeping Stage-1 answer")
-                        full_response = draft_answer
-                        
-                except Exception as e:
-                    print(f"[2-STAGE] ✗ Stage 2 verification failed: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    print(f"[2-STAGE] Keeping Stage 1 answer")
-                    full_response = draft_answer
-            else:
-                # No Stage-2 needed, use Stage-1 draft
-                full_response = draft_answer
-                print(f"[2-STAGE] ✓ Stage 1 answer sufficient (no support question/claims detected)")
-            
-            # ✅ CHECK 3: Stream only the final verified answer
+            # ✅ Stream the final answer
             # Now stream the final answer (either Stage-1 draft or Stage-2 verified)
             streaming_time_ms = 0
             stream_start_time = time.time()
             for char in full_response:
                 yield f"data: {json.dumps({'token': char, 'type': 'token'})}\n\n"
-                await asyncio.sleep(0.01)  # Small delay for smooth streaming
+                await asyncio.sleep(0.003)  # ~3ms per char for faster streaming (was 10ms)
             streaming_time_ms = int((time.time() - stream_start_time) * 1000)
             
             # Update LLM time to include streaming
@@ -10906,341 +10691,5 @@ async def microsoft_oauth_callback(
 #         if not langfuse_client:
 #             return {"error": "Langfuse client not initialized", "status": "error"}
 #         ... (entire duplicate function body removed - using endpoint at line 3482 instead)
-
-
-# ============================================================================
-# CLOUD API RESEARCH ENDPOINTS
-# ============================================================================
-
-class CloudResearchRequest(BaseModel):
-    """Request model for cloud API research"""
-    cloud_name: str
-    force_refresh: bool = False
-
-
-@router.post("/api/cloud-research/query")
-async def research_cloud_api_endpoint(
-    request: CloudResearchRequest,
-    user_info: dict = Depends(verify_user_access)
-):
-    """
-    Research cloud API and return comprehensive documentation.
-    
-    Args:
-        request: Cloud research request with cloud name
-        user_info: Authenticated user information
-        
-    Returns:
-        Complete API research results
-    """
-    try:
-        from config import ENABLE_CLOUD_API_RESEARCH
-        
-        if not ENABLE_CLOUD_API_RESEARCH:
-            raise HTTPException(
-                status_code=503,
-                detail="Cloud API research feature is currently disabled"
-            )
-        
-        cloud_name = request.cloud_name.strip()
-        user_email = user_info.get("email", "unknown")
-        
-        logger.info(f"[CLOUD RESEARCH] User {user_email} requesting research for {cloud_name}")
-        
-        # Import here to avoid circular dependencies
-        from app.cloud_api_researcher import research_cloud_api
-        from app.llm_factory import get_llm
-        
-        # Get LLM for intelligent normalization
-        llm = get_llm()
-        
-        # Perform research
-        results = research_cloud_api(
-            cloud_name=cloud_name,
-            user_email=user_email,
-            force_refresh=request.force_refresh,
-            llm=llm
-        )
-        
-        return {
-            "status": "success",
-            "data": results
-        }
-        
-    except Exception as e:
-        logger.error(f"[ERROR] Cloud research failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/api/cloud-research/{cloud_name}")
-async def get_cached_research(
-    cloud_name: str,
-    user_info: dict = Depends(verify_user_access)
-):
-    """
-    Get cached cloud API research results.
-    
-    Args:
-        cloud_name: Name of the cloud
-        user_info: Authenticated user information
-        
-    Returns:
-        Cached research results or 404 if not found
-    """
-    try:
-        from app.models.cloud_research import get_cloud_research
-        
-        results = get_cloud_research(cloud_name)
-        
-        if not results:
-            raise HTTPException(
-                status_code=404,
-                detail=f"No research found for {cloud_name}"
-            )
-        
-        return {
-            "status": "success",
-            "data": results
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"[ERROR] Failed to get cached research: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/api/cloud-research/list")
-async def list_researched_clouds_endpoint(
-    limit: int = Query(100, ge=1, le=500),
-    user_info: dict = Depends(verify_user_access)
-):
-    """
-    List all researched clouds.
-    
-    Args:
-        limit: Maximum number of results
-        user_info: Authenticated user information
-        
-    Returns:
-        List of researched clouds with basic info
-    """
-    try:
-        from app.models.cloud_research import list_researched_clouds
-        
-        clouds = list_researched_clouds(limit)
-        
-        return {
-            "status": "success",
-            "count": len(clouds),
-            "data": clouds
-        }
-        
-    except Exception as e:
-        logger.error(f"[ERROR] Failed to list clouds: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/api/cloud-research/refresh/{cloud_name}")
-async def refresh_cloud_research(
-    cloud_name: str,
-    user_info: dict = Depends(verify_user_access)
-):
-    """
-    Force refresh cloud API research (ignores cache).
-    
-    Args:
-        cloud_name: Name of the cloud
-        user_info: Authenticated user information
-        
-    Returns:
-        Fresh research results
-    """
-    try:
-        from app.cloud_api_researcher import research_cloud_api
-        from app.llm_factory import get_llm
-        
-        user_email = user_info.get("email", "unknown")
-        logger.info(f"[REFRESH] User {user_email} forcing refresh for {cloud_name}")
-        
-        llm = get_llm()
-        
-        results = research_cloud_api(
-            cloud_name=cloud_name,
-            user_email=user_email,
-            force_refresh=True,  # Always force refresh
-            llm=llm
-        )
-        
-        return {
-            "status": "success",
-            "data": results
-        }
-        
-    except Exception as e:
-        logger.error(f"[ERROR] Refresh failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/api/cloud-research/{cloud_name}/download")
-async def download_cloud_blueprint(
-    cloud_name: str,
-    user_info: dict = Depends(verify_user_access)
-):
-    """
-    Download JSON blueprint for a cloud.
-    
-    Args:
-        cloud_name: Name of the cloud
-        user_info: Authenticated user information
-        
-    Returns:
-        JSON file download
-    """
-    try:
-        from app.models.cloud_research import get_cloud_research
-        from fastapi.responses import Response
-        import json
-        
-        results = get_cloud_research(cloud_name)
-        
-        if not results:
-            raise HTTPException(
-                status_code=404,
-                detail=f"No research found for {cloud_name}"
-            )
-        
-        # Generate JSON
-        json_data = json.dumps(results, indent=2, ensure_ascii=False)
-        
-        # Return as downloadable file
-        filename = f"{cloud_name.lower().replace(' ', '_')}_api_blueprint.json"
-        
-        return Response(
-            content=json_data,
-            media_type="application/json",
-            headers={
-                "Content-Disposition": f'attachment; filename="{filename}"'
-            }
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"[ERROR] Download failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/api/cloud-research/statistics")
-async def get_research_statistics_endpoint(
-    user_info: dict = Depends(verify_user_access)
-):
-    """
-    Get overall cloud research statistics.
-    
-    Args:
-        user_info: Authenticated user information
-        
-    Returns:
-        Statistics about researched clouds
-    """
-    try:
-        from app.models.cloud_research import get_research_statistics
-        
-        stats = get_research_statistics()
-        
-        return {
-            "status": "success",
-            "data": stats
-        }
-        
-    except Exception as e:
-        logger.error(f"[ERROR] Failed to get statistics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/api/user/api-research/access")
-async def check_api_research_access(
-    current_user: dict = Depends(get_current_user)
-):
-    """
-    Check if user can access Cloud API Research feature.
-    
-    Returns:
-        can_access: bool - Whether user has permission
-        enabled: bool - Whether user has it enabled
-    """
-    try:
-        from app.auth import can_access_api_research
-        from app.mongodb_memory import get_api_research_preference
-        
-        user_email = current_user.get("email")
-        
-        # Check if user has access
-        can_access = can_access_api_research(user_email)
-        
-        # Check if user has it enabled
-        enabled = False
-        if can_access:
-            enabled = await get_api_research_preference(user_email)
-        
-        return {
-            "status": "success",
-            "can_access": can_access,
-            "enabled": enabled
-        }
-        
-    except Exception as e:
-        logger.error(f"[ERROR] Failed to check API research access: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/api/user/api-research/toggle")
-async def toggle_api_research(
-    request: Request,
-    current_user: dict = Depends(get_current_user)
-):
-    """
-    Toggle Cloud API Research feature for current user.
-    
-    Body:
-        enabled: bool
-    """
-    try:
-        from app.auth import can_access_api_research
-        from app.mongodb_memory import update_api_research_preference
-        
-        user_email = current_user.get("email")
-        
-        # Check if user has access to this feature
-        if not can_access_api_research(user_email):
-            raise HTTPException(
-                status_code=403,
-                detail="You don't have access to Cloud API Research feature"
-            )
-        
-        data = await request.json()
-        enabled = data.get("enabled", False)
-        
-        # Update preference
-        success = await update_api_research_preference(user_email, enabled)
-        
-        if not success:
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to update preference"
-            )
-        
-        return {
-            "status": "success",
-            "enabled": enabled,
-            "message": f"Cloud API Research {'enabled' if enabled else 'disabled'}"
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"[ERROR] Failed to toggle API research: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 

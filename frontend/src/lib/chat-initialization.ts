@@ -2675,6 +2675,11 @@ export function initializeChatApp(options: InitOptions = {}) {
     last_email_content?: string;
   };
 
+  // Dedupe: one send per gesture (click + touchend on send button, or duplicate listeners)
+  let lastSendKey: string | null = null;
+  let lastSendTime = 0;
+  const SEND_DEDUPE_MS = 400;
+
   async function sendMessageText(question: string, options?: SendMessageOptions) {
     if (!question) {
       console.warn('[SEND] No question provided');
@@ -2691,6 +2696,14 @@ export function initializeChatApp(options: InitOptions = {}) {
       console.warn('[SEND] Session is already generating, skipping');
       return;
     }
+
+    const sendKey = `${sessionId}:${question}:${options?.refine_action ?? ''}`;
+    if (sendKey === lastSendKey && Date.now() - lastSendTime < SEND_DEDUPE_MS) {
+      console.warn('[SEND] Duplicate send within 400ms, skipping');
+      return;
+    }
+    lastSendKey = sendKey;
+    lastSendTime = Date.now();
     
     console.log('[SEND] Starting message send for session:', sessionId);
     
@@ -2858,9 +2871,9 @@ export function initializeChatApp(options: InitOptions = {}) {
                 // Update thinking status with backend progress
                 updateThinkingStatus(data.status, data.message);
               } else if (data.type === 'thinking_complete') {
-                // Mark that we're done with thinking phase and starting content
+                // Mark that we're done with thinking phase; keep showing last status until first token (avoids blank screen)
                 isStreamingStatus = true;
-                botDiv.innerHTML = `<div class="message-content"></div>`;
+                // Do NOT clear thinking UI here — first token will replace it with content div
               } else if (data.type === 'sources') {
                 console.log("[CONSOLE]", data.sources);
               } else if (data.type === 'token') {
@@ -5474,7 +5487,11 @@ export function initializeChatApp(options: InitOptions = {}) {
   
   function setupButtonEventDelegation() {
     let lastTouchTime = 0;
-    // Use capture phase and handle both click and touch events for better mobile support
+    // Dedupe: same send-like action (recommended question, refinement) within 400ms = one gesture (click + pointerup + touchend)
+    let lastSendLikeActionKey: string | null = null;
+    let lastSendLikeActionTime = 0;
+    const SEND_LIKE_DEDUPE_MS = 400;
+
     const handleButtonAction = (e: Event) => {
       const isTouchEvent =
         e.type === 'touchend' ||
@@ -5538,8 +5555,14 @@ export function initializeChatApp(options: InitOptions = {}) {
         case 'share-chat':
           shareChat();
           break;
-        case 'ask-recommended-question':
+        case 'ask-recommended-question': {
           const question = button.getAttribute('data-question');
+          const actionKey = `ask-recommended:${question ?? ''}`;
+          if (actionKey === lastSendLikeActionKey && Date.now() - lastSendLikeActionTime < SEND_LIKE_DEDUPE_MS) {
+            return; // Dedupe: same gesture (click + pointerup + touchend)
+          }
+          lastSendLikeActionKey = actionKey;
+          lastSendLikeActionTime = Date.now();
           console.log('[EVENT] Recommended question clicked:', question);
           if (question) {
             askRecommendedQuestion(button);
@@ -5547,6 +5570,7 @@ export function initializeChatApp(options: InitOptions = {}) {
             console.warn('[EVENT] No question attribute found on recommended question button');
           }
           break;
+        }
         case 'edit-email-draft':
           editEmailDraft(button);
           break;
@@ -5558,6 +5582,12 @@ export function initializeChatApp(options: InitOptions = {}) {
           break;
         case 'email-refinement': {
           const refinement = button.getAttribute('data-refinement');
+          const actionKey = `email-refinement:${refinement ?? ''}`;
+          if (actionKey === lastSendLikeActionKey && Date.now() - lastSendLikeActionTime < SEND_LIKE_DEDUPE_MS) {
+            return;
+          }
+          lastSendLikeActionKey = actionKey;
+          lastSendLikeActionTime = Date.now();
           const msgDiv = button.closest('.message.bot') as HTMLElement | null;
           // Prefer dataset (set when draft completed); fallback to visible body (e.g. after restore)
           let emailContent = msgDiv?.dataset?.emailContent;
@@ -5588,6 +5618,11 @@ export function initializeChatApp(options: InitOptions = {}) {
   
   // Set up event delegation immediately
   setupButtonEventDelegation();
+
+  // ✅ CRITICAL: Mark as initialized right after adding listeners so React effect re-runs
+  // don't add duplicate listeners (isAppInitialized was previously set only after async fetch).
+  isAppInitialized = true;
+  currentInitializedSessionId = initialSessionId ?? null;
 
   initAuth();
 }

@@ -668,6 +668,7 @@ MAX_SHAREPOINT_K = int(os.getenv("MAX_SHAREPOINT_K", "15"))  # Max SharePoint do
 MAX_PDF_K = int(os.getenv("MAX_PDF_K", "15"))  # Max PDF docs per query
 MAX_TRANSCRIPT_K = int(os.getenv("MAX_TRANSCRIPT_K", "10"))  # Max transcript chunks per query
 MAX_EXCEL_K = int(os.getenv("MAX_EXCEL_K", "10"))  # Max Excel rows per query
+MAX_LIMITATIONS_K = int(os.getenv("MAX_LIMITATIONS_K", "6"))  # Max limitations/supported-features docs per query (single retrieval, router-driven)
 
 # Routing Strategy
 ROUTING_USE_PARALLEL_RETRIEVAL = os.getenv("ROUTING_USE_PARALLEL_RETRIEVAL", "true").lower() == "true"  # Parallel vs sequential

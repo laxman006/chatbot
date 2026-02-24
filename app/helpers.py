@@ -1,8 +1,9 @@
 import os
+import re
 import requests
 import json
 import markdown
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from datetime import datetime
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
@@ -716,6 +717,98 @@ def preserve_markdown(md_text: str) -> str:
     # Return the clean Markdown text (don't convert to HTML)
     return clean_text
 
+
+def extract_combination_llm_fallback(query: str) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Use a small/fast LLM to extract migration (source, target) from the query when
+    rule-based get_query_combination_canonical returns (None, None).
+    Returns (source_canonical, target_canonical) or (None, None).
+    """
+    if not (query or "").strip():
+        return (None, None)
+    try:
+        from app.llm_factory import get_llm
+        from app.capabilities_vectorstore import parse_combination_to_canonical
+        llm = get_llm(temperature=0, max_tokens=80)
+        prompt = """From the following user question, extract the migration direction if mentioned.
+Reply with exactly one line in the form: SOURCE - TARGET
+Examples: MyDrive - OneDrive, Egnyte - SharePoint, Slack - Teams, Box - OneDrive.
+Use common names: MyDrive, OneDrive, SharePoint, Egnyte, Box, Google Drive, Shared Drive, Slack, Teams, Chat, Dropbox, Citrix, ShareFile.
+If no migration source and target are clearly mentioned, reply with exactly: NONE
+
+User question:
+"""
+        response = llm.invoke(prompt + (query.strip()[:500]))
+        text = (response.content if hasattr(response, "content") else str(response)).strip().upper()
+        if not text or "NONE" in text:
+            return (None, None)
+        # First line only, normalize " TO " to " - "
+        line = text.split("\n")[0].strip().replace(" TO ", " - ")
+        if not line or " - " not in line:
+            return (None, None)
+        src, dst = parse_combination_to_canonical(line)
+        if src and dst:
+            print(f"[RELATED DOCS] LLM fallback extracted combination: {src} → {dst}")
+            return (src, dst)
+    except Exception as e:
+        print(f"[RELATED DOCS] LLM fallback failed: {e}")
+    return (None, None)
+
+
+# Procedural vs capability query/doc classification for RAG retrieval balancing
+_PROCEDURAL_PATTERNS = re.compile(
+    r"\b(how\s+(does|do|to|can|is|are|would)|"
+    r"what\s+is\s+the\s+(process|procedure|steps?|workflow)|"
+    r"explain\s+(the\s+)?(process|procedure|steps?)|"
+    r"walk\s+(me\s+)?through|step\s*[- ]?by\s*[- ]?step|"
+    r"guide\s+to|instructions?\s+for|"
+    r"how\s+to\s+(migrate|export|transfer|upload))\b",
+    re.IGNORECASE,
+)
+
+
+def is_procedural_query(query: str) -> bool:
+    """
+    Detect if the user is asking 'how does X work' (procedural) vs 'what is supported' (capability).
+    Procedural queries need migration guides, JSON export docs, step-by-step content.
+    """
+    if not (query or "").strip():
+        return False
+    return bool(_PROCEDURAL_PATTERNS.search(query.strip()))
+
+
+def is_capability_doc(doc) -> bool:
+    """True if doc is from capabilities ChromaDB (message_limitations) - feature/status table rows."""
+    meta = getattr(doc, "metadata", None) or {}
+    return (meta.get("source_type") or "").lower() == "message_limitations"
+
+
+def is_procedural_doc(doc) -> bool:
+    """
+    True if doc is procedural content: migration guides, JSON export docs, FAQs.
+    These contain step-by-step instructions and often file URLs.
+    Excludes capability table rows (message_limitations, sharepoint_limitations).
+    """
+    meta = getattr(doc, "metadata", None) or {}
+    source_type = (meta.get("source_type") or "").lower()
+    tag = (meta.get("tag") or "").lower()
+    # Capability table rows are never procedural
+    if source_type == "message_limitations" or tag == "message_limitations":
+        return False
+    if "sharepoint_limitations" in source_type or "sharepoint_limitations" in tag:
+        return False
+    source = (meta.get("source") or "").lower()
+    title = (meta.get("title") or "").lower()
+    content = (getattr(doc, "page_content", "") or "").lower()
+    combined = f"{tag} {source} {title}"
+    return (
+        ("migration" in combined or "migration guide" in combined)
+        and ("sharepoint" in tag or "sharepoint" in source_type)
+    ) or (
+        "json export" in combined or "faq" in combined
+    )
+
+
 def build_vectorstore(url: str):
     """Build and persist embeddings for web documents with HNSW graph indexing."""
     raw_text = load_webpage(url)
@@ -875,230 +968,4 @@ def build_combined_vectorstore(url: str = None, pdf_directory: str = None, excel
         print(f"   [OK] Batch {batch_num}/{total_batches} complete")
     
     print("\n[OK] Selective knowledge base created with HNSW graph indexing!")
-    return vectorstore
-
-    return vectorstore
-
-
-
-def build_combined_vectorstore(url: str = None, pdf_directory: str = None, excel_directory: str = None, doc_directory: str = None, sharepoint_enabled: bool = False, outlook_enabled: bool = False):
-
-    """Build and persist embeddings for enabled sources only."""
-
-    all_docs = []
-
-    
-
-    # Process web content if URL provided
-
-    if url:
-
-        print("Loading web content...")
-
-        # Use fetch_web_content which now includes blog post URLs and metadata
-
-        web_docs = fetch_web_content(url)
-
-        all_docs.extend(web_docs)
-
-        print(f"  - Web documents: {len(web_docs)}")
-
-    else:
-
-        print("Web content disabled - skipping...")
-
-    
-
-    # Process PDF documents if directory provided
-
-    if pdf_directory and os.path.exists(pdf_directory):
-
-        print("Processing PDF documents...")
-
-        pdf_docs = process_pdf_directory(pdf_directory)
-
-        pdf_chunks = chunk_pdf_documents(pdf_docs, chunk_size=1000, chunk_overlap=200)
-
-        all_docs.extend(pdf_chunks)
-
-        print(f"  - PDF documents: {len(pdf_chunks)}")
-
-    else:
-
-        print("PDF processing disabled or directory not found - skipping...")
-
-    
-
-    # Process Excel files if directory provided
-
-    if excel_directory and os.path.exists(excel_directory):
-
-        print("Processing Excel documents...")
-
-        excel_docs = process_excel_directory(excel_directory)
-
-        excel_chunks = chunk_excel_documents(excel_docs, chunk_size=1000, chunk_overlap=200)
-
-        all_docs.extend(excel_chunks)
-
-        print(f"  - Excel documents: {len(excel_chunks)}")
-
-    else:
-
-        print("Excel processing disabled or directory not found - skipping...")
-
-    
-
-    # Process Word documents if directory provided
-
-    if doc_directory and os.path.exists(doc_directory):
-
-        print("Processing Word documents...")
-
-        doc_docs = process_doc_directory(doc_directory)
-
-        doc_chunks = chunk_doc_documents(doc_docs, chunk_size=1000, chunk_overlap=200)
-
-        all_docs.extend(doc_chunks)
-
-        print(f"  - Word documents: {len(doc_chunks)}")
-
-    else:
-
-        print("Word document processing disabled or directory not found - skipping...")
-
-    
-
-    # Process SharePoint content if enabled
-
-    if sharepoint_enabled:
-
-        print("Processing SharePoint content...")
-
-        try:
-
-            sharepoint_docs = process_sharepoint_content()
-
-            all_docs.extend(sharepoint_docs)
-
-            print(f"  - SharePoint documents: {len(sharepoint_docs)}")
-
-        except Exception as e:
-
-            print(f"[ERROR] SharePoint processing failed: {e}")
-
-            print("  - SharePoint documents: 0 (failed)")
-
-    else:
-
-        print("SharePoint processing disabled - skipping...")
-
-    
-
-    # Process Outlook email content if enabled
-
-    if outlook_enabled:
-
-        print("Processing Outlook email content...")
-
-        try:
-
-            from app.outlook_processor import process_outlook_content
-
-            outlook_docs = process_outlook_content()
-
-            all_docs.extend(outlook_docs)
-
-            print(f"  - Outlook email documents: {len(outlook_docs)}")
-
-        except Exception as e:
-
-            print(f"[ERROR] Outlook processing failed: {e}")
-
-            print("  - Outlook email documents: 0 (failed)")
-
-    else:
-
-        print("Outlook processing disabled - skipping...")
-
-    
-
-    print(f"Total documents to process: {len(all_docs)}")
-
-    
-
-    # Create embeddings and vectorstore with batch processing to avoid token limits
-
-    embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
-
-    
-
-    # Process in batches to avoid OpenAI token limit (300k tokens per request)
-
-    # Each batch: ~50 docs = ~50k tokens (safe margin)
-
-    batch_size = 50
-
-    total_batches = (len(all_docs) + batch_size - 1) // batch_size
-
-    
-
-    print(f"\n[*] Creating vectorstore with HNSW graph indexing...")
-
-    print(f"[*] Processing {total_batches} batches of up to {batch_size} documents each...")
-
-    
-
-    vectorstore = None
-
-    for i in range(0, len(all_docs), batch_size):
-
-        batch = all_docs[i:i + batch_size]
-
-        batch_num = (i // batch_size) + 1
-
-        print(f"   [*] Processing batch {batch_num}/{total_batches} ({len(batch)} documents)...")
-
-        
-
-        if vectorstore is None:
-
-            # Create vectorstore with first batch and HNSW graph indexing
-
-            vectorstore = Chroma.from_documents(
-
-                batch, 
-
-                embeddings, 
-
-                persist_directory=CHROMA_DB_PATH,
-
-                collection_metadata={
-
-                    "hnsw:space": "cosine",  # Cosine similarity for semantic search
-
-                    "hnsw:construction_ef": 200,  # Better indexing accuracy
-
-                    "hnsw:search_ef": 100,  # Better search accuracy
-
-                    "hnsw:M": 48,  # More graph connections for better recall
-
-                }
-
-            )
-
-        else:
-
-            # Add subsequent batches
-
-            vectorstore.add_documents(batch)
-
-        
-
-        print(f"   [OK] Batch {batch_num}/{total_batches} complete")
-
-    
-
-    print("\n[OK] Selective knowledge base created with HNSW graph indexing!")
-
     return vectorstore

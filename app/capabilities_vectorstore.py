@@ -236,6 +236,25 @@ def get_migrations_mentioned_in_query(query: str) -> List[str]:
         if (ms, md) == (q_src, q_dst)
     ]
 
+
+def get_query_combination_canonical(query: str) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Extract (source_canonical, target_canonical) from the query for combination-based filtering.
+    Returns (None, None) if the query does not mention a migration direction.
+    Use with parse_combination_to_canonical() to compare doc metadata.
+    """
+    return _extract_source_dest_from_query(query or "")
+
+
+def parse_combination_to_canonical(display: str) -> Tuple[str, str]:
+    """
+    Parse a combination or migration_display string into (source_canonical, target_canonical).
+    Handles formats like "Egnyte - SharePoint", "MyDrive to OneDrive", "Box - One Drive for Business".
+    Returns ("", "") if display is empty or cannot be parsed into two parts.
+    """
+    return _parse_migration_display(display or "")
+
+
 _capabilities_vectorstore = None
 
 

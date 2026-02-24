@@ -15,7 +15,8 @@ from config import (
     ROUTING_TOTAL_BUDGET,
     ROUTING_MIN_CONFIDENCE,
     MAX_JIRA_K, MAX_BLOG_K, MAX_SHAREPOINT_K,
-    MAX_PDF_K, MAX_TRANSCRIPT_K, MAX_EXCEL_K
+    MAX_PDF_K, MAX_TRANSCRIPT_K, MAX_EXCEL_K,
+    MAX_LIMITATIONS_K,
 )
 
 
@@ -71,6 +72,11 @@ class IntelligentQueryRouter:
                 "description": "Structured data, pricing tables, feature comparisons, migration checklists, data matrices, feature matrices",
                 "typical_use": "Pricing information, structured comparisons, data tables, feature matrices, checklists",
                 "max_k": MAX_EXCEL_K
+            },
+            "limitations": {
+                "description": "Limitations & Supported Features (SharePoint) - definitive source for what is supported/not supported, out-of-scope features, migration capabilities per combination (e.g. Slack to Teams, Slack to Chat). Same role as Jira for troubleshooting.",
+                "typical_use": "Supported/unsupported features, limitations, out-of-scope, 'can we migrate X', 'does CloudFuze support Y', 'what is supported/not supported' for any migration combination. Use when query_type is capabilities.",
+                "max_k": MAX_LIMITATIONS_K
             }
         }
     
@@ -156,7 +162,7 @@ Analyze the user query and determine:
   * **Technical deep-dive** → Prioritize PDFs (0.8-1.0), SharePoint (0.5-0.7), Jira (0.4-0.6), blog (0.1-0.3) ONLY if needed
   * **Pricing** → Prioritize excel (0.8-1.0), transcripts (0.5-0.7), SharePoint (0.3-0.5), blog (0.1-0.2) ONLY if needed
   * **Best practices** → Prioritize SharePoint (0.6-0.8), Jira (0.5-0.7), transcripts (0.4-0.6), blog (0.2-0.4) ONLY if needed
-  * **Capabilities/Limitations** → Use query_type: **capabilities** when the user asks about: feature capabilities, migration limitations, out-of-scope features, supported/unsupported features, "can we migrate X", "does CloudFuze support Y", "what are the limitations/features/capabilities of [combination]", "list out-of-scope features", "what is supported/not supported" for any migration combination (e.g. Slack to Teams, Slack to Chat, Meta to Gchat, Teams to Teams, Box to OneDrive). This triggers retrieval from the dedicated capabilities DB (2 Excels: message + content migrations) plus main vectorstore and Jira. Prioritize SharePoint (0.7-0.9), PDFs (0.6-0.8), Jira (0.4-0.6), blog (0.2-0.4).
+  * **Capabilities/Limitations** → Use query_type: **capabilities** when the user asks about: feature capabilities, migration limitations, out-of-scope features, supported/unsupported features, "can we migrate X", "does CloudFuze support Y", "what are the limitations/features/capabilities of [combination]", "list out-of-scope features", "what is supported/not supported" for any migration combination (e.g. Slack to Teams, Slack to Chat, Meta to Gchat, Teams to Teams, Box to OneDrive). Allocate to **limitations** (0.8-1.0, k=4-6) - this is the definitive Limitations & Supported Features source. Also use SharePoint (0.7-0.9), PDFs (0.6-0.8), Jira (0.4-0.6), blog (0.2-0.4).
 - Look for signals even if keywords are missing (copy-pasted errors, stack traces, failure descriptions)
 
 **Important Query Understanding:**
@@ -198,10 +204,10 @@ Queries MUST route primarily to Jira (relevance ≥ 0.8, k ≥ 25) if they conta
 - "how to change CSV during migration" → migration_procedure (SharePoint: high, Jira: medium, blog: low)
 - "migration failed with error 500" → troubleshooting (Jira: high, SharePoint: medium, blog: very low)
 - "what is CloudFuze" → general_info (SharePoint: high, PDFs: medium, blog: low)
-- "what are the limitations of slack to chat" → capabilities (SharePoint: high, PDFs: high, blog: low)
-- "list out-of-scope features for Slack to Chat" → capabilities (SharePoint: high, PDFs: high, Jira: medium, blog: low)
-- "can we migrate pinned messages from slack to google chat" → capabilities (SharePoint: high, PDFs: high, blog: low)
-- "what features are supported for Meta to Gchat / Teams to Teams / Box to OneDrive" → capabilities (SharePoint: high, PDFs: high, Jira: medium, blog: low)
+- "what are the limitations of slack to chat" → capabilities (limitations: high k=4-6, SharePoint: high, PDFs: high, blog: low)
+- "list out-of-scope features for Slack to Chat" → capabilities (limitations: high k=4-6, SharePoint: high, PDFs: high, Jira: medium, blog: low)
+- "can we migrate pinned messages from slack to google chat" → capabilities (limitations: high k=4-6, SharePoint: high, PDFs: high, blog: low)
+- "what features are supported for Meta to Gchat / Teams to Teams / Box to OneDrive" → capabilities (limitations: high k=4-6, SharePoint: high, PDFs: high, Jira: medium, blog: low)
 - "SOC 2 certification" → compliance (SharePoint: high, blog: very low)
 - "customer objection about pricing" → sales (transcripts: high, SharePoint: medium, blog: low)
 - "API rate limits" → technical (PDFs: high, SharePoint: medium, blog: very low)
@@ -216,7 +222,8 @@ Queries MUST route primarily to Jira (relevance ≥ 0.8, k ≥ 25) if they conta
     "jira": {{"relevance": 0.0-1.0, "k": 0-{MAX_JIRA_K}, "reasoning": "why/why not"}},
     "transcripts": {{"relevance": 0.0-1.0, "k": 0-{MAX_TRANSCRIPT_K}, "reasoning": "why/why not"}},
     "pdfs": {{"relevance": 0.0-1.0, "k": 0-{MAX_PDF_K}, "reasoning": "why/why not"}},
-    "excel": {{"relevance": 0.0-1.0, "k": 0-{MAX_EXCEL_K}, "reasoning": "why/why not"}}
+    "excel": {{"relevance": 0.0-1.0, "k": 0-{MAX_EXCEL_K}, "reasoning": "why/why not"}},
+    "limitations": {{"relevance": 0.0-1.0, "k": 0-{MAX_LIMITATIONS_K}, "reasoning": "why/why not - use for support/capabilities/limitations questions only"}}
   }},
   "confidence": 0.0-1.0
 }}
@@ -324,7 +331,8 @@ Analyze this query and determine the optimal retrieval strategy. Consider:
                 "pdfs": {"relevance": 0.5, "k": 10, "reasoning": "Fallback - technical documentation"},
                 "blog": {"relevance": 0.2, "k": 2, "reasoning": "Fallback - low priority marketing content, use sparingly"},
                 "transcripts": {"relevance": 0.0, "k": 0, "reasoning": "Fallback - skip transcripts"},
-                "excel": {"relevance": 0.0, "k": 0, "reasoning": "Fallback - skip structured data"}
+                "excel": {"relevance": 0.0, "k": 0, "reasoning": "Fallback - skip structured data"},
+                "limitations": {"relevance": 0.0, "k": 0, "reasoning": "Fallback - only use when routing detects capabilities/support"}
             },
             "confidence": 0.4
         }

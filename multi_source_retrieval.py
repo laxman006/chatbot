@@ -452,7 +452,8 @@ def intelligent_multi_source_retrieve(
     # Track retrieval statistics
     retrieval_stats = defaultdict(int)
     
-    # ============ PINNED LIMITATIONS RETRIEVAL (ALWAYS FIRST) ============
+    # ============ LIMITATIONS: PINNED (legacy) OR ROUTER-DRIVEN (single retrieval) ============
+    limitations_k_planned = sources_plan.get("limitations", {}).get("k", 0)
     if always_include_limitations:
         print(f"\n[RETRIEVAL] ━━━ PINNED: Fetching limitations documents (ALWAYS INCLUDED) ━━━")
         limitations_docs = retrieve_limitations_documents(vectorstore, query, k=4)
@@ -460,6 +461,15 @@ def intelligent_multi_source_retrieve(
             results_by_source["limitations"] = limitations_docs
             retrieval_stats["limitations"] = len(limitations_docs)
             print(f"[RETRIEVAL] ✓ Retrieved {len(limitations_docs)} limitations documents (PINNED)")
+        else:
+            print(f"[RETRIEVAL] ⚠ No limitations documents found (will continue with other sources)")
+    elif limitations_k_planned > 0:
+        print(f"\n[RETRIEVAL] ━━━ Fetching {limitations_k_planned} docs from Limitations (router-driven) ━━━")
+        limitations_docs = retrieve_limitations_documents(vectorstore, query, k=limitations_k_planned)
+        if limitations_docs:
+            results_by_source["limitations"] = limitations_docs
+            retrieval_stats["limitations"] = len(limitations_docs)
+            print(f"[RETRIEVAL] ✓ Retrieved {len(limitations_docs)} limitations documents")
         else:
             print(f"[RETRIEVAL] ⚠ No limitations documents found (will continue with other sources)")
     
