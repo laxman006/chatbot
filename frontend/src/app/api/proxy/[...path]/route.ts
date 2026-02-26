@@ -60,11 +60,20 @@ async function proxyRequest(
     // ✅ STREAMING DETECTION: Check if this is a streaming endpoint
     const isStreamingEndpoint = path.includes('/chat/stream') || path.includes('/stream');
     
-    // Get request body if present
-    let body: string | undefined;
+    // Get request body if present.
+    // IMPORTANT: multipart/form-data (file uploads) must be read as ArrayBuffer,
+    // NOT as text — request.text() corrupts binary file bytes (e.g. Excel uploads).
+    const requestContentType = request.headers.get('content-type') || '';
+    let body: string | ArrayBuffer | undefined;
     if (method !== 'GET' && method !== 'HEAD') {
       try {
-        body = await request.text();
+        if (requestContentType.includes('multipart/form-data')) {
+          // Binary-safe read — preserves file bytes exactly
+          body = await request.arrayBuffer();
+          console.log(`[PROXY] 📎 Multipart upload detected — reading as ArrayBuffer (${(body as ArrayBuffer).byteLength} bytes)`);
+        } else {
+          body = await request.text();
+        }
       } catch {
         // No body, that's fine
       }
@@ -80,10 +89,10 @@ async function proxyRequest(
         const backendResponse = await fetch(url, {
           method: method as any,
           headers: {
-            'Content-Type': request.headers.get('content-type') || 'application/json',
+            ...(requestContentType ? { 'Content-Type': requestContentType } : {}),
             'Cookie': browserCookies,
           },
-          body: body,
+          body: body as BodyInit,
         });
         
         // Create a ReadableStream to forward chunks in real-time
@@ -164,7 +173,10 @@ async function proxyRequest(
         method: method as 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'HEAD' | 'OPTIONS',
         url,
         headers: {
-          'Content-Type': request.headers.get('content-type') || 'application/json',
+          // Forward original Content-Type exactly — multipart/form-data MUST include
+          // the boundary string (e.g. "multipart/form-data; boundary=----xyz") so the
+          // backend can parse the file correctly. Never override it with a default.
+          ...(requestContentType ? { 'Content-Type': requestContentType } : {}),
           // ⭐ CRITICAL: Forward cookies from browser to backend
           cookie: browserCookies,
         },

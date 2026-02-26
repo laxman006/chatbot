@@ -42,6 +42,9 @@ _PLATFORM_CANONICAL_ALIASES: List[Tuple[str, List[str]]] = [
     ("sharefile", ["sharefile", "share file"]),
     ("amazon workdocs", ["amazon workdocs", "workdocs"]),
     ("amazon wordocs", ["amazon wordocs", "wordocs"]),
+    # Email platforms
+    ("gmail", ["gmail", "google mail", "google gmail"]),
+    ("outlook", ["outlook", "ms outlook", "microsoft outlook", "office 365 mail", "outlook 365", "exchange online"]),
     # Message migrations
     ("slack", ["slack"]),
     ("teams", ["teams", "ms-teams", "msteams"]),
@@ -148,6 +151,10 @@ MIGRATION_DISPLAY_PATTERNS = [
     "Amazon workdocs to NFS",
     "Amazon wordocs to Sharepoint",
     "Amazon wordocs to OneDrive",
+    # NOTE: Email migration combinations (e.g. Gmail to Outlook) are NOT hardcoded here.
+    # They are discovered dynamically from the capabilities ChromaDB via refresh_combinations_from_db()
+    # after each FAQ upload. This ensures the display name casing always matches exactly what
+    # the admin used in the uploaded filename — no duplicate entries for the same canonical pair.
 ]
 
 
@@ -176,12 +183,134 @@ def _parse_migration_display(display: str) -> Tuple[str, str]:
     return (src, dst)
 
 
-# List of (source_canonical, dest_canonical, display_name) for strict (source, dest) matching
+# List of (source_canonical, dest_canonical, display_name) for strict (source, dest) matching.
+# Mutable so refresh_combinations_from_db() can extend it at runtime after FAQ uploads.
 MIGRATION_SOURCE_DEST: List[Tuple[str, str, str]] = []
 for _disp in MIGRATION_DISPLAY_PATTERNS:
     _s, _d = _parse_migration_display(_disp)
     if _s and _d:
         MIGRATION_SOURCE_DEST.append((_s, _d, _disp))
+
+
+# ---------------------------------------------------------------------------
+# Dynamic combination discovery — reads migration_display values from ChromaDB
+# and extends MIGRATION_SOURCE_DEST at runtime without any code changes.
+# Called on server startup and after every FAQ upload.
+# ---------------------------------------------------------------------------
+
+def refresh_combinations_from_db() -> List[str]:
+    """
+    Read all distinct migration_display values from the capabilities ChromaDB and
+    register any new ones in MIGRATION_SOURCE_DEST so they can be matched in queries.
+
+    Returns the full list of distinct combination names now known (existing + new).
+    Safe to call multiple times — duplicates are ignored.
+    """
+    import logging
+    _log = logging.getLogger(__name__)
+
+    vs = get_capabilities_vectorstore()
+    if vs is None:
+        _log.warning("[capabilities_vectorstore] refresh_combinations_from_db: DB not available, skipping")
+        return [d for _, _, d in MIGRATION_SOURCE_DEST]
+
+    try:
+        result = vs._collection.get(include=["metadatas"])
+        total_docs = len(result.get("ids") or [])
+        seen_displays: set = set()
+        for meta in (result.get("metadatas") or []):
+            val = (meta or {}).get("migration_display", "")
+            if val:
+                seen_displays.add(val)
+
+        _log.info(
+            "[capabilities_vectorstore] refresh_combinations_from_db: scanned %d docs, found %d distinct migration_display value(s)",
+            total_docs,
+            len(seen_displays),
+        )
+
+        existing_displays = {d for _, _, d in MIGRATION_SOURCE_DEST}
+        # Also track canonical (src, dst) pairs already registered so we never
+        # create two entries for the same migration with different casing.
+        # If "Gmail to Outlook" was hardcoded and the DB has "Gmail to outlook",
+        # the DB version wins — we replace the hardcoded entry with the DB one.
+        existing_pairs: dict = {(s, d): idx for idx, (s, d, _) in enumerate(MIGRATION_SOURCE_DEST)}
+        added = 0
+        replaced = 0
+        unparseable = []
+        for display in sorted(seen_displays):
+            if display in existing_displays:
+                continue  # exact match already registered
+            s, d = _parse_migration_display(display)
+            if s and d:
+                if (s, d) in existing_pairs:
+                    # Same canonical pair exists under a different display name — replace it
+                    # so the DB casing (from the uploaded filename) is the single source of truth.
+                    old_idx = existing_pairs[(s, d)]
+                    old_display = MIGRATION_SOURCE_DEST[old_idx][2]
+                    MIGRATION_SOURCE_DEST[old_idx] = (s, d, display)
+                    existing_displays.discard(old_display)
+                    existing_displays.add(display)
+                    existing_pairs[(s, d)] = old_idx
+                    replaced += 1
+                    _log.info(
+                        "[capabilities_vectorstore] Replaced hardcoded combination '%s' with DB version '%s' (src='%s', dst='%s')",
+                        old_display, display, s, d,
+                    )
+                else:
+                    MIGRATION_SOURCE_DEST.append((s, d, display))
+                    existing_displays.add(display)
+                    existing_pairs[(s, d)] = len(MIGRATION_SOURCE_DEST) - 1
+                    added += 1
+                    _log.info(
+                        "[capabilities_vectorstore] Registered new combination: '%s' (src='%s', dst='%s')",
+                        display, s, d,
+                    )
+            else:
+                unparseable.append(display)
+
+        if replaced:
+            _log.info(
+                "[capabilities_vectorstore] refresh_combinations_from_db: replaced %d hardcoded combination(s) with DB versions",
+                replaced,
+            )
+
+        if unparseable:
+            _log.warning(
+                "[capabilities_vectorstore] %d combination(s) in DB could not be parsed into src/dst and will not be filterable: %s",
+                len(unparseable),
+                unparseable,
+            )
+
+        all_combinations = sorted({d for _, _, d in MIGRATION_SOURCE_DEST})
+        _log.info(
+            "[capabilities_vectorstore] refresh_combinations_from_db complete: %d new added, %d replaced, %d total known",
+            added,
+            replaced,
+            len(all_combinations),
+        )
+        return all_combinations
+
+    except Exception as e:
+        import logging as _logging
+        _logging.getLogger(__name__).error(
+            "[capabilities_vectorstore] refresh_combinations_from_db failed: %s", e, exc_info=True
+        )
+        return [d for _, _, d in MIGRATION_SOURCE_DEST]
+
+
+def invalidate_capabilities_cache() -> None:
+    """
+    Clear the in-memory capabilities vectorstore cache so the next call to
+    get_capabilities_vectorstore() reloads from disk (picks up newly added documents).
+    Call this immediately after writing new documents to the capabilities ChromaDB.
+    """
+    import logging
+    global _capabilities_vectorstore
+    _capabilities_vectorstore = None
+    logging.getLogger(__name__).info(
+        "[capabilities_vectorstore] In-memory cache invalidated — will reload from disk on next query"
+    )
 
 
 def _extract_source_dest_from_query(query: str) -> Tuple[Optional[str], Optional[str]]:
@@ -257,13 +386,27 @@ def parse_combination_to_canonical(display: str) -> Tuple[str, str]:
 
 _capabilities_vectorstore = None
 
+import logging as _logging
+_cap_log = _logging.getLogger(__name__)
+
 
 def preload_capabilities_vectorstore():
     """
     Load capabilities ChromaDB at startup so logs show whether the DB is available.
+    Also discovers any combinations already in the DB (e.g. from previous FAQ uploads)
+    and registers them in MIGRATION_SOURCE_DEST for query matching.
     Safe to call from async code (runs sync I/O). Call from server lifespan/startup.
     """
-    return get_capabilities_vectorstore()
+    _cap_log.info("[capabilities_vectorstore] Preloading capabilities ChromaDB at startup…")
+    vs = get_capabilities_vectorstore()
+    if vs is not None:
+        refresh_combinations_from_db()
+    else:
+        _cap_log.warning(
+            "[capabilities_vectorstore] Capabilities DB not available at startup. "
+            "Upload a FAQ Excel or run scripts/ingest_capability_limitations.py to create it."
+        )
+    return vs
 
 
 def get_capabilities_vectorstore():
@@ -272,18 +415,29 @@ def get_capabilities_vectorstore():
     if _capabilities_vectorstore is not None:
         return _capabilities_vectorstore
     if not os.path.isdir(CHROMA_CAPABILITIES_DB_PATH):
-        print(f"[capabilities_vectorstore] DB path not found: {CHROMA_CAPABILITIES_DB_PATH} (run scripts/ingest_capability_limitations.py to create)")
+        _cap_log.warning(
+            "[capabilities_vectorstore] DB path not found: %s "
+            "(run scripts/ingest_capability_limitations.py or upload a FAQ Excel to create it)",
+            CHROMA_CAPABILITIES_DB_PATH,
+        )
         return None
     try:
         from langchain_openai import OpenAIEmbeddings
         from langchain_chroma import Chroma
+        _cap_log.info("[capabilities_vectorstore] Loading ChromaDB from %s …", CHROMA_CAPABILITIES_DB_PATH)
         embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
         _capabilities_vectorstore = Chroma(
             persist_directory=CHROMA_CAPABILITIES_DB_PATH,
             embedding_function=embeddings,
             collection_metadata={"hnsw:space": "cosine"},
         )
-        print(f"[capabilities_vectorstore] Loaded from {CHROMA_CAPABILITIES_DB_PATH}")
+        doc_count = _capabilities_vectorstore._collection.count()
+        _cap_log.info(
+            "[capabilities_vectorstore] ✓ Loaded from %s | %d documents in collection",
+            CHROMA_CAPABILITIES_DB_PATH,
+            doc_count,
+        )
+        print(f"[capabilities_vectorstore] Loaded from {CHROMA_CAPABILITIES_DB_PATH} ({doc_count} docs)")
         return _capabilities_vectorstore
     except Exception as e:
         print(f"[capabilities_vectorstore] Failed to load: {e}")
@@ -298,19 +452,38 @@ def get_capabilities_retriever(k: int = 15):
     return vs.as_retriever(search_type="similarity", search_kwargs={"k": k})
 
 
-# Keywords that suggest the question is about migration capabilities/limitations
-# - Generic: capability, limitation, supported, migration support/feature, etc.
-# - Migration combinations (source → target): slack to teams, teams to chat, slack to google chat, box to onedrive.
-# - Platform names (single source/target, not combinations): onedrive, sharepoint, google drive, dropbox, egnyte, citrix, etc.
-# - Question patterns: "is X possible", "does X support", "can X migrate"
+# Keywords that suggest the question is about migration capabilities/limitations/FAQ.
+# Groups:
+#   A. Generic capability/limitation terms
+#   B. Known migration combination shorthand
+#   C. Platform names (content + email + message)
+#   D. Question patterns: "is X possible", "does X support", "can X migrate"
+#   E. FAQ-style patterns: what data is migrated, will X be preserved, etc.
+#      These cover client FAQ questions uploaded via the admin FAQ upload feature
+#      (e.g. "Will my Gmail folders be preserved?", "Are attachments migrated?")
 _CAPABILITY_KEYWORDS = re.compile(
+    # A — generic capability/limitation terms
     r"\b(migration\s+(capabilit|support|feature|limit)|"
     r"capabilit|limitation|supported|unsupported|not\s+support|"
     r"delta\s+migration|one\s*time\s+migration|"
+    # B — known combination shorthand
     r"slack\s+to\s+teams|teams\s+to\s+chat|slack\s+to\s+google\s+chat|box\s+to\s+onedrive|"
+    r"gmail\s+to\s+outlook|outlook\s+to\s+gmail|"
+    # C — platform names (content, email, message)
     r"onedrive|sharepoint|google\s+drive|dropbox|box\s+for\s+business|"
     r"egnyte|citrix|shared\s+drive|content\s+migration|"
-    r"is\s+.*\s+possible|does\s+.*\s+support|can\s+.*\s+migrate)\b",
+    r"gmail|outlook|exchange\s+online|"
+    # D — question patterns
+    r"is\s+.*\s+possible|does\s+.*\s+support|can\s+.*\s+migrate|"
+    # E — FAQ-style patterns (what data, will X be preserved, attachments, calendars, etc.)
+    r"what\s+data\s+(will|is|are|get|gets)\s+(be\s+)?migrat|"
+    r"(will|are|is)\s+(my\s+)?(folder|label|email|calendar|attachment|contact|read|unread|"
+    r"starred|important|draft|sent|inbox|junk|spam|deleted|timestamp|recurring)\s*"
+    r"(s\s+)?(migrat|preserv|transfer|carr|kept|maintain|retain)|"
+    r"(folder|label|email|calendar|attachment|contact|read|unread|starred|timestamp)\s+"
+    r"(migrat|preserv|transfer|carr|kept|maintain|retain)|"
+    r"selected\s+user|migrate\s+only|partial\s+migrat|"
+    r"what\s+(happen|gets?\s+migrat|is\s+migrat|data\s+is\s+migrat))\b",
     re.IGNORECASE,
 )
 
@@ -361,14 +534,20 @@ def get_capability_docs(query: str, k: int = 15, force: bool = False) -> List:
     answering capability/limitation questions.
     """
     if not force and not is_capability_related_query(query):
+        _cap_log.debug("[capabilities_vectorstore] Query not capability-related, skipping capabilities DB")
         return []
     vs = get_capabilities_vectorstore()
     if vs is None:
+        _cap_log.warning("[capabilities_vectorstore] get_capability_docs: capabilities DB not loaded, returning []")
         return []
     try:
         mentioned = get_migrations_mentioned_in_query(query)
-        # Log so retrieval logs show capabilities ChromaDB is being queried
-        print(f"[capabilities_vectorstore] Querying ChromaDB (k={k}, migration_filter={mentioned or 'none'})")
+        _cap_log.info(
+            "[capabilities_vectorstore] ▶ Querying capabilities DB | k=%d | force=%s | migration_filter=%s",
+            k,
+            force,
+            mentioned if mentioned else "none (unfiltered)",
+        )
         if mentioned:
             # Filter by migration_display so we only get chunks for the migration(s) the user asked about
             if len(mentioned) == 1:
@@ -376,15 +555,31 @@ def get_capability_docs(query: str, k: int = 15, force: bool = False) -> List:
             else:
                 where = {"migration_display": {"$in": mentioned}}
             docs_with_scores = vs.similarity_search_with_score(query, k=k, filter=where)
-            # If filter returns 0 (e.g. no chunks for "Meta to Gchat" in DB), fall back to unfiltered so we still return some capability docs
+            # If filter returns 0 (e.g. no chunks for "Meta to Gchat" in DB), fall back to unfiltered
             if not docs_with_scores:
-                print(f"[capabilities_vectorstore] Filtered search returned 0 docs for migration_display={mentioned}, falling back to unfiltered")
+                _cap_log.warning(
+                    "[capabilities_vectorstore] Filtered search returned 0 docs for migration_display=%s — falling back to unfiltered search",
+                    mentioned,
+                )
                 docs_with_scores = vs.similarity_search_with_score(query, k=k)
         else:
             docs_with_scores = vs.similarity_search_with_score(query, k=k)
+
         if not docs_with_scores:
-            print(f"[capabilities_vectorstore] ChromaDB returned 0 documents (collection may be empty — run scripts/ingest_capability_limitations.py on this host)")
+            _cap_log.warning(
+                "[capabilities_vectorstore] ChromaDB returned 0 documents "
+                "(collection may be empty — upload a FAQ Excel or run scripts/ingest_capability_limitations.py)"
+            )
+        else:
+            scores = [round(score, 4) for _, score in docs_with_scores]
+            source_types = list({d.metadata.get("source_type", "unknown") for d, _ in docs_with_scores})
+            _cap_log.info(
+                "[capabilities_vectorstore] ✓ Retrieved %d doc(s) | source_types=%s | scores(cosine)=%s",
+                len(docs_with_scores),
+                source_types,
+                scores,
+            )
         return [doc for doc, _ in docs_with_scores]
     except Exception as e:
-        print(f"[capabilities_vectorstore] Retrieval failed: {e}")
+        _cap_log.error("[capabilities_vectorstore] Retrieval failed: %s", e, exc_info=True)
         return []

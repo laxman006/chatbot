@@ -74,8 +74,24 @@ class IntelligentQueryRouter:
                 "max_k": MAX_EXCEL_K
             },
             "limitations": {
-                "description": "Limitations & Supported Features (SharePoint) - definitive source for what is supported/not supported, out-of-scope features, migration capabilities per combination (e.g. Slack to Teams, Slack to Chat). Same role as Jira for troubleshooting.",
-                "typical_use": "Supported/unsupported features, limitations, out-of-scope, 'can we migrate X', 'does CloudFuze support Y', 'what is supported/not supported' for any migration combination. Use when query_type is capabilities.",
+                "description": (
+                    "Limitations & Supported Features + Client FAQ answers — definitive source for: "
+                    "(1) what is supported/not supported per migration combination, out-of-scope features, "
+                    "migration capabilities (e.g. Slack to Teams, Box to OneDrive, Gmail to Outlook); "
+                    "(2) client-facing FAQ answers about what data is migrated, what is preserved, and "
+                    "how emails/folders/labels/attachments/calendars/contacts/read-status are handled "
+                    "per combination (e.g. 'Will my Gmail folders be preserved in Outlook?', "
+                    "'Are attachments migrated from Gmail to Outlook?', 'Will read/unread status transfer?', "
+                    "'Can we migrate only selected users?', 'What data is migrated from Gmail to Outlook?')."
+                ),
+                "typical_use": (
+                    "Supported/unsupported features, limitations, out-of-scope, 'can we migrate X', "
+                    "'does CloudFuze support Y', 'what is supported/not supported' for any migration "
+                    "combination. ALSO USE for any question about what happens to data during a specific "
+                    "migration: 'will X be preserved', 'are attachments migrated', 'what data is moved', "
+                    "'will my folders/labels/calendars carry over' — these are answered by the client FAQ "
+                    "indexed per combination. Set query_type=capabilities for all these."
+                ),
                 "max_k": MAX_LIMITATIONS_K
             }
         }
@@ -162,7 +178,21 @@ Analyze the user query and determine:
   * **Technical deep-dive** → Prioritize PDFs (0.8-1.0), SharePoint (0.5-0.7), Jira (0.4-0.6), blog (0.1-0.3) ONLY if needed
   * **Pricing** → Prioritize excel (0.8-1.0), transcripts (0.5-0.7), SharePoint (0.3-0.5), blog (0.1-0.2) ONLY if needed
   * **Best practices** → Prioritize SharePoint (0.6-0.8), Jira (0.5-0.7), transcripts (0.4-0.6), blog (0.2-0.4) ONLY if needed
-  * **Capabilities/Limitations** → Use query_type: **capabilities** when the user asks about: feature capabilities, migration limitations, out-of-scope features, supported/unsupported features, "can we migrate X", "does CloudFuze support Y", "what are the limitations/features/capabilities of [combination]", "list out-of-scope features", "what is supported/not supported" for any migration combination (e.g. Slack to Teams, Slack to Chat, Meta to Gchat, Teams to Teams, Box to OneDrive). Allocate to **limitations** (0.8-1.0, k=4-6) - this is the definitive Limitations & Supported Features source. Also use SharePoint (0.7-0.9), PDFs (0.6-0.8), Jira (0.4-0.6), blog (0.2-0.4).
+  * **Capabilities/Limitations/FAQ** → Use query_type: **capabilities** when the user asks about:
+      - Feature capabilities, migration limitations, out-of-scope features, supported/unsupported features
+      - "can we migrate X", "does CloudFuze support Y", "what are the limitations/features of [combination]"
+      - "list out-of-scope features", "what is supported/not supported" for any migration combination
+      - **ANY question about what data is migrated or preserved for a specific migration combination**, including:
+        "Will my Gmail folders be preserved?", "Are attachments migrated from Gmail to Outlook?",
+        "Will read/unread status transfer?", "What data is migrated from Gmail to Outlook?",
+        "Will calendar events be migrated?", "Can we migrate only selected users?",
+        "Will email timestamps be preserved?", "Are starred/important emails migrated?"
+      - These FAQ-style questions are answered by the client FAQ indexed per combination.
+      - Applies to all combinations: Gmail to Outlook, Slack to Teams, Slack to Chat, Meta to Gchat,
+        Teams to Teams, Box to OneDrive, Dropbox to SharePoint, etc.
+      - Allocate to **limitations** (0.8-1.0, k=8-12) — this is the definitive source for both
+        capabilities and client FAQ answers. Also use SharePoint (0.6-0.8), PDFs (0.5-0.7),
+        Jira (0.3-0.5), blog (0.1-0.2).
 - Look for signals even if keywords are missing (copy-pasted errors, stack traces, failure descriptions)
 
 **Important Query Understanding:**
@@ -204,10 +234,16 @@ Queries MUST route primarily to Jira (relevance ≥ 0.8, k ≥ 25) if they conta
 - "how to change CSV during migration" → migration_procedure (SharePoint: high, Jira: medium, blog: low)
 - "migration failed with error 500" → troubleshooting (Jira: high, SharePoint: medium, blog: very low)
 - "what is CloudFuze" → general_info (SharePoint: high, PDFs: medium, blog: low)
-- "what are the limitations of slack to chat" → capabilities (limitations: high k=4-6, SharePoint: high, PDFs: high, blog: low)
-- "list out-of-scope features for Slack to Chat" → capabilities (limitations: high k=4-6, SharePoint: high, PDFs: high, Jira: medium, blog: low)
-- "can we migrate pinned messages from slack to google chat" → capabilities (limitations: high k=4-6, SharePoint: high, PDFs: high, blog: low)
-- "what features are supported for Meta to Gchat / Teams to Teams / Box to OneDrive" → capabilities (limitations: high k=4-6, SharePoint: high, PDFs: high, Jira: medium, blog: low)
+- "what are the limitations of slack to chat" → capabilities (limitations: high k=8-12, SharePoint: high, PDFs: high, blog: low)
+- "list out-of-scope features for Slack to Chat" → capabilities (limitations: high k=8-12, SharePoint: high, PDFs: high, Jira: medium, blog: low)
+- "can we migrate pinned messages from slack to google chat" → capabilities (limitations: high k=8-12, SharePoint: high, PDFs: high, blog: low)
+- "what features are supported for Meta to Gchat / Teams to Teams / Box to OneDrive" → capabilities (limitations: high k=8-12, SharePoint: high, PDFs: high, Jira: medium, blog: low)
+- "What data will be migrated from Gmail to Outlook?" → capabilities (limitations: high k=8-12, SharePoint: medium, PDFs: medium, blog: low)
+- "Will the folder/label structure be preserved?" → capabilities (limitations: high k=8-12, SharePoint: medium, blog: low)
+- "Will my email read/unread status be preserved?" → capabilities (limitations: high k=8-12, SharePoint: medium, blog: low)
+- "Are attachments migrated from Gmail to Outlook?" → capabilities (limitations: high k=8-12, SharePoint: medium, blog: low)
+- "Can we migrate only selected users?" → capabilities (limitations: high k=8-12, SharePoint: medium, blog: low)
+- "Will calendar events be migrated to Outlook?" → capabilities (limitations: high k=8-12, SharePoint: medium, blog: low)
 - "SOC 2 certification" → compliance (SharePoint: high, blog: very low)
 - "customer objection about pricing" → sales (transcripts: high, SharePoint: medium, blog: low)
 - "API rate limits" → technical (PDFs: high, SharePoint: medium, blog: very low)
@@ -223,7 +259,7 @@ Queries MUST route primarily to Jira (relevance ≥ 0.8, k ≥ 25) if they conta
     "transcripts": {{"relevance": 0.0-1.0, "k": 0-{MAX_TRANSCRIPT_K}, "reasoning": "why/why not"}},
     "pdfs": {{"relevance": 0.0-1.0, "k": 0-{MAX_PDF_K}, "reasoning": "why/why not"}},
     "excel": {{"relevance": 0.0-1.0, "k": 0-{MAX_EXCEL_K}, "reasoning": "why/why not"}},
-    "limitations": {{"relevance": 0.0-1.0, "k": 0-{MAX_LIMITATIONS_K}, "reasoning": "why/why not - use for support/capabilities/limitations questions only"}}
+    "limitations": {{"relevance": 0.0-1.0, "k": 0-{MAX_LIMITATIONS_K}, "reasoning": "why/why not - use for capabilities/limitations AND FAQ questions about what data is migrated/preserved per combination"}}
   }},
   "confidence": 0.0-1.0
 }}

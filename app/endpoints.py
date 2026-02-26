@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from fastapi import APIRouter, Request, HTTPException, Header, Depends, Query, Path, status
+from fastapi import APIRouter, Request, HTTPException, Header, Depends, Query, Path, status, UploadFile, File
 from fastapi.responses import PlainTextResponse, StreamingResponse, JSONResponse
 from pydantic import BaseModel
 from typing import Optional, List, Tuple
@@ -3294,24 +3294,34 @@ def intelligent_route_and_retrieve(
         always_include_limitations=False  # ✅ STAGE 1: No pinned limitations (2-stage retrieval)
     )
     
-    # Add capability/limitations docs from ChromaDB when router says "capabilities" or
-    # "migration_procedure" with a known migration path (e.g. Teams to Teams, Slack to Chat).
+    # Add capability/limitations/FAQ docs from ChromaDB.
+    # Trigger when ANY of these is true:
+    #   1. LLM classified the query as "capabilities"
+    #   2. LLM classified as "migration_procedure" AND a known migration is mentioned
+    #   3. The query mentions a known migration combination (e.g. "Gmail to Outlook") regardless
+    #      of LLM query_type — covers plain FAQ questions like "Will my folders be preserved?"
+    #      that the LLM may classify as general_info instead of capabilities.
     query_type = (routing_plan or {}).get("query_type") or ""
+    _mentioned_migrations = get_migrations_mentioned_in_query(query)
     add_capability = (
         query_type == "capabilities"
-        or (
-            query_type == "migration_procedure"
-            and get_migrations_mentioned_in_query(query)
-        )
+        or (query_type == "migration_procedure" and _mentioned_migrations)
+        or bool(_mentioned_migrations)   # any known migration mentioned → always check FAQ/capabilities
     )
     if add_capability:
+        _cap_trigger = (
+            f"query_type='{query_type}'" if query_type == "capabilities"
+            else f"migration_mentioned={_mentioned_migrations}"
+        )
+        print(f"[RETRIEVAL] Querying capabilities/FAQ ChromaDB (trigger: {_cap_trigger})")
         capability_docs = get_capability_docs(query, k=15, force=True)
         for doc in capability_docs:
-            all_candidates.append((doc, 0.2))  # low distance = high relevance
+            all_candidates.append((doc, 0.2))  # low distance = high relevance in cosine space
         if capability_docs:
-            print(f"[RETRIEVAL] ✓ Retrieved {len(capability_docs)} docs from capabilities ChromaDB")
+            src_types = list({d.metadata.get("source_type", "unknown") for d in capability_docs})
+            print(f"[RETRIEVAL] ✓ Retrieved {len(capability_docs)} docs from capabilities ChromaDB (source_types={src_types})")
         else:
-            print(f"[RETRIEVAL] Capabilities ChromaDB returned 0 docs (query_type={query_type!r}) — check ingest or migration_display in DB")
+            print(f"[RETRIEVAL] Capabilities ChromaDB returned 0 docs (trigger={_cap_trigger}) — check ingest or migration_display in DB")
     
     if not all_candidates:
         print("[WARN] No candidates retrieved")
@@ -8238,6 +8248,157 @@ async def get_blog_stats(
             status_code=500,
             detail=f"Failed to get blog stats: {str(e)}"
         )
+
+
+# ---------------- Admin FAQ Upload: Index FAQ Excels into Capabilities ChromaDB ----------------
+
+
+@router.post("/admin/faq/upload")
+async def upload_faq_excel(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(require_restricted_admin),
+):
+    """
+    Upload a FAQ Excel file and index it into the capabilities ChromaDB.
+
+    - Accepts .xlsx or .xls files only.
+    - Column A: Question, Column B: Answer.
+    - The migration combination name (migration_display) is extracted from the file name,
+      e.g. "Gmail to Outlook FAQ's.xlsx" → "Gmail to Outlook".
+    - Documents are APPENDED to the existing capabilities DB (existing data is never wiped).
+    - After indexing, the in-memory vectorstore cache is invalidated so queries immediately
+      pick up the new documents, and the combination is registered for query routing.
+
+    Requires admin access.
+    """
+    from app.faq_extractor import extract_faq_documents
+    from app.capability_limitations_ingest import CHROMA_CAPABILITIES_DB_PATH
+    from app.capabilities_vectorstore import (
+        invalidate_capabilities_cache,
+        refresh_combinations_from_db,
+    )
+    from langchain_openai import OpenAIEmbeddings
+    from langchain_chroma import Chroma
+
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file name provided")
+
+    if not file.filename.lower().endswith((".xlsx", ".xls")):
+        raise HTTPException(
+            status_code=400,
+            detail="Only .xlsx or .xls files are accepted",
+        )
+
+    try:
+        contents = await file.read()
+    except Exception as e:
+        logger.error(f"[FAQ Upload] Failed to read uploaded file: {e}")
+        raise HTTPException(status_code=400, detail=f"Failed to read file: {str(e)}")
+
+    docs = extract_faq_documents(contents, file_name=file.filename)
+    if not docs:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "No FAQ rows could be extracted from the uploaded file. "
+                "Ensure Column A contains questions and Column B contains answers."
+            ),
+        )
+
+    try:
+        os.makedirs(CHROMA_CAPABILITIES_DB_PATH, exist_ok=True)
+        embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+        vs = Chroma(
+            persist_directory=CHROMA_CAPABILITIES_DB_PATH,
+            embedding_function=embeddings,
+            collection_metadata={"hnsw:space": "cosine"},
+        )
+
+        # Remove any previously indexed docs from this same file (re-upload = replace)
+        try:
+            existing = vs._collection.get(
+                where={"source": file.filename},
+                include=[],
+            )
+            existing_ids = existing.get("ids", [])
+            if existing_ids:
+                vs._collection.delete(ids=existing_ids)
+                logger.info(f"[FAQ Upload] Removed {len(existing_ids)} old chunk(s) for '{file.filename}'")
+        except Exception as del_err:
+            logger.warning(f"[FAQ Upload] Could not remove old chunks: {del_err}")
+
+        vs.add_documents(docs)
+        total_count = vs._collection.count()
+
+    except Exception as e:
+        logger.error(f"[FAQ Upload] ChromaDB write failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to index FAQ: {str(e)}")
+
+    # Invalidate cache so queries immediately use the updated DB, then refresh combinations
+    invalidate_capabilities_cache()
+    combinations = refresh_combinations_from_db()
+
+    from app.faq_extractor import extract_combination_from_filename
+    combination = extract_combination_from_filename(file.filename)
+
+    logger.info(
+        f"[FAQ Upload] '{file.filename}' → {len(docs)} docs indexed "
+        f"(combination: '{combination}', total in DB: {total_count})"
+    )
+
+    return {
+        "status": "ok",
+        "file": file.filename,
+        "combination": combination,
+        "docs_added": len(docs),
+        "total_in_db": total_count,
+        "all_combinations": combinations,
+    }
+
+
+@router.get("/admin/faq/combinations")
+async def list_faq_combinations(
+    current_user: dict = Depends(require_restricted_admin),
+):
+    """
+    List all distinct migration combinations currently indexed in the capabilities ChromaDB.
+    Includes both existing capability/limitation combinations and any uploaded FAQ combinations.
+    Requires admin access.
+    """
+    from app.capabilities_vectorstore import (
+        get_capabilities_vectorstore,
+        refresh_combinations_from_db,
+        CHROMA_CAPABILITIES_DB_PATH,
+    )
+
+    vs = get_capabilities_vectorstore()
+    if vs is None:
+        return {
+            "combinations": [],
+            "total_docs": 0,
+            "db_path": CHROMA_CAPABILITIES_DB_PATH,
+            "db_exists": os.path.isdir(CHROMA_CAPABILITIES_DB_PATH),
+        }
+
+    combinations = refresh_combinations_from_db()
+
+    # Count FAQ vs capability docs
+    try:
+        faq_result = vs._collection.get(where={"source_type": "client_faq"}, include=["metadatas"])
+        faq_count = len(faq_result.get("ids", []))
+        total_count = vs._collection.count()
+    except Exception:
+        faq_count = 0
+        total_count = 0
+
+    return {
+        "combinations": combinations,
+        "total_docs": total_count,
+        "faq_docs": faq_count,
+        "capability_docs": total_count - faq_count,
+        "db_path": CHROMA_CAPABILITIES_DB_PATH,
+        "db_exists": os.path.isdir(CHROMA_CAPABILITIES_DB_PATH),
+    }
 
 
 # ---------------- Admin Teams Dashboard: MongoDB-based Team Analytics ----------------
