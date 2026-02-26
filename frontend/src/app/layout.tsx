@@ -15,7 +15,11 @@ export const metadata: Metadata = {
   authors: [{ name: 'CloudFuze, Inc' }],
   robots: 'noindex, follow',
   icons: {
-    icon: '/images/CloudFuze Horizontal Logo.svg',
+    icon: [
+      { url: '/images/CloudFuze-icon-64x64.png', type: 'image/png', sizes: '64x64' },
+    ],
+    shortcut: '/images/CloudFuze-icon-64x64.png',
+    apple: '/images/CloudFuze-icon-64x64.png',
   },
   verification: {
     google: 'PhjlsaI1LwJ0elVNYMvimmGx_a_PXGb6XQZZSRWsm10',

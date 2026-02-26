@@ -183,10 +183,10 @@ export default function ChatSidebar({
 
     sidebarHistory.innerHTML = html;
 
-    // Fetch and render others' chats in separate section
+    // Fetch and render others' chats in separate section (admin-only)
     let othersHtml = '';
 
-    const othersChats = await fetchAllUsersChats();
+    const othersChats = user?.is_admin ? await fetchAllUsersChats() : [];
     if (othersChats.length > 0) {
       othersChats.forEach((chat: OtherUserChat) => {
         const displayTitle = chat.title.length > 40 ? chat.title.substring(0, 40) + '...' : chat.title;
@@ -952,6 +952,29 @@ export default function ChatSidebar({
                         <path d="M3 3v18h18M3 15l4-4 3 3 5-5 6 6M9 7h6M9 7v2" />
                       </svg>
                       <span>Langfuse Analytics</span>
+                    </div>
+                    <div 
+                      className="dropdown-item admin-item" 
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.nativeEvent.stopImmediatePropagation();
+                        console.log('[Admin Nav] Site Analytics clicked - mousedown');
+                        handleAdminNavigation('/admin/site-analytics', e);
+                      }}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.nativeEvent.stopImmediatePropagation();
+                        console.log('[Admin Nav] Site Analytics clicked - click');
+                        handleAdminNavigation('/admin/site-analytics', e);
+                      }}
+                      style={{ cursor: 'pointer', pointerEvents: 'auto', position: 'relative', zIndex: 10000 }}
+                    >
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                        <path d="M3 3v18h18V3H3zm2 2v14h14V5H5zm2 2h10v2H7V7zm0 4h10v2H7v-2zm0 4h7v2H7v-2z" />
+                      </svg>
+                      <span>Site Analytics</span>
                     </div>
                     <div 
                       className="dropdown-item admin-item" 

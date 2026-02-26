@@ -3,34 +3,24 @@ import { NextRequest, NextResponse } from 'next/server';
 const ENV_BACKEND_BASE =
   process.env.NEXT_PUBLIC_BACKEND_URL || process.env.NEXT_PUBLIC_API_URL;
 
-function buildBackendUrl(token: string, request: NextRequest) {
-  const baseFromEnv = ENV_BACKEND_BASE;
-  const requestUrl = new URL(request.url);
-  const base =
-    (baseFromEnv && baseFromEnv.replace(/\/$/, '')) ||
-    `${requestUrl.protocol}//${requestUrl.host}`;
+function buildBackendUrl(token: string): string {
+  if (!ENV_BACKEND_BASE) {
+    throw new Error('NEXT_PUBLIC_BACKEND_URL is not configured');
+  }
+  const base = ENV_BACKEND_BASE.replace(/\/$/, '');
   return `${base}/chat/shared/${token}`;
 }
 
 // Helper function to get CORS headers
-function getCorsHeaders(origin: string | null, request?: NextRequest) {
+function getCorsHeaders(origin: string | null) {
   const allowedOrigins = [
     'http://localhost:3000',
     'http://127.0.0.1:3000',
     'https://ai.cloudfuze.com',
   ];
 
-  // If no origin header (same-origin request), use the request URL's origin
-  let originHeader = origin;
-  if (!originHeader && request) {
-    const url = new URL(request.url);
-    originHeader = `${url.protocol}//${url.host}`;
-  }
-
-  // Default to production origin if still no origin
-  if (!originHeader) {
-    originHeader = 'https://ai.cloudfuze.com';
-  }
+  // Default to production origin when no origin header is present
+  const originHeader = origin || 'https://ai.cloudfuze.com';
 
   const isAllowedOrigin = allowedOrigins.includes(originHeader);
 
@@ -44,7 +34,7 @@ function getCorsHeaders(origin: string | null, request?: NextRequest) {
 }
 
 async function proxySharedChatRequest(token: string, request: NextRequest) {
-  const backendUrl = buildBackendUrl(token, request);
+  const backendUrl = buildBackendUrl(token);
   const origin = request.headers.get('origin');
 
   const headers = new Headers();
@@ -74,7 +64,7 @@ async function proxySharedChatRequest(token: string, request: NextRequest) {
     // Build response headers with CORS
     const responseHeaders = new Headers({
       'Content-Type': backendResponse.headers.get('content-type') || 'application/json',
-      ...getCorsHeaders(origin, request),
+      ...getCorsHeaders(origin),
     });
 
     // Forward CORS headers from backend if present
@@ -110,7 +100,7 @@ export async function OPTIONS(
   
   return new NextResponse(null, {
     status: 204,
-    headers: getCorsHeaders(origin, request),
+    headers: getCorsHeaders(origin),
   });
 }
 
@@ -127,7 +117,7 @@ export async function GET(
       { error: 'Missing share token' },
       { 
         status: 400,
-        headers: getCorsHeaders(origin, request),
+        headers: getCorsHeaders(origin),
       }
     );
   }
@@ -141,7 +131,7 @@ export async function GET(
       { error: 'Failed to proxy shared chat request' },
       { 
         status: 502,
-        headers: getCorsHeaders(origin, request),
+        headers: getCorsHeaders(origin),
       }
     );
   }

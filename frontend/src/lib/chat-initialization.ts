@@ -1987,11 +1987,12 @@ export function initializeChatApp(options: InitOptions = {}) {
     
     sidebarHistory.innerHTML = html;
     
-    // Fetch and render others' chats in separate section
+    // Fetch and render others' chats in separate section (admin-only)
     const othersHistory = document.getElementById('others-history');
     let othersHtml = '';
     
-    const othersChats = await fetchAllUsersChats();
+    const currentUserForOthers = getCurrentUser();
+    const othersChats = currentUserForOthers?.is_admin ? await fetchAllUsersChats() : [];
     if (othersChats.length > 0) {
       // Render all others' chats without date grouping
       othersChats.forEach((chat: OtherUserChat) => {

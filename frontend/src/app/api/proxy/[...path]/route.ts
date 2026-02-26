@@ -21,14 +21,11 @@ import axios from 'axios';
 // This prevents any proxy access even if route is accidentally called
 const isProduction = process.env.NODE_ENV === 'production';
 
-// Helper function to return production block response
+// Return a generic 404 in production — avoids disclosing this route exists
 function productionBlockResponse() {
   return NextResponse.json(
-    { 
-      error: 'Proxy disabled in production',
-      message: 'This proxy route is only available in development. Use direct API calls in production.'
-    },
-    { status: 403 }
+    { error: 'Not Found' },
+    { status: 404 }
   );
 }
 

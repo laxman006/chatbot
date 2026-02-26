@@ -6492,8 +6492,8 @@ async def save_chat_session(
 
 @router.get("/chat/sessions/all")
 async def get_all_chat_sessions(
-    limit: int = 15,
-    auth_user: dict = Depends(require_auth)
+    limit: int = Query(default=15, ge=1, le=100),
+    auth_user: dict = Depends(require_restricted_admin)
 ):
     """Get recent chat sessions from all users (one most recent chat per user)."""
     try:
@@ -6625,7 +6625,7 @@ async def delete_chat_session(
 @router.get("/chat/sessions/messages/{user_id}")
 async def get_user_chat_messages(
     user_id: str,
-    auth_user: dict = Depends(require_auth)
+    auth_user: dict = Depends(require_restricted_admin)
 ):
     """Get chat messages for a specific user (for read-only viewing)."""
     try:
@@ -6672,7 +6672,7 @@ async def get_user_chat_messages(
 @router.get("/chat/sessions/by-conversation/{conversation_id}")
 async def get_user_by_conversation_id(
     conversation_id: str,
-    auth_user: dict = Depends(require_auth)
+    auth_user: dict = Depends(require_restricted_admin)
 ):
     """Get user_id and messages from MongoDB conversation_id (_id)."""
     try:
@@ -10279,7 +10279,9 @@ class TokenRefreshRequest(BaseModel):
 
 @router.get("/test")
 async def test_endpoint():
-    """Test endpoint to verify backend connectivity."""
+    """Test endpoint — only available in development."""
+    if os.getenv("ENVIRONMENT", "development").lower() == "production":
+        raise HTTPException(status_code=404, detail="Not Found")
     return {"message": "Backend is working", "status": "success"}
 
 @router.get("/auth/config")
@@ -10292,7 +10294,9 @@ async def get_auth_config():
 
 @router.post("/test-post")
 async def test_post_endpoint(data: dict):
-    """Test POST endpoint to verify CORS and connectivity."""
+    """Test POST endpoint — only available in development."""
+    if os.getenv("ENVIRONMENT", "development").lower() == "production":
+        raise HTTPException(status_code=404, detail="Not Found")
     return {"message": "POST request received", "data": data, "status": "success"}
 
 @router.post("/auth/microsoft/refresh")
