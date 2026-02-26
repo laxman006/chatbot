@@ -20,6 +20,8 @@ interface UploadResult {
 
 interface CombinationsResult {
   combinations: string[];
+  faq_combinations: string[];
+  capability_combinations: string[];
   total_docs: number;
   faq_docs: number;
   capability_docs: number;
@@ -351,27 +353,69 @@ function FaqUploadContent() {
           )}
 
           {combinations && combinations.combinations.length > 0 && (
-            <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "340px", overflowY: "auto" }}>
-              {combinations.combinations.map((combo) => (
-                <div
-                  key={combo}
-                  style={{
-                    padding: "10px 14px",
-                    background: "#f5f3ff",
-                    border: "1px solid #ede9fe",
-                    borderRadius: "8px",
-                    fontSize: "13px",
-                    color: "#4338ca",
-                    fontWeight: 500,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                  }}
-                >
-                  <span style={{ fontSize: "16px" }}>🔀</span>
-                  {combo}
+            <div style={{ display: "flex", flexDirection: "column", gap: "16px", maxHeight: "380px", overflowY: "auto" }}>
+
+              {/* FAQ-uploaded combinations */}
+              {combinations.faq_combinations.length > 0 && (
+                <div>
+                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#059669", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "8px" }}>
+                    📋 FAQ Uploaded ({combinations.faq_combinations.length})
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                    {combinations.faq_combinations.map((combo) => (
+                      <div
+                        key={combo}
+                        style={{
+                          padding: "9px 13px",
+                          background: "#f0fdf4",
+                          border: "1px solid #bbf7d0",
+                          borderRadius: "8px",
+                          fontSize: "13px",
+                          color: "#15803d",
+                          fontWeight: 500,
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "8px",
+                        }}
+                      >
+                        <span style={{ fontSize: "15px" }}>🔀</span>
+                        {combo}
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              ))}
+              )}
+
+              {/* Capability/limitation combinations */}
+              {combinations.capability_combinations.length > 0 && (
+                <div>
+                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#6366f1", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "8px" }}>
+                    ⚡ Capabilities ({combinations.capability_combinations.length})
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                    {combinations.capability_combinations.map((combo) => (
+                      <div
+                        key={combo}
+                        style={{
+                          padding: "9px 13px",
+                          background: "#f5f3ff",
+                          border: "1px solid #ede9fe",
+                          borderRadius: "8px",
+                          fontSize: "13px",
+                          color: "#4338ca",
+                          fontWeight: 500,
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "8px",
+                        }}
+                      >
+                        <span style={{ fontSize: "15px" }}>🔀</span>
+                        {combo}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

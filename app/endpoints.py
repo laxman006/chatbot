@@ -8362,12 +8362,13 @@ async def list_faq_combinations(
 ):
     """
     List all distinct migration combinations currently indexed in the capabilities ChromaDB.
-    Includes both existing capability/limitation combinations and any uploaded FAQ combinations.
+    Reads migration_display values directly from DB documents (Option B) — never returns
+    hardcoded/in-memory entries that have no actual documents.
+    Returns separate lists for FAQ-uploaded vs capability/limitation combinations.
     Requires admin access.
     """
     from app.capabilities_vectorstore import (
         get_capabilities_vectorstore,
-        refresh_combinations_from_db,
         CHROMA_CAPABILITIES_DB_PATH,
     )
 
@@ -8375,24 +8376,54 @@ async def list_faq_combinations(
     if vs is None:
         return {
             "combinations": [],
+            "faq_combinations": [],
+            "capability_combinations": [],
             "total_docs": 0,
+            "faq_docs": 0,
+            "capability_docs": 0,
             "db_path": CHROMA_CAPABILITIES_DB_PATH,
             "db_exists": os.path.isdir(CHROMA_CAPABILITIES_DB_PATH),
         }
 
-    combinations = refresh_combinations_from_db()
-
-    # Count FAQ vs capability docs
     try:
-        faq_result = vs._collection.get(where={"source_type": "client_faq"}, include=["metadatas"])
-        faq_count = len(faq_result.get("ids", []))
-        total_count = vs._collection.count()
+        # Read ALL documents' metadatas directly from the DB
+        all_result = vs._collection.get(include=["metadatas"])
+        metadatas = all_result.get("metadatas") or []
+        total_count = len(all_result.get("ids") or [])
+
+        faq_displays: set = set()
+        capability_displays: set = set()
+
+        for meta in metadatas:
+            if not meta:
+                continue
+            display = meta.get("migration_display", "").strip()
+            if not display:
+                continue
+            source_type = meta.get("source_type", "")
+            if source_type == "client_faq":
+                faq_displays.add(display)
+            else:
+                capability_displays.add(display)
+
+        faq_combinations = sorted(faq_displays)
+        capability_combinations = sorted(capability_displays)
+        all_combinations = sorted(faq_displays | capability_displays)
+        faq_count = sum(
+            1 for m in metadatas if (m or {}).get("source_type") == "client_faq"
+        )
+
     except Exception:
+        faq_combinations = []
+        capability_combinations = []
+        all_combinations = []
         faq_count = 0
         total_count = 0
 
     return {
-        "combinations": combinations,
+        "combinations": all_combinations,
+        "faq_combinations": faq_combinations,
+        "capability_combinations": capability_combinations,
         "total_docs": total_count,
         "faq_docs": faq_count,
         "capability_docs": total_count - faq_count,
