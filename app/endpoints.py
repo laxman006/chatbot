@@ -6493,28 +6493,28 @@ async def save_chat_session(
 @router.get("/chat/sessions/all")
 async def get_all_chat_sessions(
     limit: int = Query(default=15, ge=1, le=100),
-    auth_user: dict = Depends(require_restricted_admin)
+    auth_user: dict = Depends(require_auth)
 ):
-    """Get recent chat sessions from all users (one most recent chat per user)."""
+    """Get recent chat sessions from all users (one most recent chat per user). User identity is not returned."""
     try:
         from app.mongodb_memory import mongodb_memory
         
         await mongodb_memory.connect()
         
-        # Get all users who have chat history (sorted by last activity)
-        # Include _id in the projection to use as conversation_id
+        # get_current_user returns "id" as the key
+        current_user_id = auth_user.get("id") or auth_user.get("user_id", "")
+        
         users_cursor = mongodb_memory.collection.find(
             {"messages": {"$exists": True, "$ne": []}},
             {"user_id": 1, "messages": 1, "last_updated": 1, "_id": 1}
-        ).sort("last_updated", -1).limit(limit + 10)  # Fetch extra to account for filtering
+        ).sort("last_updated", -1).limit(limit + 10)
         
         sessions = []
-        current_user_id = auth_user["user_id"]
         
         async for user_doc in users_cursor:
             user_id = user_doc.get("user_id")
             
-            # Skip current user
+            # Skip current user's own sessions
             if user_id == current_user_id:
                 continue
                 
@@ -6522,29 +6522,23 @@ async def get_all_chat_sessions(
             if not messages:
                 continue
             
-            # Get MongoDB document _id as conversation_id
             mongo_id_obj = user_doc.get("_id")
             if not mongo_id_obj:
-                continue  # Skip if no _id
+                continue
             
-            # Convert ObjectId to string (24 hex characters)
             mongo_id = str(mongo_id_obj)
             
-            # Get first user message as title
             first_message = next((msg for msg in messages if msg.get("role") == "user"), None)
             title = first_message["content"][:50] + "..." if first_message else "Chat conversation"
             
-            # Get timestamp
             last_updated = user_doc.get("last_updated")
             timestamp = int(last_updated.timestamp() * 1000) if last_updated else 0
             
+            # Never return user_id / user_email / user_name — only anonymous session data
             sessions.append({
-                "session_id": mongo_id,  # Use conversation_id as session_id for URL routing
-                "user_id": user_id,
-                "user_email": user_id,  # Using user_id as email for now
-                "user_name": user_id.split("@")[0] if "@" in user_id else user_id,
+                "session_id": mongo_id,
                 "title": title,
-                "conversation_id": mongo_id,  # MongoDB _id as conversation identifier
+                "conversation_id": mongo_id,
                 "created_at": timestamp,
                 "updated_at": timestamp,
                 "message_count": len(messages)

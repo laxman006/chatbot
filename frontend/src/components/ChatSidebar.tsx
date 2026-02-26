@@ -183,10 +183,10 @@ export default function ChatSidebar({
 
     sidebarHistory.innerHTML = html;
 
-    // Fetch and render others' chats in separate section (admin-only)
+    // Fetch and render others' chats in separate section
     let othersHtml = '';
 
-    const othersChats = user?.is_admin ? await fetchAllUsersChats() : [];
+    const othersChats = await fetchAllUsersChats();
     if (othersChats.length > 0) {
       othersChats.forEach((chat: OtherUserChat) => {
         const displayTitle = chat.title.length > 40 ? chat.title.substring(0, 40) + '...' : chat.title;
